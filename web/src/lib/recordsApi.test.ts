@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { UnifiedTimeline } from '../components/UnifiedTimeline'
 import { ApiError } from './apiRequest'
+import { recordAllocationFixture } from '../pages/records/testFixtures'
 import {
   applyRecordImport,
   archiveRecord,
@@ -14,6 +15,7 @@ import {
   captureEvidencePreview,
   createAttachmentUpload,
   createRecord,
+  createRecordAllocation,
   createRecordDraft,
   createRecordRevision,
   discardRecordDraft,
@@ -51,7 +53,7 @@ import type {
   EvidenceCapturePreviewInput,
   EvidenceSnapshotRead,
   CreateRecordDraftInput,
-  PublishRecordInput,
+  CreateRecordInput,
   PublishRecordRevisionInput,
   RecordDeletionExecuteInput,
   RecordDeletionOperation,
@@ -786,6 +788,42 @@ describe('Records API transport', () => {
     })
   })
 
+  it('posts a stable allocation request and rejects JSON generations that would round', async () => {
+    const allocation = recordAllocationFixture('wire', { idempotency_key: 'allocation-key', request_digest: 'a'.repeat(64) })
+    const raw = JSON.stringify(allocation)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(raw, { status: 201 }))
+      .mockResolvedValueOnce(new Response(raw.replace('"generation":0', '"generation":9007199254740993'), { status: 201 }))
+      .mockResolvedValueOnce(new Response(raw.replace('"generation":0', '"generation":1.0000000000000001'), { status: 201 }))
+    const input = { purpose: 'record_create' as const, request_digest: 'a'.repeat(64) }
+    await expect(createRecordAllocation(input, 'allocation-key')).resolves.toEqual(allocation)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/records/allocations')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST', headers: expect.objectContaining({ 'Idempotency-Key': 'allocation-key' }), body: JSON.stringify(input),
+    })
+    await expect(createRecordAllocation(input, 'allocation-key')).rejects.toThrow('记录预留响应无效')
+    await expect(createRecordAllocation(input, 'allocation-key')).rejects.toThrow('记录预留响应无效')
+    await expect(createRecordAllocation({ ...input, request_digest: '0'.repeat(64) }, 'allocation-key')).rejects.toThrow('记录预留请求无效')
+  })
+
+  it('requires an exact echoed reservation on pre-root evidence previews', async () => {
+    const allocation = recordAllocationFixture('evidencewire', { purpose: 'evidence_preview' })
+    const input: EvidenceCapturePreviewInput = {
+      record_id: allocation.record_id, allocation, kind: 'monitoring.host', schema_version: 1,
+      source_type: 'monitoring_instance', source_id: 'mi_wire',
+      requested_window: { start: '2026-08-16T01:00:00Z', end: '2026-08-16T02:00:00Z' },
+      metrics: ['cpu_usage_pct'], precision_seconds: 300, sensitive_topology_fields: [],
+    }
+    const response = { ...evidencePreviewResponse, record_id: allocation.record_id, allocation }
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockResponse(201, response))
+      .mockResolvedValueOnce(mockResponse(201, { ...response, allocation: undefined }))
+      .mockResolvedValueOnce(mockResponse(201, { ...response, allocation: { ...allocation, reservation_id: `rba_${'f'.repeat(32)}` } }))
+    await expect(captureEvidencePreview(input)).resolves.toEqual(response)
+    await expect(captureEvidencePreview(input)).rejects.toThrow('记录预留响应无效')
+    await expect(captureEvidencePreview(input)).rejects.toThrow('另一个记录预留')
+  })
+
   it('reads an encoded evidence snapshot through the shared records transport', async () => {
     const response = { ...evidenceReadResponse, snapshot_id: 'evs /contract' }
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))
@@ -810,6 +848,7 @@ describe('Records API transport', () => {
     }))
 
     await expect(captureEvidencePreview({
+      record_id: 'rec_contract',
       kind: 'monitoring.host',
       schema_version: 1,
       source_type: 'monitoring_instance',
@@ -1134,12 +1173,16 @@ describe('Records API transport', () => {
       .mockResolvedValueOnce(mockResponse(201, mutation))
       .mockResolvedValueOnce(mockResponse(200, lifecycle))
       .mockResolvedValueOnce(mockResponse(200, { ...lifecycle, lifecycle: 'active' }))
+    const allocation = recordAllocationFixture('create-wire')
     const createInput = {
       draft_id: draft.draft_id,
       draft_etag: draft.etag,
-    } satisfies PublishRecordInput
+      record_id: allocation.record_id,
+      allocation,
+    } satisfies CreateRecordInput
     const revisionInput = {
-      ...createInput,
+      draft_id: draft.draft_id,
+      draft_etag: draft.etag,
       base_revision_id: revision.revision_id,
       lock_version: 1,
       authorization_epoch: 1,
@@ -1282,7 +1325,13 @@ describe('Records API transport', () => {
       surviving_copies: [{
         scope: 'record_attachments',
         kind: 'other_record',
+        count_status: 'known',
         copy_count: 2,
+      }, {
+        scope: 'record_markdown_client',
+        kind: 'offline_browser_buffer',
+        count_status: 'unknown',
+        copy_count: null,
       }],
       managed_backup: {
         retained_copy_count: 0,
@@ -1531,6 +1580,7 @@ describe('Records API transport', () => {
       digest: 'cd'.repeat(32),
       items: [{
         snapshot_id: 'evs_fixeda',
+        source_record_id: 'rec_fixeda',
         canonical_hash: '11'.repeat(32),
         kind: 'command.audit',
         schema_version: 1,
@@ -1598,9 +1648,11 @@ describe('Records API transport', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(mockResponse(201, mutation))
       .mockResolvedValueOnce(mockResponse(201, mutation))
+    const allocation = recordAllocationFixture('comparison-wire', { purpose: 'comparison_save' })
 
     await saveComparisonRecord({
-      record_id: 'rec_comparisonsave',
+      record_id: allocation.record_id,
+      allocation,
       draft_id: draft.draft_id,
       draft_etag: draft.etag,
       comparison_intent: 'cmp1.valid.payload.mac',
@@ -1617,7 +1669,8 @@ describe('Records API transport', () => {
     }, 'comparison-revision-key')
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      record_id: 'rec_comparisonsave',
+      record_id: allocation.record_id,
+      allocation,
       draft_id: draft.draft_id,
       draft_etag: draft.etag,
       comparison_intent: 'cmp1.valid.payload.mac',

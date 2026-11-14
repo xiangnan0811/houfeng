@@ -2,20 +2,15 @@ package evidence
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"time"
 	"unicode/utf8"
+
+	"houfeng/internal/center/recordidentity"
 )
 
-const EvidenceRecoveryContractVersionV1 uint64 = 1
-
-var (
-	ErrInvalidRecoveryAdapter   = errors.New("invalid evidence recovery adapter")
-	ErrInvalidRecoveryInventory = errors.New("invalid evidence recovery inventory")
-)
+var ErrInvalidRecoveryInventory = errors.New("invalid evidence recovery inventory")
 
 type EvidenceRecoveryPayload struct {
 	Key              KindKey
@@ -63,47 +58,6 @@ type EvidenceRecoveryInventory struct {
 	CopyLineage        []EvidenceRecoveryCopyLineage
 }
 
-type EvidenceRecoveryRepository interface {
-	RestoreEvidenceInventory(context.Context, EvidenceRecoveryInventory) error
-	// CollectUnreferencedEvidencePayloads must use a global logical-snapshot
-	// reference check. Record-local ownership is insufficient for deduplicated
-	// payloads shared by a surviving explicit copy.
-	CollectUnreferencedEvidencePayloads(context.Context) error
-}
-
-type RecoveryAdapter struct {
-	registry   Registry
-	repository EvidenceRecoveryRepository
-}
-
-func NewRecoveryAdapter(registry Registry, repository EvidenceRecoveryRepository) (*RecoveryAdapter, error) {
-	if len(registry.kinds) == 0 || nilRevisionPreparationDependency(repository) {
-		return nil, ErrInvalidRecoveryAdapter
-	}
-	return &RecoveryAdapter{registry: registry, repository: repository}, nil
-}
-
-func (adapter *RecoveryAdapter) ContractVersion() uint64 {
-	return EvidenceRecoveryContractVersionV1
-}
-
-func (adapter *RecoveryAdapter) Replay(ctx context.Context, inventory EvidenceRecoveryInventory) error {
-	if ctx == nil || adapter == nil || len(adapter.registry.kinds) == 0 ||
-		nilRevisionPreparationDependency(adapter.repository) {
-		return ErrInvalidRecoveryAdapter
-	}
-	if err := validateEvidenceRecoveryInventory(adapter.registry, inventory); err != nil {
-		return err
-	}
-	if err := adapter.repository.RestoreEvidenceInventory(ctx, cloneEvidenceRecoveryInventory(inventory)); err != nil {
-		return fmt.Errorf("restore evidence inventory: %w", err)
-	}
-	if err := adapter.repository.CollectUnreferencedEvidencePayloads(ctx); err != nil {
-		return fmt.Errorf("collect globally unreferenced evidence payloads: %w", err)
-	}
-	return nil
-}
-
 func validateEvidenceRecoveryInventory(registry Registry, inventory EvidenceRecoveryInventory) error {
 	if inventory.Payloads == nil || inventory.Snapshots == nil || inventory.CaptureIntents == nil ||
 		inventory.RevisionReferences == nil || inventory.CopyLineage == nil {
@@ -125,7 +79,7 @@ func validateEvidenceRecoveryInventory(registry Registry, inventory EvidenceReco
 	snapshots := make(map[string]EvidenceRecoverySnapshot, len(inventory.Snapshots))
 	referencedPayloads := make(map[[sha256.Size]byte]struct{}, len(inventory.Snapshots))
 	for index, snapshot := range inventory.Snapshots {
-		if !validClosedPreparedID(snapshot.RecordID, "rec_") || !ValidSnapshotID(snapshot.SnapshotID) ||
+		if !recordidentity.IsValid(snapshot.RecordID) || !ValidSnapshotID(snapshot.SnapshotID) ||
 			(index > 0 && inventory.Snapshots[index-1].SnapshotID >= snapshot.SnapshotID) ||
 			snapshot.PayloadDigest != snapshot.Envelope.CanonicalHash ||
 			!recoverySnapshotTimestampsCanonical(snapshot.Envelope) {
@@ -163,7 +117,7 @@ func validateEvidenceRecoveryInventory(registry Registry, inventory EvidenceReco
 	lastRevisionKey := ""
 	var nextOrdinal uint64
 	for index, reference := range inventory.RevisionReferences {
-		if !validClosedPreparedID(reference.RecordID, "rec_") || !validClosedPreparedID(reference.RevisionID, "rrv_") ||
+		if !recordidentity.IsValid(reference.RecordID) || !validClosedPreparedID(reference.RevisionID, "rrv_") ||
 			!ValidSnapshotID(reference.SnapshotID) || !validEvidenceRecoveryReferenceRole(reference.ReferenceRole) ||
 			len(reference.Caption) > 1024 || !utf8.ValidString(reference.Caption) ||
 			(index > 0 && compareEvidenceRecoveryReference(inventory.RevisionReferences[index-1], reference) >= 0) {
@@ -237,28 +191,4 @@ func compareEvidenceRecoveryReference(left, right EvidenceRecoveryRevisionRefere
 		return 1
 	}
 	return 0
-}
-
-func cloneEvidenceRecoveryInventory(inventory EvidenceRecoveryInventory) EvidenceRecoveryInventory {
-	cloned := EvidenceRecoveryInventory{
-		Payloads:           make([]EvidenceRecoveryPayload, len(inventory.Payloads)),
-		Snapshots:          make([]EvidenceRecoverySnapshot, len(inventory.Snapshots)),
-		CaptureIntents:     make([]EvidenceRecoveryCaptureIntent, len(inventory.CaptureIntents)),
-		RevisionReferences: make([]EvidenceRecoveryRevisionReference, len(inventory.RevisionReferences)),
-		CopyLineage:        make([]EvidenceRecoveryCopyLineage, len(inventory.CopyLineage)),
-	}
-	for index, snapshot := range inventory.Snapshots {
-		cloned.Snapshots[index] = snapshot
-		cloned.Snapshots[index].Envelope = cloneSnapshotEnvelope(snapshot.Envelope)
-	}
-	copy(cloned.RevisionReferences, inventory.RevisionReferences)
-	copy(cloned.CopyLineage, inventory.CopyLineage)
-	for index, payload := range inventory.Payloads {
-		cloned.Payloads[index] = payload
-		cloned.Payloads[index].CanonicalPayload = append([]byte(nil), payload.CanonicalPayload...)
-	}
-	for index, binding := range inventory.CaptureIntents {
-		cloned.CaptureIntents[index] = cloneCaptureIntentBinding(binding)
-	}
-	return cloned
 }

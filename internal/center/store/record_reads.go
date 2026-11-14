@@ -11,6 +11,7 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -31,7 +32,7 @@ func (repository *PostgresRecordRepository) ListRecordCandidates(
 	var afterTime any
 	afterID := ""
 	if page.After != nil {
-		if page.After.UpdatedAt.IsZero() || !validStoredRecordIdentity(page.After.RecordID, "rec_") {
+		if page.After.UpdatedAt.IsZero() || !recordidentity.IsValid(page.After.RecordID) {
 			return nil, records.ErrInvalidRecordReadRequest
 		}
 		afterTime = page.After.UpdatedAt.UTC()
@@ -83,7 +84,7 @@ func (repository *PostgresRecordRepository) ListRecordCandidates(
 				return fmt.Errorf("scan record read candidate: %w", err)
 			}
 			candidate.UpdatedAt = candidate.UpdatedAt.UTC()
-			if !validStoredRecordIdentity(candidate.RecordID, "rec_") || candidate.UpdatedAt.IsZero() {
+			if !recordidentity.IsValid(candidate.RecordID) || candidate.UpdatedAt.IsZero() {
 				return records.ErrInvalidRecordReadRequest
 			}
 			candidates = append(candidates, candidate)
@@ -104,7 +105,7 @@ func (repository *PostgresRecordRepository) ListRevisionCandidates(
 	page records.RecordRevisionCandidatePage,
 ) ([]records.RecordRevisionCandidate, error) {
 	if ctx == nil || repository == nil || repository.platform == nil ||
-		!validStoredRecordIdentity(page.RecordID, "rec_") ||
+		!recordidentity.IsValid(page.RecordID) ||
 		!validStoredRecordIdentity(page.CurrentRevisionID, "rrv_") ||
 		page.LockVersion == 0 || page.AuthorizationEpoch == 0 || page.Limit == 0 ||
 		page.Limit > maxRecordReadPageSize {
@@ -172,7 +173,7 @@ func (repository *PostgresRecordRepository) ReadRecordRevision(
 	request records.StoredRecordRevisionRequest,
 ) (records.StoredRecordRevision, error) {
 	if ctx == nil || repository == nil || repository.platform == nil ||
-		!validStoredRecordIdentity(request.RecordID, "rec_") ||
+		!recordidentity.IsValid(request.RecordID) ||
 		!validStoredRecordIdentity(request.RevisionID, "rrv_") ||
 		!validStoredRecordIdentity(request.CurrentRevisionID, "rrv_") ||
 		request.LockVersion == 0 || request.AuthorizationEpoch == 0 {
@@ -231,6 +232,18 @@ func assertRecordReadFence(ctx context.Context, tx pgx.Tx, recordID string) erro
 		return records.ErrRecordDeletionReserved
 	}
 
+	// The epoch share lock serializes against both deletion protocols. Read
+	// the durable V2 gate in a fresh statement after any epoch lock wait.
+	var deletionGate bool
+	if err := tx.QueryRow(ctx, `select exists (
+		select 1 from public.record_deletion_gates where project_id = $1 and record_id = $2
+	)`, recordplatform.ProjectIDDefault, recordID).Scan(&deletionGate); err != nil {
+		return fmt.Errorf("read record deletion gate: %w", err)
+	}
+	if deletionGate {
+		return records.ErrRecordDeletionReserved
+	}
+
 	var liveFence int
 	err = tx.QueryRow(ctx, `
 		select 1
@@ -238,7 +251,7 @@ func assertRecordReadFence(ctx context.Context, tx pgx.Tx, recordID string) erro
 		where project_id = $1
 		  and object_kind = $2
 		  and object_id = $3
-		  and expires_at > transaction_timestamp()`,
+		  and expires_at > clock_timestamp()`,
 		recordplatform.ProjectIDDefault, recordObjectKind, recordID,
 	).Scan(&liveFence)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -72,9 +73,26 @@ func RunComposeAuthority(ctx context.Context) error {
 		closePostgres: func(pool *pgxpool.Pool) {
 			pool.Close()
 		},
-		listen:    net.Listen,
-		now:       func() time.Time { return time.Now().UTC() },
-		heartbeat: heartbeatComposeAuthorityAt,
+		listen: net.Listen,
+		now:    func() time.Time { return time.Now().UTC() },
+		heartbeat: func(ctx context.Context, pool *pgxpool.Pool, state recordauthority.VerifiedComposeState, issuedAt time.Time) (time.Time, error) {
+			var expiry time.Time
+			err := WithSourceMaintenanceAuthority(ctx, pool, SourceMaintenanceConfigPath, func(maintenance *SourceMaintenanceConfig) error {
+				current, err := recordauthority.LoadComposeState(composeAuthorityStateRoot)
+				if err != nil || !sameVerifiedComposeAuthorityState(current, state) {
+					return ErrComposeAuthorityLoadState
+				}
+				if _, err := inspectPublishedComposeBirthLaunch(ctx, pool, current, maintenance, filepath.Dir(composeCenterDeploymentIDPath), true); err != nil {
+					return ErrComposeAuthorityHeartbeat
+				}
+				expiry, err = heartbeatComposeAuthorityAt(ctx, pool, current, issuedAt)
+				return err
+			})
+			if err != nil {
+				return time.Time{}, ErrComposeAuthorityHeartbeat
+			}
+			return expiry, nil
+		},
 		newTicker: func(interval time.Duration) composeAuthorityTicker {
 			return systemComposeAuthorityTicker{ticker: time.NewTicker(interval)}
 		},

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -14,14 +15,20 @@ import (
 var version = "dev"
 
 func main() {
+	if err := runCenterCommand(); err != nil {
+		fatal("center stopped", err)
+	}
+}
+
+func runCenterCommand() error {
 	cfg, err := config.LoadCenterConfig()
 	if err != nil {
-		fatal("load center config", err)
+		return fmt.Errorf("load center config: %w", err)
 	}
 
 	cleanupLogging, err := setupLogging(cfg)
 	if err != nil {
-		fatal("setup logging", err)
+		return fmt.Errorf("setup logging: %w", err)
 	}
 	defer cleanupLogging()
 	slog.Info("center starting", "version", safeLogVersion(version), "http_addr", cfg.HTTPAddr)
@@ -32,13 +39,11 @@ func main() {
 
 	app, cleanup, err := bootstrapCenter(ctx, cfg, version, bootstrapDeps{})
 	if err != nil {
-		fatal("bootstrap center", err)
+		return fmt.Errorf("bootstrap center: %w", err)
 	}
 	defer cleanup()
 
-	if err := app.Run(ctx); err != nil {
-		fatal("run center app", err)
-	}
+	return app.Run(ctx)
 }
 
 func fatal(msg string, err error) {

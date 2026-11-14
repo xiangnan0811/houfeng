@@ -29,18 +29,40 @@ func AdmitAppACLCurrentRuntime(ctx context.Context, db *pgxpool.Pool) error {
 		ctx,
 		migrations.FS,
 		appACLCurrentMigrationFragments,
-		appACLCurrentRuntimeAdmissionDependencies{
-			beginTx: func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-				return db.BeginTx(ctx, options)
-			},
-			readManifest:  readAppACLManifestRuntimeSnapshotInTxV1,
-			readCatalog:   readAppACLEffectiveCatalogSnapshotInTx,
-			verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
-			transitionDefinitions: cloneAppACLCurrentTransitionDefinitions(
-				appACLCurrentTransitionDefinitions,
-			),
-		},
+		defaultAppACLCurrentAdmissionDependencies(db),
 	)
+}
+
+// AdmitAppACLCurrentDeletionWorker admits a direct record-deletion worker
+// login only when the latest manifest is the exact current v2 contract, its
+// mandatory worker binding names session_user=current_user, and the managed
+// catalog matches in the same REPEATABLE READ READ ONLY snapshot. It shares
+// the runtime admission path; only the expected semantic subject differs.
+func AdmitAppACLCurrentDeletionWorker(ctx context.Context, db *pgxpool.Pool) error {
+	if db == nil {
+		return fmt.Errorf("current app ACL deletion worker admission has no PostgreSQL pool")
+	}
+	return admitAppACLCurrentWithDependencies(
+		ctx,
+		migrations.FS,
+		appACLCurrentMigrationFragments,
+		defaultAppACLCurrentAdmissionDependencies(db),
+		AppACLSubjectRecordDeletionWorker,
+	)
+}
+
+func defaultAppACLCurrentAdmissionDependencies(db *pgxpool.Pool) appACLCurrentRuntimeAdmissionDependencies {
+	return appACLCurrentRuntimeAdmissionDependencies{
+		beginTx: func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+			return db.BeginTx(ctx, options)
+		},
+		readManifest:  readAppACLManifestRuntimeSnapshotInTxV1,
+		readCatalog:   readAppACLEffectiveCatalogSnapshotInTx,
+		verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
+		transitionDefinitions: cloneAppACLCurrentTransitionDefinitions(
+			appACLCurrentTransitionDefinitions,
+		),
+	}
 }
 
 func admitAppACLCurrentRuntimeWithDependencies(
@@ -49,6 +71,19 @@ func admitAppACLCurrentRuntimeWithDependencies(
 	fragments []AppACLCurrentMigrationFragment,
 	dependencies appACLCurrentRuntimeAdmissionDependencies,
 ) error {
+	return admitAppACLCurrentWithDependencies(ctx, migrationFS, fragments, dependencies, AppACLSubjectCenterRuntime)
+}
+
+func admitAppACLCurrentWithDependencies(
+	ctx context.Context,
+	migrationFS fs.FS,
+	fragments []AppACLCurrentMigrationFragment,
+	dependencies appACLCurrentRuntimeAdmissionDependencies,
+	expectedSubject AppACLSubject,
+) error {
+	if expectedSubject != AppACLSubjectCenterRuntime && expectedSubject != AppACLSubjectRecordDeletionWorker {
+		return fmt.Errorf("current app ACL admission subject %q is not admissible", expectedSubject)
+	}
 	if migrationFS == nil {
 		return fmt.Errorf("current app ACL runtime admission embedded migration filesystem is nil")
 	}
@@ -85,7 +120,7 @@ func admitAppACLCurrentRuntimeWithDependencies(
 	if err != nil {
 		return fmt.Errorf("read current app ACL runtime manifest: %w", err)
 	}
-	manifest, contract, err := verifyAppACLCurrentManifestRuntimeSnapshot(manifestSnapshot, source, transitions)
+	manifest, contract, err := verifyAppACLCurrentManifestRuntimeSnapshot(manifestSnapshot, source, transitions, expectedSubject)
 	if err != nil {
 		return fmt.Errorf("verify current app ACL runtime manifest: %w", err)
 	}

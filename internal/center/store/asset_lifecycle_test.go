@@ -171,6 +171,7 @@ func (f *fakeAssetLifecycleDB) BeginTx(_ context.Context, options pgx.TxOptions)
 }
 
 type fakeAssetLifecycleTx struct {
+	sourceState   fakeSourceWriterState
 	queryRowFunc  func(context.Context, string, ...any) pgx.Row
 	queryFunc     func(context.Context, string, ...any) (pgx.Rows, error)
 	execFunc      func(context.Context, string, ...any) (pgconn.CommandTag, error)
@@ -219,6 +220,9 @@ func (f *fakeAssetLifecycleTx) Prepare(context.Context, string, string) (*pgconn
 }
 
 func (f *fakeAssetLifecycleTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "source_application_admit()") {
+		return pgconn.CommandTag{}, f.sourceState.admissionErr
+	}
 	f.execCalls = append(f.execCalls, fakeAssetLifecycleExecCall{sql: sql, args: append([]any(nil), args...)})
 	if f.execFunc != nil {
 		return f.execFunc(ctx, sql, args...)
@@ -234,6 +238,9 @@ func (f *fakeAssetLifecycleTx) Query(ctx context.Context, sql string, args ...an
 }
 
 func (f *fakeAssetLifecycleTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if row, ok := f.sourceState.queryRow(sql, args...); ok {
+		return row
+	}
 	if f.queryRowFunc != nil {
 		return f.queryRowFunc(ctx, sql, args...)
 	}

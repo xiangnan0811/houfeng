@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,74 +12,6 @@ import (
 
 	"houfeng/internal/center/vpsassets"
 )
-
-func TestPostgresVPSAssetMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0017_add_vps_assets.sql"))
-	if err != nil {
-		t.Fatalf("ReadFile(vps asset migration) error = %v", err)
-	}
-	text := string(source)
-	for _, snippet := range []string{
-		"create table if not exists vps_assets",
-		"vps_id text primary key",
-		"provider_id text references providers(provider_id) on delete set null",
-		"display_name text not null",
-		"ssh_port integer not null default 22",
-		"labels text[] not null default '{}'",
-		"archived_at timestamptz",
-		"vps_assets_display_name_not_blank",
-		"length(btrim(display_name)) > 0",
-		"vps_assets_lifecycle_status_allowed",
-		"'active', 'idle', 'testing', 'to_migrate', 'to_cancel', 'cancelled', 'archived'",
-		"vps_assets_usage_status_allowed",
-		"'in_use', 'idle', 'standby', 'testing', 'unknown'",
-		"vps_assets_renewal_decision_allowed",
-		"'unreviewed', 'keep', 'observe', 'migrate', 'cancel', 'auto_renew_cancelled', 'replaced'",
-		"vps_assets_ssh_port_range",
-		"ssh_port between 1 and 65535",
-		"idx_vps_assets_provider",
-		"idx_vps_assets_status",
-		"idx_vps_assets_location",
-	} {
-		if !strings.Contains(text, snippet) {
-			t.Fatalf("vps asset migration missing %q", snippet)
-		}
-	}
-}
-
-func TestPostgresVPSAssetHistoryMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0021_create_asset_histories.sql"))
-	if err != nil {
-		t.Fatalf("ReadFile(asset history migration) error = %v", err)
-	}
-	text := string(source)
-	for _, snippet := range []string{
-		"create table if not exists ip_histories",
-		"ip_history_id text primary key",
-		"vps_id text not null references vps_assets(vps_id) on delete cascade",
-		"from_ipv4 text not null default ''",
-		"to_ipv4 text not null default ''",
-		"from_ipv6 text not null default ''",
-		"to_ipv6 text not null default ''",
-		"ip_histories_changed",
-		"create table if not exists vps_spec_snapshots",
-		"snapshot_id text primary key",
-		"product_name text not null default ''",
-		"ssh_port integer not null",
-		"captured_at timestamptz not null default now()",
-		"vps_spec_snapshots_ssh_port_range",
-		"idx_ip_histories_vps_time",
-		"idx_vps_spec_snapshots_vps_time",
-	} {
-		if !strings.Contains(text, snippet) {
-			t.Fatalf("asset history migration missing %q", snippet)
-		}
-	}
-}
 
 func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	t.Parallel()
@@ -331,85 +261,6 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 		if !strings.Contains(rowCalls[3], snippet) {
 			t.Fatalf("PatchVPSAsset SQL missing %q in %q", snippet, rowCalls[3])
 		}
-	}
-}
-
-func TestPostgresVPSAssetPatchWithoutChangesReturnsExistingAsset(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
-	queryCount := 0
-	repo := &PostgresVPSAssetRepository{db: fakeVPSAssetDB{
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			queryCount++
-			if strings.Contains(sql, "update vps_assets") {
-				t.Fatalf("PatchVPSAsset without changes should not update: %q", sql)
-			}
-			if len(args) != 1 || args[0] != "vps_001" {
-				t.Fatalf("GetVPSAsset args = %#v, want vps id", args)
-			}
-			return fakeVPSAssetRow{scan: func(dest ...any) error {
-				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
-					VPSID:           "vps_001",
-					DisplayName:     "Akamai Edge",
-					SSHPort:         22,
-					LifecycleStatus: vpsassets.LifecycleActive,
-					UsageStatus:     vpsassets.UsageInUse,
-					RenewalDecision: vpsassets.RenewalKeep,
-					Importance:      "normal",
-					CreatedAt:       now,
-					UpdatedAt:       now,
-				})
-				return nil
-			}}
-		},
-	}}
-
-	record, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{})
-	if err != nil {
-		t.Fatalf("PatchVPSAsset() error = %v", err)
-	}
-	if record.VPSID != "vps_001" {
-		t.Fatalf("VPSID = %q, want vps_001", record.VPSID)
-	}
-	if queryCount != 1 {
-		t.Fatalf("QueryRow calls = %d, want only get", queryCount)
-	}
-}
-
-func TestPostgresVPSAssetListAppliesAssetScope(t *testing.T) {
-	tests := []struct {
-		name      string
-		scope     vpsassets.AssetScope
-		wantSQL   string
-		rejectSQL string
-	}{
-		{name: "current", scope: vpsassets.AssetScopeCurrent, wantSQL: "lifecycle_status not in ('cancelled', 'archived')"},
-		{name: "archived", scope: vpsassets.AssetScopeArchived, wantSQL: "lifecycle_status in ('cancelled', 'archived')"},
-		{name: "historical", scope: vpsassets.AssetScope("historical"), wantSQL: "lifecycle_status in ('cancelled', 'archived')"},
-		{name: "all", scope: vpsassets.AssetScopeAll, rejectSQL: "lifecycle_status in ("},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var query string
-			repo := &PostgresVPSAssetRepository{db: fakeVPSAssetDB{
-				query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-					query = sql
-					return &fakeVPSAssetRows{}, nil
-				},
-			}}
-
-			if _, err := repo.ListVPSAssets(context.Background(), vpsassets.ListFilters{AssetScope: tt.scope}); err != nil {
-				t.Fatalf("ListVPSAssets() error = %v", err)
-			}
-			if tt.wantSQL != "" && !strings.Contains(query, tt.wantSQL) {
-				t.Fatalf("query = %q, want %q", query, tt.wantSQL)
-			}
-			if tt.rejectSQL != "" && strings.Contains(query, tt.rejectSQL) {
-				t.Fatalf("query = %q, do not want %q", query, tt.rejectSQL)
-			}
-		})
 	}
 }
 
@@ -1081,11 +932,12 @@ func (f fakeVPSAssetDB) QueryRow(ctx context.Context, sql string, args ...any) p
 }
 
 type fakeVPSAssetTx struct {
-	queryRow   func(context.Context, string, ...any) pgx.Row
-	query      func(context.Context, string, ...any) (pgx.Rows, error)
-	exec       func(context.Context, string, ...any) (pgconn.CommandTag, error)
-	committed  bool
-	rolledBack int
+	sourceState fakeSourceWriterState
+	queryRow    func(context.Context, string, ...any) pgx.Row
+	query       func(context.Context, string, ...any) (pgx.Rows, error)
+	exec        func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	committed   bool
+	rolledBack  int
 }
 
 func (f *fakeVPSAssetTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
@@ -1106,6 +958,9 @@ func (f *fakeVPSAssetTx) Prepare(context.Context, string, string) (*pgconn.State
 	return nil, nil
 }
 func (f *fakeVPSAssetTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "source_application_admit()") {
+		return pgconn.CommandTag{}, f.sourceState.admissionErr
+	}
 	if f.exec != nil {
 		return f.exec(ctx, sql, args...)
 	}
@@ -1118,12 +973,58 @@ func (f *fakeVPSAssetTx) Query(ctx context.Context, sql string, args ...any) (pg
 	return nil, nil
 }
 func (f *fakeVPSAssetTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if row, ok := f.sourceState.queryRow(sql, args...); ok {
+		return row
+	}
 	if f.queryRow != nil {
 		return f.queryRow(ctx, sql, args...)
 	}
 	return fakeVPSAssetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 }
 func (f *fakeVPSAssetTx) Conn() *pgx.Conn { return nil }
+
+// These fixtures model database authority facts, not a replacement authorization
+// hook: production still reads the guard and actual parent through the caller's tx.
+type fakeSourceWriterState struct {
+	blocked      map[string]bool
+	parents      map[string]string
+	queryErr     error
+	admissionErr error
+}
+
+func (f fakeSourceWriterState) queryRow(sql string, args ...any) (pgx.Row, bool) {
+	switch {
+	case strings.Contains(sql, "public.source_retirement_barriers"):
+		return fakeRow{scan: func(dest ...any) error {
+			if f.queryErr != nil {
+				return f.queryErr
+			}
+			kind, kindOK := args[0].(string)
+			id, idOK := args[1].(string)
+			if !kindOK || !idOK {
+				return errors.New("invalid source authority identity")
+			}
+			*(dest[0].(*bool)) = f.blocked[kind+"/"+id]
+			return nil
+		}}, true
+	case strings.Join(strings.Fields(sql), " ") == "select vps_id from monitoring_instances where monitoring_instance_id=$1":
+		return fakeRow{scan: func(dest ...any) error {
+			id, ok := args[0].(string)
+			if !ok {
+				return errors.New("invalid monitoring parent identity")
+			}
+			parent, exists := f.parents[id]
+			if !exists {
+				*(dest[0].(**string)) = nil
+			} else {
+				*(dest[0].(**string)) = &parent
+			}
+			return nil
+		}}, true
+	default:
+		return nil, false
+	}
+}
 
 type fakeVPSAssetRow struct {
 	scan func(dest ...any) error

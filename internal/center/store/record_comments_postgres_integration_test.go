@@ -20,11 +20,11 @@ import (
 
 func TestPostgresIntegrationRecordCommentRedactionActivityFailureRollsBackAllContentChanges(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentrollback", "comments-rollback-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "comments-rollback-parent")
 	repository := newPostgresCommentRepositoryForTest(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-comments-rollback", 1), allowRecordPlatformAdmissionGate)
+		fixture.openDirectRuntimePool(t, ctx, "record-comments-rollback", 1), fixture.admissionGate)
 	create := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
 		"rcm_pgrollback", 0, "Content must survive rollback.", "",
 		[]string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb"}, "comments-rollback-create")
@@ -80,95 +80,67 @@ func TestPostgresIntegrationRecordCommentRedactionActivityFailureRollsBackAllCon
 }
 
 func TestPostgresIntegrationRecordCommentsRefreshSourceAuthorizationInsideTransaction(t *testing.T) {
-	for _, failure := range []struct {
-		name    string
-		step    func(*testing.T, recordauth.SourceAuthorization) watchSubjectResolutionStep
-		wantErr error
-	}{
-		{
-			name: "revoked",
-			step: func(t *testing.T, capture recordauth.SourceAuthorization) watchSubjectResolutionStep {
-				denied := collaborationSourceAuthorization(t, capture.CaptureScope,
-					collaborationVisibility(t, recordauth.VisibilityKindRestricted, nil), recordauth.SourceStateLive)
-				return actionSubjectResolutionStep(t, denied)
-			},
-			wantErr: recordauth.ErrDenied,
-		},
-		{
-			name: "unavailable",
-			step: func(*testing.T, recordauth.SourceAuthorization) watchSubjectResolutionStep {
-				return watchSubjectResolutionStep{err: ErrRecordSubjectUnavailable}
-			},
-			wantErr: ErrRecordSubjectUnavailable,
-		},
-	} {
-		for _, operation := range []string{"create", "list", "replay"} {
-			t.Run(failure.name+"/"+operation, func(t *testing.T) {
-				ctx := context.Background()
-				fixture := newRecordsPostgresFixture(t, ctx)
-				seedCollaborationRevisionUsers(t, ctx, fixture)
-				parent := seedPostgresActionParent(t, ctx, fixture,
-					"rec_pgcommentauth"+failure.name+operation, "comments-auth-parent-"+failure.name+"-"+operation)
-				runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-comments-auth-"+failure.name+"-"+operation, 3)
-				actor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
-				request := recordcollaboration.CommentCreateRequest{
-					Actor: actor, RecordID: parent.RecordID, BodyMarkdown: "Refresh current source.",
-					IdempotencyKey: "comments-auth-" + failure.name + "-" + operation, IdempotencyOwnerID: "records_comments_api",
-					OwnerLeaseDuration: time.Minute, IdempotencyTTL: 24 * time.Hour, OutboxTTL: 24 * time.Hour,
+	for _, operation := range []string{"create", "list", "replay"} {
+		t.Run(operation, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
+			seedCollaborationRevisionUsers(t, ctx, fixture)
+			parent := seedPostgresActionParent(t, ctx, fixture, "comments-auth-parent-"+operation)
+			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-comments-auth-"+operation, 3)
+			actor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
+			request := recordcollaboration.CommentCreateRequest{
+				Actor: actor, RecordID: parent.RecordID, BodyMarkdown: "Refresh current source.",
+				IdempotencyKey: "comments-auth-" + operation, IdempotencyOwnerID: "records_comments_api",
+				OwnerLeaseDuration: time.Minute, IdempotencyTTL: 24 * time.Hour, OutboxTTL: 24 * time.Hour,
+			}
+			authorization := newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)
+			seedRepository := NewPostgresRecordCommentRepository(runtimePool, fixture.admissionGate,
+				NewPostgresCollaborationMembershipReader(), authorization)
+			if operation == "list" {
+				seed := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
+					"rcm_pgauthlist", 0, "List seed.", "", nil, request.IdempotencyKey+"-seed")
+				if _, err := seedRepository.CommitComment(ctx, seed); err != nil {
+					t.Fatalf("CommitComment(list seed) error = %v", err)
 				}
-				if operation == "list" {
-					seedAuthorization := newPostgresWatchAuthorizationSource(t, runtimePool)
-					seed := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
-						"rcm_pgauthlist", 0, "List seed.", "", nil, request.IdempotencyKey+"-seed")
-					if _, err := NewPostgresRecordCommentRepository(runtimePool, allowRecordPlatformAdmissionGate,
-						NewPostgresCollaborationMembershipReader(), seedAuthorization).CommitComment(ctx, seed); err != nil {
-						t.Fatalf("CommitComment(list seed) error = %v", err)
-					}
-				} else if operation == "replay" {
-					seedAuthorization := newPostgresWatchAuthorizationSource(t, runtimePool)
-					seedRepository := NewPostgresRecordCommentRepository(runtimePool, allowRecordPlatformAdmissionGate,
-						NewPostgresCollaborationMembershipReader(), seedAuthorization)
-					seedService, err := recordcollaboration.NewCommentService(seedAuthorization, seedRepository)
-					if err != nil {
-						t.Fatalf("NewCommentService(seed) error = %v", err)
-					}
-					if seeded, err := seedService.CreateComment(ctx, request); err != nil || seeded.Version != 1 {
-						t.Fatalf("CreateComment(replay seed) = (%#v, %v)", seeded, err)
-					}
-				}
-
-				_, evidence := storeActionAuthorization(t)
-				resolver := &sequencedWatchSubjectResolver{steps: []watchSubjectResolutionStep{
-					actionSubjectResolutionStep(t, evidence.Sources[0]), failure.step(t, evidence.Sources[0]),
-				}}
-				authorization := newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate)
-				repository := NewPostgresRecordCommentRepository(runtimePool, allowRecordPlatformAdmissionGate,
-					NewPostgresCollaborationMembershipReader(), authorization)
-				service, err := recordcollaboration.NewCommentService(authorization, repository)
+			} else if operation == "replay" {
+				seedService, err := recordcollaboration.NewCommentService(authorization, seedRepository)
 				if err != nil {
-					t.Fatalf("NewCommentService() error = %v", err)
+					t.Fatal(err)
 				}
-				before := readPostgresCommentAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
-				var operationErr error
-				if operation == "list" {
-					_, operationErr = service.ListComments(ctx, recordcollaboration.CommentListRequest{
-						Actor: actor, RecordID: parent.RecordID, Limit: 25,
-					})
-				} else {
-					_, operationErr = service.CreateComment(ctx, request)
+				if seeded, err := seedService.CreateComment(ctx, request); err != nil || seeded.Version != 1 {
+					t.Fatalf("CreateComment(replay seed) = (%#v, %v)", seeded, err)
 				}
-				if !errors.Is(operationErr, failure.wantErr) {
-					t.Fatalf("%s source authorization error = %v, want %v", operation, operationErr, failure.wantErr)
+			}
+			repository := NewPostgresRecordCommentRepository(runtimePool, postgresCollaborationSourceRevocationGate(fixture),
+				NewPostgresCollaborationMembershipReader(), authorization)
+			service, err := recordcollaboration.NewCommentService(authorization, repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := readPostgresCommentAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
+			var operationErr error
+			if operation == "list" {
+				var result []recordcollaboration.CommentRecord
+				result, operationErr = service.ListComments(ctx, recordcollaboration.CommentListRequest{Actor: actor, RecordID: parent.RecordID, Limit: 25})
+				if len(result) != 0 {
+					t.Fatalf("revoked ListComments returned content: %#v", result)
 				}
-				if resolver.calls != 2 {
-					t.Fatalf("%s source resolver calls = %d, want service then transaction refresh", operation, resolver.calls)
+			} else {
+				var result recordcollaboration.CommentMutationResult
+				result, operationErr = service.CreateComment(ctx, request)
+				if result != (recordcollaboration.CommentMutationResult{}) {
+					t.Fatalf("revoked CreateComment returned content: %#v", result)
 				}
-				after := readPostgresCommentAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
-				if after != before {
-					t.Fatalf("%s authorization failure durable counts = %#v, want unchanged %#v", operation, after, before)
-				}
-			})
-		}
+			}
+			if !errors.Is(operationErr, ErrRecordSubjectUnavailable) {
+				t.Fatalf("%s source revocation error = %v, want ErrRecordSubjectUnavailable", operation, operationErr)
+			}
+			assertPostgresCollaborationSourceRevoked(t, ctx, fixture)
+			after := readPostgresCommentAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
+			if after != before {
+				t.Fatalf("%s authorization failure durable counts = %#v, want unchanged %#v", operation, after, before)
+			}
+		})
 	}
 }
 
@@ -177,13 +149,12 @@ func TestPostgresIntegrationRecordCommentsRequireCurrentActorMembership(t *testi
 		for _, operation := range []string{"create", "redact", "list"} {
 			t.Run(membership+"/"+operation, func(t *testing.T) {
 				ctx := context.Background()
-				fixture := newRecordsPostgresFixture(t, ctx)
+				fixture := newAdmittedCoreRecordFixture(t, ctx)
 				seedCollaborationRevisionUsers(t, ctx, fixture)
-				parent := seedPostgresActionParent(t, ctx, fixture,
-					"rec_pgcommentmember"+membership+operation, "comments-member-parent-"+membership+"-"+operation)
+				parent := seedPostgresActionParent(t, ctx, fixture, "comments-member-parent-"+membership+"-"+operation)
 				runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-comments-member-"+membership+"-"+operation, 2)
-				authorization := newPostgresWatchAuthorizationSource(t, runtimePool)
-				repository := NewPostgresRecordCommentRepository(runtimePool, allowRecordPlatformAdmissionGate,
+				authorization := newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)
+				repository := NewPostgresRecordCommentRepository(runtimePool, fixture.admissionGate,
 					NewPostgresCollaborationMembershipReader(), authorization)
 				allowedActor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
 				actor := allowedActor
@@ -243,11 +214,11 @@ func TestPostgresIntegrationRecordCommentsRequireCurrentActorMembership(t *testi
 func TestPostgresIntegrationRecordCommentsConcurrentSameVersionHasOneWinner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentrace", "comments-race-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "comments-race-parent")
 	seedRepository := newPostgresCommentRepositoryForTest(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-comments-race-seed", 1), allowRecordPlatformAdmissionGate)
+		fixture.openDirectRuntimePool(t, ctx, "record-comments-race-seed", 1), fixture.admissionGate)
 	create := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
 		"rcm_pgrace", 0, "Race source.", "", nil, "comments-race-create")
 	if _, err := seedRepository.CommitComment(ctx, create); err != nil {
@@ -312,8 +283,8 @@ func TestPostgresIntegrationRecordCommentsConcurrentSameVersionHasOneWinner(t *t
 	secondPool := fixture.openDirectRuntimePool(t, ctx, "record-comments-race-second", 1)
 	firstPID := postgresCollaborationBackendPID(t, ctx, firstPool)
 	secondPID := postgresCollaborationBackendPID(t, ctx, secondPool)
-	firstRepository := newPostgresCommentRepositoryForTest(t, firstPool, allowRecordPlatformAdmissionGate)
-	secondRepository := newPostgresCommentRepositoryForTest(t, secondPool, allowRecordPlatformAdmissionGate)
+	firstRepository := newPostgresCommentRepositoryForTest(t, firstPool, fixture.admissionGate)
+	secondRepository := newPostgresCommentRepositoryForTest(t, secondPool, fixture.admissionGate)
 	firstCommand := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationEdit,
 		create.CommentID, 1, "Winner A.", "", nil, "comments-race-a")
 	secondCommand := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationEdit,
@@ -399,11 +370,11 @@ func TestPostgresIntegrationRecordCommentsConcurrentSameVersionHasOneWinner(t *t
 
 func TestPostgresIntegrationRecordCommentsReplyMentionAndModeratorPolicies(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentpolicy", "comments-policy-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "comments-policy-parent")
 	repository := newPostgresCommentRepositoryForTest(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-comments-policy", 2), allowRecordPlatformAdmissionGate)
+		fixture.openDirectRuntimePool(t, ctx, "record-comments-policy", 2), fixture.admissionGate)
 
 	root := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
 		"rcm_pgpolicyroot", 0, "Policy root.", "", nil, "comments-policy-root")
@@ -479,11 +450,11 @@ func TestPostgresIntegrationRecordCommentsReplyMentionAndModeratorPolicies(t *te
 
 func TestPostgresIntegrationRecordCommentsRejectStaleSessionModeratorAfterPersistedDemotion(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentdemotion", "comments-demotion-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "comments-demotion-parent")
 	repository := newPostgresCommentRepositoryForTest(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-comments-demotion", 1), allowRecordPlatformAdmissionGate)
+		fixture.openDirectRuntimePool(t, ctx, "record-comments-demotion", 1), fixture.admissionGate)
 	create := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
 		"rcm_pgdemotion", 0, "Must remain active.", "", nil, "comments-demotion-create")
 	if _, err := repository.CommitComment(ctx, create); err != nil {
@@ -515,15 +486,15 @@ func TestPostgresIntegrationRecordCommentsRejectStaleSessionModeratorAfterPersis
 
 func TestPostgresIntegrationRecordCommentsRequireAvailablePersistedActorMembershipForEveryMutation(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentactor", "comments-actor-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "comments-actor-parent")
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-comments-actor", 1)
 
 	if _, err := fixture.db.Exec(ctx, `delete from public.users where user_id = $1`, "usr_dddddddddddddddddddddddd"); err != nil {
 		t.Fatalf("remove actor membership row: %v", err)
 	}
-	missingActorRepository := newPostgresCommentRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+	missingActorRepository := newPostgresCommentRepositoryForTest(t, runtimePool, fixture.admissionGate)
 	missingActor := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
 		"rcm_pgmissingactor", 0, "Missing actor.", "", nil, "comments-missing-actor")
 	missingActor.Actor = mustPostgresCommentActor(t, "usr_dddddddddddddddddddddddd", recordauth.RoleProjectAdmin)
@@ -534,7 +505,7 @@ func TestPostgresIntegrationRecordCommentsRequireAvailablePersistedActorMembersh
 
 	unavailable := &unavailableCommentMembershipReader{err: recordcollaboration.ErrMembershipUnavailable}
 	unavailableRepository := NewPostgresRecordCommentRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, unavailable, newPostgresWatchAuthorizationSource(t, runtimePool))
+		runtimePool, fixture.admissionGate, unavailable, newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate))
 	unavailableCreate := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
 		"rcm_pgunavailableactor", 0, "Unavailable actor.", "", nil, "comments-unavailable-actor")
 	if result, err := unavailableRepository.CommitComment(ctx, unavailableCreate); !errors.Is(err, recordcollaboration.ErrMembershipUnavailable) || result != (recordcollaboration.CommentMutationResult{}) {
@@ -560,19 +531,19 @@ func TestPostgresIntegrationRecordCommentsRequireAvailablePersistedActorMembersh
 
 func TestPostgresIntegrationRecordCommentsRejectCrossRecordReplyAndStaleRootAuthorization(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	first := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentfirst", "comments-first-parent")
-	recordRepository := newRecordsPostgresRepository(t, fixture.openDirectRuntimePool(t, ctx, "record-comments-records", 1))
-	second, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgcommentsecond", "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, "Second comment parent"), "comments-second-parent",
-	))
+	first := seedPostgresActionParent(t, ctx, fixture, "comments-first-parent")
+	runtime := fixture.openDirectRuntimePool(t, ctx, "record-comments-records", 1)
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtime, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture)
+	second, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Second comment parent"), "comments-second-parent"))
 	if err != nil {
 		t.Fatalf("CommitRevision(second parent) error = %v", err)
 	}
 	repository := newPostgresCommentRepositoryForTest(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-comments-cross-record", 1), allowRecordPlatformAdmissionGate)
+		fixture.openDirectRuntimePool(t, ctx, "record-comments-cross-record", 1), fixture.admissionGate)
 	secondComment := postgresCommentCommand(t, second, recordcollaboration.CommentMutationCreate,
 		"rcm_pgsecond", 0, "Second record.", "", nil, "comments-second-create")
 	if _, err := repository.CommitComment(ctx, secondComment); err != nil {
@@ -602,9 +573,9 @@ func TestPostgresIntegrationRecordCommentsRejectCrossRecordReplyAndStaleRootAuth
 
 func TestPostgresIntegrationRecordCommentsRejectCommittedDeletionReservationBeforeWrites(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentfenced", "comments-fenced-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "comments-fenced-parent")
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.deletion_reservations (
 			reservation_id, project_id, object_kind, object_id,
@@ -630,7 +601,7 @@ func TestPostgresIntegrationRecordCommentsRejectCommittedDeletionReservationBefo
 		t.Fatalf("seed committed deletion reservation: %v", err)
 	}
 	repository := newPostgresCommentRepositoryForTest(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-comments-fenced", 1), allowRecordPlatformAdmissionGate)
+		fixture.openDirectRuntimePool(t, ctx, "record-comments-fenced", 1), fixture.admissionGate)
 	command := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
 		"rcm_pgfenced", 0, "Fenced comment.", "", nil, "comments-fenced-create")
 	if result, err := repository.CommitComment(ctx, command); !errors.Is(err, records.ErrRecordDeletionReserved) || result != (recordcollaboration.CommentMutationResult{}) {
@@ -660,11 +631,11 @@ func (reader *unavailableCommentMembershipReader) ReadMemberActor(_ context.Cont
 
 func TestPostgresIntegrationRecordCommentsLifecycleReplayAndOneWayRedaction(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcomments", "comments-parent-key")
+	parent := seedPostgresActionParent(t, ctx, fixture, "comments-parent-key")
 	repository := newPostgresCommentRepositoryForTest(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-comments-lifecycle", 3), allowRecordPlatformAdmissionGate)
+		fixture.openDirectRuntimePool(t, ctx, "record-comments-lifecycle", 3), fixture.admissionGate)
 	rootBefore := readPostgresActionRoot(t, ctx, fixture, parent.RecordID)
 
 	createParent := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate,
@@ -862,6 +833,6 @@ func newPostgresCommentRepositoryForTest(
 ) *PostgresRecordCommentRepository {
 	t.Helper()
 	return NewPostgresRecordCommentRepository(
-		pool, gate, NewPostgresCollaborationMembershipReader(), newPostgresWatchAuthorizationSource(t, pool),
+		pool, gate, NewPostgresCollaborationMembershipReader(), newRecordsPostgresAuthorization(t, pool, gate),
 	)
 }

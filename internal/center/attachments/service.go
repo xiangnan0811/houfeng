@@ -241,6 +241,7 @@ type UploadServiceRepository interface {
 type ArchiveScannerReadiness func(context.Context) (ScannerStatus, error)
 
 type UploadServiceOptions struct {
+	Writer                  BlobWriter
 	TransportKind           TransportKind
 	Limits                  Limits
 	Now                     func() time.Time
@@ -254,6 +255,8 @@ type UploadService struct {
 	authorizer              DraftAttachmentUploadAuthorizer
 	repository              UploadServiceRepository
 	blob                    BlobStore
+	writer                  BlobWriter
+	promoter                TemporaryBlobWriter
 	temporary               TemporaryObjectStore
 	presigner               TemporaryUploadPresigner
 	transport               TransportKind
@@ -272,7 +275,7 @@ func NewUploadService(
 	options UploadServiceOptions,
 ) (*UploadService, error) {
 	if nilUploadServiceDependency(authorizer) || nilUploadServiceDependency(repository) ||
-		nilUploadServiceDependency(blob) ||
+		nilUploadServiceDependency(blob) || nilUploadServiceDependency(options.Writer) ||
 		(options.TransportKind != TransportKindLocal && options.TransportKind != TransportKindS3) ||
 		options.Limits.Validate() != nil || options.ProcessorMaxAttempts <= 0 {
 		return nil, fmt.Errorf("%w: dependency or options", ErrInvalidUploadServiceRequest)
@@ -288,10 +291,18 @@ func NewUploadService(
 	}
 	var temporary TemporaryObjectStore
 	var presigner TemporaryUploadPresigner
+	var promoter TemporaryBlobWriter
 	if options.TransportKind == TransportKindS3 {
-		var temporaryOK, presignerOK bool
+		var temporaryOK, presignerOK, promoterOK bool
 		temporary, temporaryOK = blob.(TemporaryObjectStore)
 		presigner, presignerOK = blob.(TemporaryUploadPresigner)
+		promoter, promoterOK = options.Writer.(TemporaryBlobWriter)
+		if !promoterOK || nilUploadServiceDependency(promoter) {
+			return nil, fmt.Errorf("%w: managed S3 temporary publisher", ErrInvalidUploadServiceRequest)
+		}
+		if managed, ok := options.Writer.(*ManagedBlobWriter); ok && (managed.backend != BackendKindS3 || nilUploadServiceDependency(managed.temporary)) {
+			return nil, fmt.Errorf("%w: managed S3 temporary object store", ErrInvalidUploadServiceRequest)
+		}
 		if !temporaryOK || nilUploadServiceDependency(temporary) {
 			return nil, fmt.Errorf("%w: S3 temporary object store", ErrInvalidUploadServiceRequest)
 		}
@@ -301,6 +312,7 @@ func NewUploadService(
 	}
 	return &UploadService{
 		authorizer: authorizer, repository: repository, blob: blob, temporary: temporary, presigner: presigner,
+		writer: options.Writer, promoter: promoter,
 		transport: options.TransportKind, limits: options.Limits, now: options.Now,
 		archiveScannerReadiness: options.ArchiveScannerReadiness,
 		newTemporaryObjectKey:   options.NewTemporaryObjectKey,
@@ -509,18 +521,34 @@ func (service *UploadService) PutContent(
 	if err != nil {
 		return PutUploadContentResult{}, err
 	}
-	object, err := service.blob.Put(ctx, PutRequest{
-		ExpectedSHA256: request.ExpectedSHA256, ExpectedSizeBytes: preparation.DeclaredSizeBytes,
-		TemporaryKey: preparation.TemporaryObjectKey,
-	}, request.Content)
-	if err != nil {
-		return PutUploadContentResult{}, err
+	var written WrittenBlob
+	if publicationIntent.State == BlobPublicationStatePublished {
+		object, ok := publicationIntent.Object()
+		if !ok {
+			return PutUploadContentResult{}, ErrAttachmentConflict
+		}
+		written = WrittenBlob{Version: objectVersionFromPublicationObject(object), NamespaceID: publicationIntent.NamespaceID, ObligationID: publicationIntent.ObligationID}
+		if _, err := service.blob.Stat(ctx, written.Version); err != nil {
+			return PutUploadContentResult{}, err
+		}
+	} else {
+		written, err = service.writer.Put(ctx, WriteRequest{
+			Content:   PutRequest{ExpectedSHA256: request.ExpectedSHA256, ExpectedSizeBytes: preparation.DeclaredSizeBytes, TemporaryKey: preparation.TemporaryObjectKey},
+			ProjectID: preparation.ProjectID, Origin: WriteOrigin{Kind: "upload", ID: preparation.UploadID, Generation: 1, DraftID: &preparation.DraftID, PublicationID: &publicationIntent.PublicationID},
+		}, request.Content)
+		if err != nil {
+			return PutUploadContentResult{}, err
+		}
 	}
+	if written.NamespaceID != publicationIntent.NamespaceID || (service.transport == TransportKindLocal && written.ObligationID == "") {
+		return PutUploadContentResult{}, ErrAttachmentConflict
+	}
+	object := written.Version
 	if object.Validate() != nil || object.SHA256 != request.ExpectedSHA256 ||
 		object.SizeBytes != preparation.DeclaredSizeBytes {
 		return PutUploadContentResult{}, ErrAttachmentConflict
 	}
-	publicationIntent, err = service.recordUploadPublicationVersion(ctx, publicationIntent, object)
+	publicationIntent, err = service.recordUploadPublicationVersion(ctx, publicationIntent, object, written.ObligationID)
 	if err != nil {
 		return PutUploadContentResult{}, err
 	}
@@ -658,16 +686,31 @@ func (service *UploadService) publishDirectS3Upload(
 	if err != nil {
 		return UploadCompletionPreparation{}, ObjectVersion{}, 0, [sha256.Size]byte{}, err
 	}
-	published, err := service.temporary.PublishTemporaryVersion(ctx, TemporaryObjectPublishRequest{
-		Version: resolved, ExpectedSHA256: digest, ExpectedSizeBytes: actualSize,
-	})
-	if err != nil {
-		return UploadCompletionPreparation{}, ObjectVersion{}, 0, [sha256.Size]byte{}, err
+	var written WrittenBlob
+	if publicationIntent.State == BlobPublicationStatePublished {
+		object, ok := publicationIntent.Object()
+		if !ok {
+			return UploadCompletionPreparation{}, ObjectVersion{}, 0, [sha256.Size]byte{}, ErrAttachmentConflict
+		}
+		written = WrittenBlob{Version: objectVersionFromPublicationObject(object), ObligationID: publicationIntent.ObligationID}
+		if _, err := service.blob.Stat(ctx, written.Version); err != nil {
+			return UploadCompletionPreparation{}, ObjectVersion{}, 0, [sha256.Size]byte{}, err
+		}
+	} else {
+		written, err = service.promoter.PublishTemporaryVersion(ctx, WriteRequest{
+			ProjectID: completion.ProjectID,
+			Origin:    WriteOrigin{Kind: "upload", ID: completion.UploadID, Generation: 1, DraftID: &completion.DraftID, PublicationID: &publicationIntent.PublicationID},
+			Content:   PutRequest{ExpectedSHA256: digest, ExpectedSizeBytes: actualSize, TemporaryKey: resolved.Key},
+		}, resolved)
+		if err != nil {
+			return UploadCompletionPreparation{}, ObjectVersion{}, 0, [sha256.Size]byte{}, err
+		}
 	}
+	published := written.Version
 	if published.Validate() != nil || published.SHA256 != digest || published.SizeBytes != actualSize {
 		return UploadCompletionPreparation{}, ObjectVersion{}, 0, [sha256.Size]byte{}, ErrAttachmentConflict
 	}
-	publicationIntent, err = service.recordUploadPublicationVersion(ctx, publicationIntent, published)
+	publicationIntent, err = service.recordUploadPublicationVersion(ctx, publicationIntent, published, written.ObligationID)
 	if err != nil {
 		return UploadCompletionPreparation{}, ObjectVersion{}, 0, [sha256.Size]byte{}, err
 	}
@@ -693,7 +736,8 @@ func (service *UploadService) prepareUploadPublication(
 	}
 	request := BlobPublicationPrepareRequest{
 		ProjectID: preparation.ProjectID, OwnerKind: BlobPublicationOwnerUpload,
-		OwnerID: preparation.UploadID, OwnerGeneration: 1, Target: target,
+		NamespaceID: service.writer.NamespaceID(),
+		OwnerID:     preparation.UploadID, OwnerGeneration: 1, Target: target,
 		PublishExpiresAt: preparation.ExpiresAt.UTC(),
 	}
 	intent, err := service.repository.PrepareBlobPublication(ctx, request)
@@ -702,6 +746,7 @@ func (service *UploadService) prepareUploadPublication(
 	}
 	if intent.Validate() != nil || intent.ProjectID != request.ProjectID ||
 		intent.OwnerKind != request.OwnerKind || intent.OwnerID != request.OwnerID ||
+		intent.NamespaceID != request.NamespaceID ||
 		intent.OwnerGeneration != request.OwnerGeneration || intent.Target != target ||
 		!intent.PublishExpiresAt.Equal(request.PublishExpiresAt) ||
 		(intent.State != BlobPublicationStatePrepared && intent.State != BlobPublicationStatePublished) {
@@ -714,9 +759,10 @@ func (service *UploadService) recordUploadPublicationVersion(
 	ctx context.Context,
 	intent BlobPublicationIntent,
 	object ObjectVersion,
+	obligationID string,
 ) (BlobPublicationIntent, error) {
 	if intent.State == BlobPublicationStatePublished {
-		if intent.ObjectVersion != object.VersionID || !blobPublicationObjectMatchesTarget(object, intent.Target) {
+		if intent.ObjectVersion != object.VersionID || intent.ObligationID != obligationID || !blobPublicationObjectMatchesTarget(object, intent.Target) {
 			return BlobPublicationIntent{}, ErrAttachmentConflict
 		}
 		return intent, nil
@@ -725,13 +771,14 @@ func (service *UploadService) recordUploadPublicationVersion(
 		return BlobPublicationIntent{}, ErrAttachmentConflict
 	}
 	published, err := service.repository.RecordBlobPublicationVersion(ctx, BlobPublicationVersionRequest{
-		Intent: intent, Object: object,
+		Intent: intent, Object: object, ObligationID: obligationID,
 	})
 	if err != nil {
 		return BlobPublicationIntent{}, err
 	}
 	if published.Validate() != nil || published.State != BlobPublicationStatePublished ||
 		published.PublicationID != intent.PublicationID || published.ProjectID != intent.ProjectID ||
+		published.NamespaceID != intent.NamespaceID || published.ObligationID != obligationID ||
 		published.OwnerKind != intent.OwnerKind || published.OwnerID != intent.OwnerID ||
 		published.OwnerGeneration != intent.OwnerGeneration || published.Target != intent.Target ||
 		published.ObjectVersion != object.VersionID || !published.PublishExpiresAt.Equal(intent.PublishExpiresAt) {

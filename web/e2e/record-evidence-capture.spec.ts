@@ -14,6 +14,7 @@ const PREVIEW_KEYS = [
 
 type PreviewRequest = {
   record_id?: string
+  allocation?: { record_id: string; [key: string]: unknown }
   kind: string
   schema_version: number
   source_type: string
@@ -35,6 +36,7 @@ async function routeCapturePreviews(page: Page, recordId: string): Promise<Previ
       contentType: 'application/json',
       body: JSON.stringify({
         record_id: body.record_id ?? recordId,
+        ...(body.allocation ? { allocation: body.allocation } : {}),
         snapshot_id: `evs_e2ecaptured${sequence}`,
         capture_intent_id: `evi_e2ecapture${sequence}`,
         kind: body.kind,
@@ -116,6 +118,8 @@ for (const viewport of [
 }
 
 test('a new record publishes captured evidence on the pre-allocated record id', async ({ api, page }) => {
+  const target = 'rec2_00000000000000000000000000000002'
+  const detail = recordDetailProfile()
   const draft = {
     draft_id: 'rdf_e2e_new',
     etag: 'rdt1_e2e_new',
@@ -127,7 +131,11 @@ test('a new record publishes captured evidence on the pre-allocated record id', 
     expires_at: '2026-08-22T10:00:00Z',
   }
   api.useProfile({
-    ...recordDetailProfile(),
+    ...detail,
+    [apiRouteKey('GET', `/api/records/${target}`)]: detail[apiRouteKey('GET', '/api/records/rec_e2e001')]!,
+    [apiRouteKey('GET', `/api/records/${target}/actions?limit=50`)]: detail[apiRouteKey('GET', '/api/records/rec_e2e001/actions?limit=50')]!,
+    [apiRouteKey('GET', `/api/records/${target}/comments?limit=100`)]: detail[apiRouteKey('GET', '/api/records/rec_e2e001/comments?limit=100')]!,
+    [apiRouteKey('GET', `/api/records/${target}/watch`)]: detail[apiRouteKey('GET', '/api/records/rec_e2e001/watch')]!,
     ...authenticatedProfile({
       [apiRouteKey('GET', '/api/vps')]: { status: 200, body: [{ vps_id: 'vps_e2ebeta', display_name: 'VPS Beta' }] },
       ...monitoringInstanceRoutes('vps_e2ebeta', [{ id: 'mi_e2ebeta', name: 'beta 主机监控' }]),
@@ -139,10 +147,18 @@ test('a new record publishes captured evidence on the pre-allocated record id', 
       },
       [apiRouteKey('POST', '/api/records')]: {
         status: 201,
-        body: { record_id: 'rec_e2e001', revision_id: 'rrv_e2e001', revision_no: 1, created: true, replayed: false },
-        expectedBodyKeys: ['draft_id', 'draft_etag', 'record_id', 'evidence_items'],
+        body: { record_id: target, revision_id: 'rrv_e2e001', revision_no: 1, created: true, replayed: false },
+        expectedBodyKeys: ['draft_id', 'draft_etag', 'record_id', 'allocation', 'evidence_items'],
       },
     }),
+  })
+  await page.route('**/api/records/allocations', async (route) => {
+    const body = route.request().postDataJSON() as { purpose: string; request_digest: string }
+    await route.fulfill({ status: 201, json: {
+      allocation_id: `rqa_${'3'.repeat(32)}`, reservation_id: `rba_${'4'.repeat(32)}`,
+      record_id: target, purpose: body.purpose, request_digest: body.request_digest,
+      generation: 0, idempotency_key: route.request().headers()['idempotency-key'],
+    } })
   })
   const previews = await routeCapturePreviews(page, 'rec_e2e001')
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -158,7 +174,7 @@ test('a new record publishes captured evidence on the pre-allocated record id', 
   await dialog.getByLabel('监控实例').selectOption('mi_e2ebeta')
   await dialog.getByRole('button', { name: '生成预览' }).click()
   await dialog.getByRole('region', { name: '证据预览' }).getByRole('button', { name: '加入记录' }).click()
-  expect(previews[0]).not.toHaveProperty('record_id')
+  expect(previews[0]).toMatchObject({ record_id: target, allocation: { record_id: target, purpose: 'evidence_preview' } })
   await expect(dialog.getByText('待保存')).toBeVisible()
   await page.keyboard.press('Escape')
 
@@ -167,8 +183,9 @@ test('a new record publishes captured evidence on the pre-allocated record id', 
   expect((await createRequest).postDataJSON()).toEqual({
     draft_id: draft.draft_id,
     draft_etag: expect.any(String),
-    record_id: 'rec_e2e001',
+    record_id: target,
+    allocation: expect.objectContaining({ record_id: target, purpose: 'evidence_preview' }),
     evidence_items: [{ capture_intent_id: 'evi_e2ecapture01' }],
   })
-  await expect(page).toHaveURL(/\/records\/rec_e2e001$/u)
+  await expect(page).toHaveURL(new RegExp(`/records/${target}$`, 'u'))
 })

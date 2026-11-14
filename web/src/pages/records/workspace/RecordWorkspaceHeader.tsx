@@ -1,3 +1,4 @@
+import { useRef, type RefObject } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 import { Badge, Button, Timestamp } from '../../../components/atoms'
@@ -20,8 +21,13 @@ type RecordWorkspaceHeaderProps = {
   ownerLabel: string
   /** 附件仍在上传或安全检查：发布要等它们进入草稿，否则会漏掉或被后端拒绝。 */
   uploading?: boolean
+  publicationUnavailable?: boolean
+  publicationBusy?: boolean
+  publishButtonRef?: RefObject<HTMLButtonElement | null>
   onSave: () => void
   onPublish: () => void
+  /** 放弃确认未决的新建发布（只清本地发布状态）。 */
+  onDiscardPublication?: () => void
   onExport: () => void
   onImport: () => void
 }
@@ -38,6 +44,7 @@ function RecordMark() {
 }
 
 function syncText(state: RecordWorkspaceState, uploading: boolean): string {
+  if (state.publicationPending) return state.publishing ? '正在确认发布结果' : '发布结果待确认'
   if (state.saving) return '正在保存草稿'
   if (uploading) return '附件上传中，完成后可发布'
   if (state.dirty) return '本地未同步'
@@ -46,8 +53,8 @@ function syncText(state: RecordWorkspaceState, uploading: boolean): string {
 }
 
 function syncTone(state: RecordWorkspaceState, uploading: boolean): string {
-  if (state.saving || uploading) return 'record-identity__sync--saving'
-  if (state.dirty) return 'record-identity__sync--dirty'
+  if (state.saving || uploading || (state.publicationPending && state.publishing)) return 'record-identity__sync--saving'
+  if (state.dirty || state.publicationPending) return 'record-identity__sync--dirty'
   return state.draft ? 'record-identity__sync--synced' : ''
 }
 
@@ -60,23 +67,30 @@ export function RecordWorkspaceHeader({
   subjectReturnState,
   ownerLabel,
   uploading = false,
+  publicationUnavailable = false,
+  publicationBusy = false,
+  publishButtonRef,
   onSave,
   onPublish,
+  onDiscardPublication,
   onExport,
   onImport,
 }: RecordWorkspaceHeaderProps) {
   const auth = useAuth()
   const { comparison, portability } = capabilityFlagsForSession(auth)
   const location = useLocation()
+  const fallbackPublishRef = useRef<HTMLButtonElement>(null)
+  const publishRef = publishButtonRef ?? fallbackPublishRef
+  const publishDisabled = state.publishing || uploading || publicationUnavailable
   const { mode, payload } = state
   const editable = mode === 'new' || mode === 'edit'
   const published = mode === 'revision' ? state.revision : state.record?.current
   const subject = displaySubject(published, payload)
-  const title = editable
-    ? (mode === 'new' ? '新建运维记录' : '编辑运维记录')
-    : payload.title || '运维记录'
+  const title = state.publicationPending && payload.title
+    ? payload.title
+    : editable ? (mode === 'new' ? '新建运维记录' : '编辑运维记录') : payload.title || '运维记录'
   const businessStatus = payload.business_status ? BUSINESS_STATUS_LABELS[payload.business_status] : ''
-  const archived = mode === 'read' && state.record?.lifecycle === 'archived'
+  const inactive = (mode === 'read' || mode === 'revision') && state.record?.lifecycle !== 'active'
   const subjectReturn = subjectReturnHref ? (
     <Link className="text-link" to={subjectReturnHref} state={subjectReturnState}>返回主体</Link>
   ) : null
@@ -88,7 +102,7 @@ export function RecordWorkspaceHeader({
         <div className="record-identity__copy">
           <div className="record-identity__title-row">
             <h1 className="page__title">{title}</h1>
-            {editable ? null : (
+            {editable && !state.publicationPending ? null : (
               <div className="record-identity__badges">
                 {mode === 'revision' && published ? (
                   <Badge variant="info" tone="notice">历史修订 #{published.revision_no}</Badge>
@@ -100,20 +114,29 @@ export function RecordWorkspaceHeader({
                 {payload.impact_level ? (
                   <Badge variant="info" tone={impactTone(payload.impact_level)}>影响 {impactLevelLabel(payload.impact_level)}</Badge>
                 ) : null}
-                {archived && state.record ? (
+                {inactive && state.record ? (
                   <Badge variant="info" tone="maintenance">{RECORD_LIFECYCLE_LABELS[state.record.lifecycle]}</Badge>
                 ) : null}
               </div>
             )}
           </div>
           {editable ? (
-            <p className="record-identity__meta record-identity__meta--sync">
-              <span className={['record-identity__sync', syncTone(state, uploading)].filter(Boolean).join(' ')} role="status">
-                {syncText(state, uploading)}{state.message ? ` · ${state.message}` : ''}
-              </span>
-              {mode === 'edit' && payload.title ? <span className="record-identity__editing">{payload.title}</span> : null}
-              {subjectReturn}
-            </p>
+            <>
+              <p className="record-identity__meta record-identity__meta--sync">
+                <span className={['record-identity__sync', syncTone(state, uploading)].filter(Boolean).join(' ')} role="status">
+                  {syncText(state, uploading)}{state.message ? ` · ${state.message}` : ''}
+                </span>
+                {mode === 'edit' && !state.publicationPending && payload.title ? <span className="record-identity__editing">{payload.title}</span> : null}
+                {subjectReturn}
+              </p>
+              {state.publicationPending ? (
+                <dl className="record-identity__facts" aria-label="待确认记录属性">
+                  {subject?.source_id.trim() ? <div className="record-identity__meta-item"><dt>主体</dt><dd>{subjectLabel(subject)}</dd></div> : null}
+                  <div className="record-identity__meta-item"><dt>可见性</dt><dd>{payload.visibility.kind === 'project' ? '项目内' : '受限'}</dd></div>
+                  {ownerLabel ? <div className="record-identity__meta-item"><dt>负责人</dt><dd>{ownerLabel}</dd></div> : null}
+                </dl>
+              ) : null}
+            </>
           ) : (
             <div className="record-identity__meta">
               <dl className="record-identity__facts" aria-label="记录身份">
@@ -176,8 +199,21 @@ export function RecordWorkspaceHeader({
         ) : null}
         {editable ? (
           <>
-            <Button size="md" variant="secondary" disabled={state.saving} onClick={onSave}>保存草稿</Button>
-            <Button size="md" disabled={state.publishing || uploading} onClick={onPublish}>发布修订</Button>
+            {state.publicationPending && onDiscardPublication ? (
+              <Button
+                size="md"
+                variant="secondary"
+                disabled={state.publishing || publicationUnavailable}
+                title="只清除本地的待确认状态，不会撤销已发出的请求"
+                onClick={() => { publishRef.current?.focus(); onDiscardPublication() }}
+              >
+                放弃确认
+              </Button>
+            ) : null}
+            <Button size="md" variant="secondary" disabled={state.saving || state.publicationPending} onClick={onSave}>保存草稿</Button>
+            <Button size="md" ref={publishRef} aria-disabled={publishDisabled} onClick={() => { if (!publishDisabled) onPublish() }}>
+              {publicationBusy && !state.publishing ? '正在确认预留' : state.publicationPending ? '重试确认发布' : '发布修订'}
+            </Button>
           </>
         ) : null}
       </div>

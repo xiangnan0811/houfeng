@@ -16,6 +16,15 @@ var appACLCurrentTransitionBindings = []AppACLRoleBinding{
 	{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
 }
 
+// Captured from the unmodified C80 compiler and independently checked against
+// the C79 golden plus the actual 0080 migration and privilege delta.
+//
+//go:embed testdata/app_acl_current_c80_migrations.v1.bin
+var appACLCurrentC80MigrationGolden []byte
+
+//go:embed testdata/app_acl_current_c80_privileges.v1.bin
+var appACLCurrentC80PrivilegeGolden []byte
+
 //go:embed testdata/app_acl_current_v0.79.4_migrations.v1.bin
 var appACLCurrentV0794MigrationGolden []byte
 
@@ -240,6 +249,7 @@ const (
 	appACLCurrentProfileP77
 	appACLCurrentProfileP78
 	appACLCurrentProfileP79
+	appACLCurrentProfileP80
 )
 
 type appACLCurrentTransitionDefinition struct {
@@ -282,6 +292,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden:      appACLCurrentV0794MigrationGolden,
 		predecessorPrivilegeGolden:      appACLCurrentV0794PrivilegeGolden,
@@ -307,6 +318,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentV0802MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0802PrivilegeGolden,
@@ -332,6 +344,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentV0796MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0796PrivilegeGolden,
@@ -354,6 +367,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentV0804MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0804PrivilegeGolden,
@@ -375,6 +389,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentV1153MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV1153PrivilegeGolden,
@@ -395,6 +410,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentV1157MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV1157PrivilegeGolden,
@@ -414,6 +430,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC69MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC69PrivilegeGolden,
@@ -432,6 +449,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC70MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC70PrivilegeGolden,
@@ -449,6 +467,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC71MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC71PrivilegeGolden,
@@ -465,6 +484,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC72MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC72PrivilegeGolden,
@@ -480,6 +500,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC73MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC73PrivilegeGolden,
@@ -494,6 +515,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC74MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC74PrivilegeGolden,
@@ -507,6 +529,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC75MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC75PrivilegeGolden,
@@ -519,6 +542,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC76MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC76PrivilegeGolden,
@@ -530,6 +554,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0078_ip_quality_collection_scope.sql",
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC77MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC77PrivilegeGolden,
@@ -540,6 +565,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		successorMigrations: []string{
 			"0079_ip_quality_cache_expiry.sql",
 			agentReplayMigration,
+			recordDeletionSuccessorMigration,
 		},
 		predecessorMigrationGolden: appACLCurrentC78MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC78PrivilegeGolden,
@@ -547,9 +573,16 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 	{
 		profile:                    appACLCurrentProfileP79,
 		predecessorLastMigration:   "0079_ip_quality_cache_expiry.sql",
-		successorMigrations:        []string{agentReplayMigration},
+		successorMigrations:        []string{agentReplayMigration, recordDeletionSuccessorMigration},
 		predecessorMigrationGolden: appACLCurrentC79MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC79PrivilegeGolden,
+	},
+	{
+		profile:                    appACLCurrentProfileP80,
+		predecessorLastMigration:   agentReplayMigration,
+		successorMigrations:        []string{recordDeletionSuccessorMigration},
+		predecessorMigrationGolden: appACLCurrentC80MigrationGolden,
+		predecessorPrivilegeGolden: appACLCurrentC80PrivilegeGolden,
 	},
 }
 
@@ -697,7 +730,16 @@ var appACLCurrentAcceptedPredecessorProfileChains = func() [][]appACLCurrentProf
 		withP79 = append(withP79, appACLCurrentProfileP79)
 		c80Chains = append(c80Chains, withP79)
 	}
-	return c80Chains
+	c81Chains := make([][]appACLCurrentProfileID, 0, len(c80Chains)*2+1)
+	c81Chains = append(c81Chains, c80Chains...)
+	c81Chains = append(c81Chains, []appACLCurrentProfileID{appACLCurrentProfileP80})
+	for _, chain := range c80Chains {
+		withP80 := make([]appACLCurrentProfileID, len(chain)+1)
+		copy(withP80, chain)
+		withP80[len(chain)] = appACLCurrentProfileP80
+		c81Chains = append(c81Chains, withP80)
+	}
+	return c81Chains
 }()
 
 func cloneAppACLCurrentTransitionDefinitions(source []appACLCurrentTransitionDefinition) []appACLCurrentTransitionDefinition {
@@ -719,8 +761,8 @@ func compileAppACLCurrentTransitions(
 	if len(definitions) == 0 {
 		return nil, fmt.Errorf("current APP ACL transition registry has no definitions")
 	}
-	if len(definitions) != 17 {
-		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64, P63, P66, P67, P68, P69, P70, P71, P72, P73, P74, P75, P76, P77, P78 and P79 profiles")
+	if len(definitions) != 18 {
+		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64, P63, P66, P67, P68, P69, P70, P71, P72, P73, P74, P75, P76, P77, P78, P79 and P80 profiles")
 	}
 	expectedDefinitions := cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions)
 	compiled := make([]appACLCurrentTransition, 0, len(definitions))
@@ -734,7 +776,7 @@ func compileAppACLCurrentTransitions(
 			definition.profile != appACLCurrentProfileP73 && definition.profile != appACLCurrentProfileP74 &&
 			definition.profile != appACLCurrentProfileP75 && definition.profile != appACLCurrentProfileP76 &&
 			definition.profile != appACLCurrentProfileP77 && definition.profile != appACLCurrentProfileP78 &&
-			definition.profile != appACLCurrentProfileP79 {
+			definition.profile != appACLCurrentProfileP79 && definition.profile != appACLCurrentProfileP80 {
 			return nil, fmt.Errorf("current APP ACL transition %d has unknown predecessor profile", index)
 		}
 		if _, duplicate := claimedProfiles[definition.profile]; duplicate {
@@ -846,7 +888,7 @@ func validateAppACLCurrentTransitionPrivilegeDelta(
 	current appACLCurrentSourceContract,
 	profile appACLCurrentProfileID,
 ) error {
-	if profile < appACLCurrentProfileP62 || profile > appACLCurrentProfileP79 {
+	if profile < appACLCurrentProfileP62 || profile > appACLCurrentProfileP80 {
 		return fmt.Errorf("registered APP transition has unknown predecessor profile %d", profile)
 	}
 	oldSet, err := ParseCanonicalPrivilegeSetBodyV1(predecessorPrivilegeBody)
@@ -857,14 +899,21 @@ func validateAppACLCurrentTransitionPrivilegeDelta(
 	if err != nil {
 		return err
 	}
-	currentSet, err := ParseCanonicalPrivilegeSetBodyV1(currentBody)
+	currentSet, _, err := parseCanonicalPrivilegeSetBodyAnyVersion(currentBody)
 	if err != nil {
 		return fmt.Errorf("parse current APP privileges: %w", err)
 	}
-	if !equalAppACLRoleBindings(oldSet.RoleBindings, currentSet.RoleBindings) {
+	historicalBindings, workerBinding, err := splitAppACLCurrentRoleBindings(currentSet.RoleBindings)
+	if err != nil {
+		return err
+	}
+	if appACLCurrentSourceRequiresDeletionWorker(current) && workerBinding == nil {
+		return fmt.Errorf("registered APP successor has no deletion worker binding")
+	}
+	if !equalAppACLRoleBindings(oldSet.RoleBindings, historicalBindings) {
 		return fmt.Errorf("registered APP transition changed role bindings")
 	}
-	replayPending := indexOfAppACLCurrentMigration(current.sources.names, agentReplayMigration) >= 0
+	replayPending := profile <= appACLCurrentProfileP79 && indexOfAppACLCurrentMigration(current.sources.names, agentReplayMigration) >= 0
 	for _, fragment := range current.fragments {
 		if fragment.Migration != agentReplayMigration {
 			if len(fragment.RetiredObjects) != 0 {
@@ -954,6 +1003,15 @@ func validateAppACLCurrentTransitionPrivilegeDelta(
 		addTable(expectedAdditions, "agent_replay_states", AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
 		addTable(expectedAdditions, "agent_batch_receipts", AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
 	}
+	if appACLCurrentSourceRequiresDeletionWorker(current) {
+		successor := recordDeletionSuccessorAppACLCurrentMigrationFragment()
+		for _, privilege := range successor.Privileges(appACLCurrentTransitionDatabase) {
+			expectedAdditions[privilege] = struct{}{}
+		}
+		for _, privilege := range successor.RevokedPrivileges {
+			expectedRemovals[privilege] = struct{}{}
+		}
+	}
 	if len(removals) != len(expectedRemovals) || len(additions) != len(expectedAdditions) {
 		return fmt.Errorf("registered APP transition privilege delta is not exactly the approved current fragments")
 	}
@@ -1009,7 +1067,7 @@ func appACLCurrentTransitionPrivilegeBody(source appACLCurrentSourceContract) ([
 	return appACLCurrentTransitionPrivilegeBodyFor(
 		source,
 		appACLCurrentTransitionDatabase,
-		appACLCurrentTransitionBindings,
+		appACLCurrentTransitionBindingsV2,
 		appACLCurrentTransitionMigrator,
 	)
 }
@@ -1024,7 +1082,7 @@ func appACLCurrentTransitionPrivilegeBodyFor(
 	if err != nil {
 		return nil, fmt.Errorf("compile transition privilege contract: %w", err)
 	}
-	body, err := CanonicalPrivilegeSetBodyV1(catalog.RoleBindings, catalog.Privileges)
+	body, err := canonicalPrivilegeSetBodyForBindings(catalog.RoleBindings, catalog.Privileges)
 	if err != nil {
 		return nil, fmt.Errorf("encode transition privilege contract: %w", err)
 	}
@@ -1033,12 +1091,14 @@ func appACLCurrentTransitionPrivilegeBodyFor(
 
 func cloneAppACLCurrentCompiledMigrationFragment(source appACLCurrentCompiledMigrationFragment) appACLCurrentCompiledMigrationFragment {
 	return appACLCurrentCompiledMigrationFragment{
-		Migration:           source.Migration,
-		Objects:             append([]AppACLManagedObjectR1(nil), source.Objects...),
-		RetiredObjects:      append([]AppACLManagedObjectR1(nil), source.RetiredObjects...),
-		Privileges:          append([]AppACLPrivilege(nil), source.Privileges...),
-		AuxiliaryPrivileges: append([]AppACLCurrentAuxiliaryPrivilege(nil), source.AuxiliaryPrivileges...),
-		Functions:           cloneAppACLCurrentFunctionContracts(source.Functions),
+		Migration:            source.Migration,
+		Objects:              append([]AppACLManagedObjectR1(nil), source.Objects...),
+		RetiredObjects:       append([]AppACLManagedObjectR1(nil), source.RetiredObjects...),
+		Privileges:           append([]AppACLPrivilege(nil), source.Privileges...),
+		RevokedPrivileges:    append([]AppACLPrivilege(nil), source.RevokedPrivileges...),
+		AuxiliaryPrivileges:  append([]AppACLCurrentAuxiliaryPrivilege(nil), source.AuxiliaryPrivileges...),
+		Functions:            cloneAppACLCurrentFunctionContracts(source.Functions),
+		FunctionReplacements: cloneAppACLCurrentFunctionReplacements(source.FunctionReplacements),
 	}
 }
 

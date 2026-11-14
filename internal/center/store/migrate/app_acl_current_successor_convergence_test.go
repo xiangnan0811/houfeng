@@ -22,8 +22,8 @@ func TestConvergeAppACLCurrentRegisteredPredecessorPublishesRevisionTwo(t *testi
 	current, _, _ := appACLCurrentConvergenceExpected(t, migrations.FS, appACLCurrentMigrationFragments)
 	tx := &recordingAppACLCurrentConvergenceTx{fakeAppACLConvergenceTx: &fakeAppACLConvergenceTx{}}
 	dependencies := appACLCurrentConvergenceTestDependencies()
-	dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error) {
-		return platformmigrate.AppRoleSetV1{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", Migrator: "houfeng_migrator"}, nil
+	dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string, string) (platformmigrate.AppRoleSetV2, error) {
+		return platformmigrate.AppRoleSetV2{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", DeletionWorker: "houfeng_record_deletion_worker", Migrator: "houfeng_migrator"}, nil
 	}
 	dependencies.transitionDefinitions = cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions)
 	dependencies.readPhaseState = func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error) {
@@ -109,15 +109,7 @@ func TestConvergeAppACLCurrentRegisteredPredecessorPublishesRevisionTwo(t *testi
 	}
 	dependencies.insertGenesis = currentUnexpectedInsertGenesis(t, "registered predecessor")
 
-	result, err := convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
-		"houfeng_runtime",
-		"houfeng_platform_admin",
-		migrations.FS,
-		appACLCurrentMigrationFragments,
-		dependencies,
-	)
+	result, err := convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }, "houfeng_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if err != nil {
 		t.Fatalf("registered predecessor convergence: %v", err)
 	}
@@ -135,8 +127,8 @@ func TestConvergeAppACLCurrentRegisteredSuccessorRepeatIsReadOnly(t *testing.T) 
 	transition, predecessor, successor, currentApplied := appACLCurrentRegisteredSuccessorFixture(t)
 	tx := &recordingAppACLCurrentConvergenceTx{fakeAppACLConvergenceTx: &fakeAppACLConvergenceTx{}}
 	dependencies := appACLCurrentConvergenceTestDependencies()
-	dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error) {
-		return platformmigrate.AppRoleSetV1{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", Migrator: "houfeng_migrator"}, nil
+	dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string, string) (platformmigrate.AppRoleSetV2, error) {
+		return platformmigrate.AppRoleSetV2{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", DeletionWorker: "houfeng_record_deletion_worker", Migrator: "houfeng_migrator"}, nil
 	}
 	dependencies.transitionDefinitions = cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions)
 	dependencies.readPhaseState = func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error) {
@@ -169,15 +161,7 @@ func TestConvergeAppACLCurrentRegisteredSuccessorRepeatIsReadOnly(t *testing.T) 
 		return nil
 	}
 
-	result, err := convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
-		"houfeng_runtime",
-		"houfeng_platform_admin",
-		migrations.FS,
-		appACLCurrentMigrationFragments,
-		dependencies,
-	)
+	result, err := convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }, "houfeng_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if err != nil {
 		t.Fatalf("registered successor repeat: %v", err)
 	}
@@ -215,8 +199,8 @@ func TestConvergeAppACLCurrentRegisteredPredecessorRollsBackEveryTransitionCutpo
 			}
 			dependencies := appACLCurrentConvergenceTestDependencies()
 			dependencies.transitionDefinitions = cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions)
-			dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error) {
-				return platformmigrate.AppRoleSetV1{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", Migrator: "houfeng_migrator"}, nil
+			dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string, string) (platformmigrate.AppRoleSetV2, error) {
+				return platformmigrate.AppRoleSetV2{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", DeletionWorker: "houfeng_record_deletion_worker", Migrator: "houfeng_migrator"}, nil
 			}
 			dependencies.readPhaseState = func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error) {
 				return appACLConvergencePhaseState{LedgerExists: true, ManifestRevisionsExists: true, ManifestHeadExists: true}, nil
@@ -312,15 +296,7 @@ func TestConvergeAppACLCurrentRegisteredPredecessorRollsBackEveryTransitionCutpo
 				return fail("final-transition-verifier")
 			}
 
-			_, err = convergeAppACLCurrentWithDependencies(
-				context.Background(),
-				func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
-				"houfeng_runtime",
-				"houfeng_platform_admin",
-				migrations.FS,
-				appACLCurrentMigrationFragments,
-				dependencies,
-			)
+			_, err = convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }, "houfeng_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 			if !errors.Is(err, failure) {
 				t.Fatalf("cutpoint error = %v, want wrapped failure", err)
 			}
@@ -345,8 +321,8 @@ func TestConvergeAppACLCurrentRegisteredPredecessorRetriesWholeSerializableClosu
 	}
 	dependencies := appACLCurrentConvergenceTestDependencies()
 	dependencies.transitionDefinitions = cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions)
-	dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error) {
-		return platformmigrate.AppRoleSetV1{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", Migrator: "houfeng_migrator"}, nil
+	dependencies.resolveRoles = func(context.Context, pgx.Tx, string, string, string) (platformmigrate.AppRoleSetV2, error) {
+		return platformmigrate.AppRoleSetV2{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", DeletionWorker: "houfeng_record_deletion_worker", Migrator: "houfeng_migrator"}, nil
 	}
 	dependencies.readPhaseState = func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error) {
 		return appACLConvergencePhaseState{LedgerExists: true, ManifestRevisionsExists: true, ManifestHeadExists: true}, nil
@@ -416,10 +392,7 @@ func TestConvergeAppACLCurrentRegisteredPredecessorRetriesWholeSerializableClosu
 		return nil
 	}
 
-	result, err := convergeAppACLCurrentWithDependencies(
-		context.Background(), begin, "houfeng_runtime", "houfeng_platform_admin",
-		migrations.FS, appACLCurrentMigrationFragments, dependencies,
-	)
+	result, err := convergeAppACLCurrentWithDependencies(context.Background(), begin, "houfeng_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if err != nil {
 		t.Fatalf("retry registered predecessor: %v", err)
 	}

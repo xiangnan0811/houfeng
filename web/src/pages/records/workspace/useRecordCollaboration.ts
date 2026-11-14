@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { RecordActionCreateValues, RecordActionUpdateValues } from '../../../components/RecordActionPanel'
 import type { RecordCommentSubmit } from '../../../components/RecordCommentThread'
@@ -51,8 +51,11 @@ export function useRecordCollaboration(recordId: string | undefined, mode: Recor
     !recordId || mode === 'new' ? 'empty' : 'loading',
   )
   const [busy, setBusy] = useState(false)
+  const [loadedRecordId, setLoadedRecordId] = useState<string>()
+  const generationRef = useRef(0)
 
   useEffect(() => {
+    const generation = ++generationRef.current
     if (!recordId || mode === 'new') {
       return
     }
@@ -66,23 +69,36 @@ export function useRecordCollaboration(recordId: string | undefined, mode: Recor
       setActions(actionList.items)
       setComments(commentList.comments)
       setWatch(nextWatch)
+      setLoadedRecordId(recordId)
+      setBusy(false)
       setState('ready')
     }).catch((error: unknown) => {
       if (!active) return
+      setLoadedRecordId(recordId)
+      setBusy(false)
       if (error instanceof ApiError && (error.status === 403 || error.status === 404)) setState('revoked')
       else setState('error')
     })
     return () => {
       active = false
+      if (generationRef.current === generation) generationRef.current += 1
     }
   }, [mode, recordId])
 
   function run<T>(request: () => Promise<T>, apply: (result: T) => void) {
+    if (!recordId || recordId !== loadedRecordId || state !== 'ready') return
+    const generation = generationRef.current
     setBusy(true)
     void request()
-      .then(apply)
-      .catch(() => setState('error'))
-      .finally(() => setBusy(false))
+      .then((result) => {
+        if (generationRef.current === generation) apply(result)
+      })
+      .catch(() => {
+        if (generationRef.current === generation) setState('error')
+      })
+      .finally(() => {
+        if (generationRef.current === generation) setBusy(false)
+      })
   }
 
   function refreshActions(mutate: () => Promise<unknown>, onDone?: () => void) {
@@ -99,11 +115,11 @@ export function useRecordCollaboration(recordId: string | undefined, mode: Recor
   }
 
   return {
-    state,
-    busy,
-    actions,
-    comments,
-    watch,
+    state: !recordId || mode === 'new' ? 'empty' : loadedRecordId !== recordId ? 'loading' : state,
+    busy: loadedRecordId === recordId && busy,
+    actions: loadedRecordId === recordId && state === 'ready' ? actions : [],
+    comments: loadedRecordId === recordId && state === 'ready' ? comments : [],
+    watch: loadedRecordId === recordId && state === 'ready' ? watch : null,
     createAction: (values, onDone) => {
       if (!recordId) return
       refreshActions(() => createRecordAction(recordId, values, crypto.randomUUID()), onDone)

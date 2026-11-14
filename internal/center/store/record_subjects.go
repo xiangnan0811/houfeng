@@ -15,13 +15,15 @@ import (
 
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
 
 const (
-	recordSubjectSourcePolicyRevisionV1      uint64 = 1
+	recordSubjectSourcePolicyRevisionV1 uint64 = 1
+	// VersionV1 is the unchanged projection DTO, not the external W1 protocol.
 	WitnessedRecordSubjectTombstoneVersionV1 uint64 = 1
 )
 
@@ -192,7 +194,7 @@ func (source *PostgresCurrentRecordAuthorizationSource) loadAdmittedCurrentRecor
 	ctx context.Context,
 	recordID string,
 ) (currentRecordAuthorizationSnapshot, error) {
-	if ctx == nil || source == nil || source.platform == nil || !validStoredRecordIdentity(recordID, "rec_") {
+	if ctx == nil || source == nil || source.platform == nil || !recordidentity.IsValid(recordID) {
 		return currentRecordAuthorizationSnapshot{}, ErrRecordSubjectUnavailable
 	}
 	var snapshot currentRecordAuthorizationSnapshot
@@ -220,7 +222,7 @@ func (source *PostgresCurrentRecordAuthorizationSource) loadAdmittedRecordRevisi
 	revisionID string,
 ) (recordRevisionAuthorizationSnapshot, error) {
 	if ctx == nil || source == nil || source.platform == nil ||
-		!validStoredRecordIdentity(recordID, "rec_") || !validStoredRecordIdentity(revisionID, "rrv_") {
+		!recordidentity.IsValid(recordID) || !validStoredRecordIdentity(revisionID, "rrv_") {
 		return recordRevisionAuthorizationSnapshot{}, ErrRecordSubjectUnavailable
 	}
 	var snapshot recordRevisionAuthorizationSnapshot
@@ -247,7 +249,7 @@ func (source *PostgresCurrentRecordAuthorizationSource) loadCurrentRecordAuthori
 	recordID string,
 ) (currentRecordAuthorizationSnapshot, error) {
 	if ctx == nil || source == nil || nilRecordSubjectDependency(source.db) ||
-		!validStoredRecordIdentity(recordID, "rec_") {
+		!recordidentity.IsValid(recordID) {
 		return currentRecordAuthorizationSnapshot{}, ErrRecordSubjectUnavailable
 	}
 
@@ -406,7 +408,7 @@ func (source *PostgresCurrentRecordAuthorizationSource) loadRecordRevisionAuthor
 	revisionID string,
 ) (recordRevisionAuthorizationSnapshot, error) {
 	if ctx == nil || source == nil || nilRecordSubjectDependency(source.db) ||
-		!validStoredRecordIdentity(recordID, "rec_") || !validStoredRecordIdentity(revisionID, "rrv_") {
+		!recordidentity.IsValid(recordID) || !validStoredRecordIdentity(revisionID, "rrv_") {
 		return recordRevisionAuthorizationSnapshot{}, ErrRecordSubjectUnavailable
 	}
 
@@ -703,7 +705,7 @@ func normalizeCurrentRecordAuthorizationSnapshot(
 	input currentRecordAuthorizationSnapshot,
 ) (currentRecordAuthorizationSnapshot, error) {
 	if input.recordID != recordID || input.projectID != projectID ||
-		!validStoredRecordIdentity(input.recordID, "rec_") ||
+		!recordidentity.IsValid(input.recordID) ||
 		!validStoredRecordIdentity(input.currentRevisionID, "rrv_") ||
 		input.lockVersion == 0 || input.authorizationEpoch == 0 ||
 		records.ValidateLifecycle(input.lifecycle) != nil {
@@ -905,13 +907,8 @@ func (resolver *RecordSubjectReadResolver) Resolve(
 		return records.ResolvedSubject{}, ErrRecordSubjectUnavailable
 	}
 
-	current, err := resolver.live.Resolve(ctx, normalizedActor, normalizedInput.Reference)
-	if err == nil {
-		return refreshLiveRecordSubject(normalizedInput, current)
-	}
-	if !errors.Is(err, ErrRecordSubjectNotFound) {
-		return records.ResolvedSubject{}, fmt.Errorf("%w: resolve live source", ErrRecordSubjectUnavailable)
-	}
+	// Permanent retirement authority dominates any surviving or recreated live row.
+	// Only an explicit, proven history absence permits consulting live adapters.
 	if nilRecordSubjectDependency(resolver.tombstones) {
 		return records.ResolvedSubject{}, ErrRecordSubjectUnavailable
 	}
@@ -922,10 +919,17 @@ func (resolver *RecordSubjectReadResolver) Resolve(
 		sourceKind,
 		normalizedInput.Reference.SourceID,
 	)
-	if err != nil {
+	if err == nil {
+		return resolveTombstonedRecordSubject(normalizedInput, sourceKind, evidence)
+	}
+	if !errors.Is(err, ErrWitnessedRecordSubjectTombstoneNotFound) {
 		return records.ResolvedSubject{}, fmt.Errorf("%w: resolve witnessed source deletion", ErrRecordSubjectUnavailable)
 	}
-	return resolveTombstonedRecordSubject(normalizedInput, sourceKind, evidence)
+	current, err := resolver.live.Resolve(ctx, normalizedActor, normalizedInput.Reference)
+	if err != nil {
+		return records.ResolvedSubject{}, fmt.Errorf("%w: resolve live source", ErrRecordSubjectUnavailable)
+	}
+	return refreshLiveRecordSubject(normalizedInput, current)
 }
 
 func newLiveRecordSubject(
@@ -1040,6 +1044,9 @@ func resolveTombstonedRecordSubject(
 func normalizeRecordSubjectReadInput(
 	input RecordSubjectReadInput,
 ) (RecordSubjectReadInput, recordauth.SourceKind, error) {
+	if err := records.ValidateSubjectReference(input.Reference); err != nil {
+		return RecordSubjectReadInput{}, "", ErrRecordSubjectUnavailable
+	}
 	sourceKind, ok := recordSubjectSourceKind(input.Reference.Kind)
 	if !ok {
 		return RecordSubjectReadInput{}, "", ErrRecordSubjectUnavailable

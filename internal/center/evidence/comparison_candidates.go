@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 const RecommendationNearestWindow = "nearest_window"
@@ -115,7 +116,7 @@ func ResolveComparisonCandidates(
 	candidates := make([]ComparisonCandidate, 0, len(refs))
 	subjectIndex := comparisonSubjectIndex(normalizedSubjects)
 	for _, ref := range refs {
-		if _, known := subjectIndex[ref.Subject]; !known || !ValidSnapshotID(ref.SnapshotID) || !validClosedPreparedID(ref.RecordID, "rec_") {
+		if _, known := subjectIndex[ref.Subject]; !known || !ValidSnapshotID(ref.SnapshotID) || !recordidentity.IsValid(ref.RecordID) {
 			continue
 		}
 		if len(kinds) > 0 && !comparisonKindAllowed(kinds, ref.Kind) {

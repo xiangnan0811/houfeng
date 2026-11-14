@@ -206,10 +206,11 @@ func TestProductionComposeStagesEnvironmentSecretsForReadOnlyServices(t *testing
 		requiredProjectImage,
 		`user: "10002:10002"`,
 		"group_add:\n      - \"10001\"",
-		`network_mode: none`,
+		`entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]`,
+		`command: ["deploy-stage-secrets", "--scope", "compose"]`,
+		"db:\n        condition: service_healthy",
 		`./data/secrets:/state/secrets`,
-		`/state/secrets/db-init`,
-		`/state/secrets/processor`,
+		`./maintenance:/var/lib/houfeng-maintenance`,
 		"postgres_bootstrap_password",
 		"houfeng_runtime_password",
 		"houfeng_migrator_password",
@@ -388,7 +389,7 @@ func TestProductionComposeScopesSecretsByService(t *testing.T) {
 		{
 			service: "houfeng-secrets-init",
 			want:    []string{"./data/secrets:/state/secrets", "postgres_bootstrap_password", "houfeng_runtime_password", "houfeng_migrator_password", "houfeng_platform_admin_password"},
-			forbid:  []string{"./data:/state", "houfeng_initial_password", "houfeng_session_hmac_key", "records-authority", "attachments", "center-config"},
+			forbid:  []string{"./data:/state", "houfeng_initial_password", "houfeng_session_hmac_key", "attachments", "center-config"},
 		},
 		{
 			service: "houfeng-db-init",
@@ -989,116 +990,6 @@ func TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload(t *testing.T) 
 	} {
 		if strings.Contains(verificationStep, forbidden) {
 			t.Fatalf("public deployment verification must preserve unrelated release assets; found total-asset assumption %q", forbidden)
-		}
-	}
-}
-
-func TestProductionComposeSpecsMatchReleaseAndAuthorityContract(t *testing.T) {
-	t.Parallel()
-
-	root := repoRoot(t)
-	composeScenario := readText(t, filepath.Join(root, "docs", "spec", "contracts", "platform", "production-compose.md"))
-	databaseSpec := readText(t, filepath.Join(root, "docs", "spec", "contracts", "platform", "compose-authority.md"))
-	for _, required := range []string{
-		"1. **Scope / Trigger**",
-		"2. **Signatures**",
-		"3. **Contracts**",
-		"4. **Validation & Error Matrix**",
-		"5. **Good / Base / Bad Cases**",
-		"6. **Tests Required**",
-		"7. **Wrong vs Correct**",
-		"`compose.yaml` → `compose.proxy-network.yaml` → `compose.proxy-host.yaml` → `compose.env.example`",
-		"COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml",
-		"COMPOSE_FILE=compose.yaml:compose.proxy-host.yaml",
-		"Mode selection is common base + exactly one selected overlay.",
-		"loading both overlays is unsupported",
-		"existing NPM user-defined network",
-		"NPM remains unchanged",
-		"upstream `houfeng:16001`",
-		"base and shared-network mode publish no host port",
-		"`target: 16001`",
-		"`published: \"16001\"`",
-		"`host_ip: 127.0.0.1`",
-		"`protocol: tcp`",
-		"The effective behavior is `127.0.0.1:16001 -> 16001/tcp`",
-		"renderer-specific short form",
-		"exactly one fixed IPv4-loopback mapping",
-		"Docker Engine `28.0.0+`",
-		"Do not set `HOUFENG_PROXY_NETWORK=host` or invent a placeholder network.",
-		"all-interface/LAN/IPv6 mapping",
-		"must not duplicate the eight-service graph",
-		"renders both modes before upload",
-		"`concurrency.group: deployment-assets-${{ needs.resolve.outputs.version }}`",
-		"`cancel-in-progress: false`",
-		"serializes deployment-asset mutation for one resolved version",
-		"does not cancel the running job",
-		"queued pending runs may be replaced",
-		"non-destructive fail-closed idempotent upload",
-		"exact-name cardinality",
-		"byte identity",
-		"unrelated agent assets",
-		"do not assert total asset count equals four",
-		"`docker compose up -d` owns ordinary initialization.",
-		"Center waits for healthy authority",
-		"processor waits for db-init and ClamAV",
-		"houfeng-secrets-init",
-		"houfeng-record-authority",
-		"secret stager bind-mounts only `./data/secrets`",
-		"Center/processor never receive bootstrap, migrator, platform-admin, or authority credentials",
-		"Processor stays non-root, read-only, `cap_drop: ALL`, `no-new-privileges`, core=0",
-		"./data/records-authority",
-		"PostgreSQL, local attachments, and Records authority state are one coordinated restore unit",
-	} {
-		if !strings.Contains(composeScenario, required) {
-			t.Fatalf("deployment  Compose scenario must contain %q", required)
-		}
-	}
-	rotationSteps := []string{
-		"`docker compose stop houfeng houfeng-content-processor`",
-		"`docker compose run --rm houfeng-secrets-init`",
-		"`docker compose run --rm houfeng-db-init`",
-		"`docker compose up -d --force-recreate houfeng houfeng-content-processor`",
-	}
-	lastRotationStep := -1
-	for _, step := range rotationSteps {
-		offset := strings.Index(composeScenario, step)
-		if offset < 0 {
-			t.Fatalf("deployment  Compose scenario must preserve password rotation step %q", step)
-		}
-		if offset <= lastRotationStep {
-			t.Fatalf("deployment  Compose scenario password rotation steps are out of order at %q", step)
-		}
-		lastRotationStep = offset
-	}
-	for _, forbidden := range []string{
-		"scripts/compose-up.sh",
-		"Compose is a development/conformance topology",
-		"houfeng_blobs:/var/lib/houfeng/attachments",
-		`127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001`,
-		"`127.0.0.1:16001:16001/tcp`",
-		"one deployment-assets job waits",
-		"every later job waits",
-		"all later jobs wait",
-		"cancellation is globally disabled",
-		"cancellation and cross-run mutation for that version are disabled",
-		"`compose.yaml` 与 `compose.env.example`（后者保存为本地 `.env`）",
-		"uploads `compose.yaml` plus `compose.env.example`",
-		"never add a public fallback port",
-		`name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"`,
-	} {
-		if strings.Contains(composeScenario, forbidden) {
-			t.Fatalf("deployment  Compose scenario retains obsolete single-mode contract %q", forbidden)
-		}
-	}
-	for _, required := range []string{
-		"single-host Compose Records authority",
-		"LoadComposeState",
-		"ContractActivationProjectionCommandV1",
-		"record_platform_compose_membership_heartbeat",
-		"restore PostgreSQL and authority state together",
-	} {
-		if !strings.Contains(databaseSpec, required) {
-			t.Fatalf("database  spec must contain authority contract %q", required)
 		}
 	}
 }

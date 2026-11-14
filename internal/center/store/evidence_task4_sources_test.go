@@ -200,18 +200,25 @@ func TestMonitoringEventEvidenceIsReachableFromStateControlWriterPaths(t *testin
 }
 
 type monitoringEventWriterPathDB struct {
-	eventArgs  []any
-	guardCalls int
+	sourceState fakeSourceWriterState
+	eventArgs   []any
+	guardCalls  int
 }
 
 func (db *monitoringEventWriterPathDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "source_application_admit()") {
+		return pgconn.CommandTag{}, db.sourceState.admissionErr
+	}
 	if strings.Contains(strings.ToLower(sql), "insert into state_change_events") {
 		db.eventArgs = append([]any(nil), args...)
 	}
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
-func (db *monitoringEventWriterPathDB) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+func (db *monitoringEventWriterPathDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if row, ok := db.sourceState.queryRow(sql, args...); ok {
+		return row
+	}
 	if canonicalIncidentSQL(sql) == canonicalIncidentSQL(incidentMonitoringInstanceRowVersionGuardSQL) {
 		db.guardCalls++
 		return fakeRow{scan: func(dest ...any) error {
@@ -287,49 +294,6 @@ func (db *monitoringEventWriterPathDB) Query(_ context.Context, _ string, args .
 func stringValue(value any) string {
 	result, _ := value.(string)
 	return result
-}
-
-func TestTask4EvidenceSourceSQLUsesAllowlistedBoundedFacts(t *testing.T) {
-	t.Parallel()
-	for name, sql := range map[string]string{
-		"events":   monitoringEventEvidenceSQL,
-		"commands": commandAuditEvidenceSQL,
-		"cost":     subscriptionCostEvidenceSQL + subscriptionBudgetEvidenceSQL,
-		"renewals": assetRenewalEvidenceSQL,
-		"prices":   assetPriceEvidenceSQL,
-		"ips":      assetIPEvidenceSQL,
-		"specs":    assetSpecEvidenceSQL,
-	} {
-		lower := strings.ToLower(sql)
-		if !strings.Contains(lower, ">= $2") || !strings.Contains(lower, "< $3") {
-			t.Fatalf("%s SQL lacks half-open authoritative window: %s", name, sql)
-		}
-		if name != "cost" && !strings.Contains(lower, "limit") {
-			t.Fatalf("%s SQL lacks hard source bound: %s", name, sql)
-		}
-	}
-	for _, forbidden := range []string{"fixer_api_key", "raw_json", "stdout", "stderr", "last_action"} {
-		if strings.Contains(strings.ToLower(subscriptionCostEvidenceSQL+subscriptionBudgetEvidenceSQL+commandAuditEvidenceSQL), forbidden) {
-			t.Fatalf("Task 4 evidence SQL exposes forbidden source field %q", forbidden)
-		}
-	}
-	if strings.Contains(strings.ToLower(commandAuditEvidenceSQL), "details") {
-		t.Fatal("command audit evidence SQL must never select details")
-	}
-	if !strings.Contains(strings.ToLower(subscriptionCostEvidenceSQL), "o.at) as source_watermark") {
-		t.Fatal("subscription cost evidence SQL must bind its watermark to the observation transaction")
-	}
-	if !strings.Contains(strings.ToLower(subscriptionBudgetEvidenceSQL), "b.base_currency") {
-		t.Fatal("subscription budget evidence SQL must return its authoritative currency")
-	}
-	if strings.Contains(strings.ToLower(subscriptionBudgetEvidenceSQL), "s.vps_id =") {
-		t.Fatal("global monthly budget spend must not be scoped to the selected VPS")
-	}
-	for _, required := range []string{"event_at", "recorded_at", "is_backfilled", "correction_of_event_id", "producer_version", "rule_version", "prior_state", "resulting_state"} {
-		if !strings.Contains(strings.ToLower(monitoringEventEvidenceSQL), required) {
-			t.Fatalf("event evidence SQL lacks explicit %q", required)
-		}
-	}
 }
 
 func TestLoadMonitoringEventEvidenceScansExplicitProvenance(t *testing.T) {

@@ -205,11 +205,12 @@ func assertIPQualityProductSyncReplay(t *testing.T, ctx context.Context, fixture
 	report := ipQualityProductIntegrationReport(prefix, receivedAt.Add(-time.Minute), receivedAt, false)
 	report.SyncBatchID = batch.Heartbeats[0].SyncBatchID
 	batch.IPQualityReports = []ipquality.ReportWrite{report}
-	first, err := repository.ApplyBatch(ctx, prepareSyncFixture(batch))
+	batch = prepareSyncFixture(batch)
+	first, err := repository.ApplyBatch(ctx, batch)
 	if err != nil || first.Disposition != syncing.ResultDispositionRecorded {
 		t.Fatalf("first sync = %#v %v, want recorded", first, err)
 	}
-	replay, err := repository.ApplyBatch(ctx, prepareSyncFixture(batch))
+	replay, err := repository.ApplyBatch(ctx, batch)
 	if err != nil || replay.Disposition != syncing.ResultDispositionExactDuplicate {
 		t.Fatalf("replay = %#v %v, want exact duplicate", replay, err)
 	}
@@ -220,7 +221,7 @@ func assertIPQualityProductSyncReplay(t *testing.T, ctx context.Context, fixture
 			(select count(*)::int from public.ip_quality_intelligence i
 				join public.ip_quality_reports r on r.report_id = i.report_id
 				where r.monitoring_instance_id = $1 and r.sync_batch_id = $2)`,
-		"mi_"+prefix, report.SyncBatchID).Scan(&reports, &jobs); err != nil {
+		"mi_"+prefix, batch.IPQualityReports[0].SyncBatchID).Scan(&reports, &jobs); err != nil {
 		t.Fatal(err)
 	}
 	if reports != 1 || jobs != 1 {

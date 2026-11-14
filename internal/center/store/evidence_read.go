@@ -17,6 +17,8 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/records"
 )
 
@@ -66,12 +68,13 @@ func NewPostgresEvidenceRepositoryWithReadSources(
 	registry evidence.Registry,
 	current records.CurrentRecordAuthorizationSource,
 	subjects *RecordSubjectReadResolver,
+	continuity recordbirth.ContinuitySource,
 ) (*PostgresEvidenceRepository, error) {
 	if pool == nil || nilRecordSubjectDependency(gate) || len(registry.Keys()) == 0 ||
 		nilRecordSubjectDependency(current) || nilRecordSubjectDependency(subjects) {
 		return nil, evidence.ErrEvidenceServiceUnavailable
 	}
-	repository := NewPostgresEvidenceRepository(pool, gate)
+	repository := NewPostgresEvidenceRepository(pool, gate, continuity)
 	repository.registry = registry
 	repository.current = current
 	repository.subjects = subjects
@@ -156,7 +159,7 @@ func (repository *PostgresEvidenceRepository) loadAndAuthorizeEvidenceSnapshot(
 		return persistedEvidenceSnapshot{}, recordauth.ResourceScope{}, recordauth.SourceAuthorization{}, false,
 			evidence.CanonicalSnapshot{}, err
 	}
-	if persisted.snapshotID != snapshotID || !validEvidenceStoreID(persisted.recordID, "rec_") || !persisted.referenced ||
+	if persisted.snapshotID != snapshotID || !recordidentity.IsValid(persisted.recordID) || !persisted.referenced ||
 		persisted.payloadDigest == [sha256.Size]byte{} || persisted.envelope.CanonicalHash != persisted.payloadDigest {
 		return persistedEvidenceSnapshot{}, recordauth.ResourceScope{}, recordauth.SourceAuthorization{}, false,
 			evidence.CanonicalSnapshot{}, evidence.ErrSnapshotNotFound
@@ -342,7 +345,7 @@ const fullEvidenceSnapshotReadSQL = `select ` + evidenceSnapshotReadColumns + `,
 	join public.evidence_payloads as payload on payload.payload_digest = snapshot.payload_digest
 	where snapshot.snapshot_id = $1`
 
-func scanPersistedEvidenceSnapshotRow(row pgx.Row, value *persistedEvidenceSnapshotRow, withPayload bool) error {
+func persistedEvidenceSnapshotScanDestinations(value *persistedEvidenceSnapshotRow, withPayload bool) []any {
 	destinations := []any{
 		&value.recordID, &value.snapshotID, &value.kind, &value.schemaVersion,
 		&value.sourceKind, &value.sourceID, &value.subjectJSON, &value.sourceJSON,
@@ -360,11 +363,15 @@ func scanPersistedEvidenceSnapshotRow(row pgx.Row, value *persistedEvidenceSnaps
 	if withPayload {
 		destinations = append(destinations, &value.compressedPayload)
 	}
-	return row.Scan(destinations...)
+	return destinations
+}
+
+func scanPersistedEvidenceSnapshotRow(row pgx.Row, value *persistedEvidenceSnapshotRow, withPayload bool) error {
+	return row.Scan(persistedEvidenceSnapshotScanDestinations(value, withPayload)...)
 }
 
 func decodePersistedEvidenceSnapshot(row persistedEvidenceSnapshotRow, withPayload bool) (persistedEvidenceSnapshot, error) {
-	if !validEvidenceStoreID(row.recordID, "rec_") || !evidence.ValidSnapshotID(row.snapshotID) ||
+	if !recordidentity.IsValid(row.recordID) || !evidence.ValidSnapshotID(row.snapshotID) ||
 		row.schemaVersion < 1 || row.schemaVersion > int64(^uint16(0)) ||
 		row.sourceKind == "" || row.sourceID == "" || len(row.authorizationDigest) != sha256.Size ||
 		len(row.sourceDigest) != sha256.Size || len(row.canonicalHash) != sha256.Size || len(row.payloadDigest) != sha256.Size ||
@@ -424,23 +431,34 @@ func decodePersistedEvidenceSnapshot(row persistedEvidenceSnapshotRow, withPaylo
 	if !withPayload {
 		return persisted, nil
 	}
-	if int64(len(row.compressedPayload)) != row.payloadCompressedSize {
-		return persistedEvidenceSnapshot{}, ErrEvidencePersistenceConflict
-	}
-	reader, err := gzip.NewReader(bytes.NewReader(row.compressedPayload))
+	canonical, err := decodeEvidencePayloadBytes(row.compressedPayload, row.payloadCanonicalSize, row.payloadCompressedSize, payloadDigest)
 	if err != nil {
 		return persistedEvidenceSnapshot{}, err
 	}
-	canonical, readErr := io.ReadAll(io.LimitReader(reader, int64(evidence.MaxCanonicalPayloadBytes)+1))
-	closeErr := reader.Close()
-	if readErr != nil || closeErr != nil || int64(len(canonical)) != row.payloadCanonicalSize ||
-		uint64(len(canonical)) > evidence.MaxCanonicalPayloadBytes || evidence.CanonicalPayloadDigest(canonical) != payloadDigest {
-		return persistedEvidenceSnapshot{}, ErrEvidencePersistenceConflict
-	}
-	deterministic, err := deterministicEvidenceGzip(canonical)
-	if err != nil || !bytes.Equal(deterministic, row.compressedPayload) {
-		return persistedEvidenceSnapshot{}, ErrEvidencePersistenceConflict
-	}
 	persisted.canonicalPayload = canonical
 	return persisted, nil
+}
+
+// A payload digest is only an address until the stored gzip has been decoded
+// and its full canonical content has been checked against that address.
+func decodeEvidencePayloadBytes(compressed []byte, canonicalSize, compressedSize int64, digest [sha256.Size]byte) ([]byte, error) {
+	if canonicalSize < 1 || uint64(canonicalSize) > evidence.MaxCanonicalPayloadBytes || compressedSize < 1 ||
+		uint64(compressedSize) > maxEvidenceCompressedBytes || int64(len(compressed)) != compressedSize {
+		return nil, ErrEvidencePersistenceConflict
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		return nil, ErrEvidencePersistenceConflict
+	}
+	canonical, readErr := io.ReadAll(io.LimitReader(reader, int64(evidence.MaxCanonicalPayloadBytes)+1))
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil || int64(len(canonical)) != canonicalSize ||
+		uint64(len(canonical)) > evidence.MaxCanonicalPayloadBytes || evidence.CanonicalPayloadDigest(canonical) != digest {
+		return nil, ErrEvidencePersistenceConflict
+	}
+	deterministic, err := deterministicEvidenceGzip(canonical)
+	if err != nil || !bytes.Equal(deterministic, compressed) {
+		return nil, ErrEvidencePersistenceConflict
+	}
+	return canonical, nil
 }

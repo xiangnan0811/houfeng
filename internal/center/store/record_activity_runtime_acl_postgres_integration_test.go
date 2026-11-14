@@ -25,8 +25,8 @@ func TestPostgresIntegrationRecordActivityRuntimeACL(t *testing.T) {
 	}
 
 	base := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	firstCandidate := newActivityCandidate(t, "rac_runtime_acl_first", base)
-	first, err := PublishActivityBatch(ctx, runtimePool, 1, []activity.CandidateEvent{firstCandidate})
+	firstCandidate := newActivityCandidate(t, fixture.db, "rac_runtime_acl_first", base)
+	first, err := publishActivityTestBatch(t, ctx, runtimePool, 1, []activity.CandidateEvent{firstCandidate})
 	if err != nil {
 		assertRecordActivityRuntimeState(t, ctx, fixture, 0, 0, 0)
 		failRecordActivityPostgresOperation(t, "first activity publish", err)
@@ -51,10 +51,10 @@ func TestPostgresIntegrationRecordActivityRuntimeACL(t *testing.T) {
 	drifted.Presentation.Title = "canonical hash mismatch"
 	drifted.CanonicalHash = drifted.ComputeCanonicalHash()
 	mismatchBatch := []activity.CandidateEvent{
-		newActivityCandidate(t, "rac_runtime_acl_rolled_back", base.Add(30*time.Second)),
+		newActivityCandidate(t, fixture.db, "rac_runtime_acl_rolled_back", base.Add(30*time.Second)),
 		drifted,
 	}
-	if _, err := PublishActivityBatch(ctx, runtimePool, 1, mismatchBatch); !errors.Is(err, ErrActivitySourceHashMismatch) {
+	if _, err := publishActivityTestBatch(t, ctx, runtimePool, 1, mismatchBatch); !errors.Is(err, ErrActivitySourceHashMismatch) {
 		if err != nil {
 			failRecordActivityPostgresOperation(t, "canonical hash mismatch", err)
 		}
@@ -65,8 +65,8 @@ func TestPostgresIntegrationRecordActivityRuntimeACL(t *testing.T) {
 	assertRecordActivityCanonicalHashes(t, ctx, fixture, firstCandidate)
 
 	concurrentCandidates := []activity.CandidateEvent{
-		newActivityCandidate(t, "rac_runtime_acl_concurrent_a", base.Add(time.Minute)),
-		newActivityCandidate(t, "rac_runtime_acl_concurrent_b", base.Add(2*time.Minute)),
+		newActivityCandidate(t, fixture.db, "rac_runtime_acl_concurrent_a", base.Add(time.Minute)),
+		newActivityCandidate(t, fixture.db, "rac_runtime_acl_concurrent_b", base.Add(2*time.Minute)),
 	}
 	type publishOutcome struct {
 		result ActivityPublishResult
@@ -81,7 +81,7 @@ func TestPostgresIntegrationRecordActivityRuntimeACL(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			<-start
-			result, err := PublishActivityBatch(ctx, runtimePool, 1, []activity.CandidateEvent{candidate})
+			result, err := publishActivityTestBatch(t, ctx, runtimePool, 1, []activity.CandidateEvent{candidate})
 			outcomes <- publishOutcome{result: result, err: err}
 		}()
 	}
@@ -107,7 +107,7 @@ func TestPostgresIntegrationRecordActivityRuntimeACL(t *testing.T) {
 	assertActivitySequencesAreContiguous(t, ctx, fixture.db, 1, 3)
 	assertRecordActivityCanonicalHashes(t, ctx, fixture, append([]activity.CandidateEvent{firstCandidate}, concurrentCandidates...)...)
 
-	continuation := newActivityCandidate(t, "rac_runtime_acl_continuation", base.Add(3*time.Minute))
+	continuation := newActivityCandidate(t, fixture.db, "rac_runtime_acl_continuation", base.Add(3*time.Minute))
 	continued := requireRecordActivityRuntimePublishSuccess(
 		t, ctx, runtimePool, "continued activity publish", []activity.CandidateEvent{continuation},
 	)
@@ -134,7 +134,7 @@ func requireRecordActivityRuntimePublishSuccess(
 	candidates []activity.CandidateEvent,
 ) ActivityPublishResult {
 	t.Helper()
-	result, err := PublishActivityBatch(ctx, runtimePool, 1, candidates)
+	result, err := publishActivityTestBatch(t, ctx, runtimePool, 1, candidates)
 	if err != nil {
 		failRecordActivityPostgresOperation(t, phase, err)
 	}

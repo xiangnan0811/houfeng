@@ -104,7 +104,7 @@ func TestRecordAuthNormalizeVisibilityScopeKeepsProjectAndEmptyRestrictedDistinc
 	}
 }
 
-func TestRecordAuthNormalizeSourceAuthorizationRejectsTombstonedFloorWiderThanCapture(t *testing.T) {
+func TestRecordAuthNormalizeSourceAuthorizationRejectsTombstonedFloorWiderThanLastLive(t *testing.T) {
 	capture := mustVisibility(t, VisibilityKindRestricted, nil, []string{testGroupAlpha})
 	floor := mustVisibility(t, VisibilityKindProject, nil, nil)
 
@@ -163,7 +163,7 @@ func TestRecordAuthNormalizeSourceAuthorizationEnforcesTombstoneTransitionWitnes
 			wantErr: true,
 		},
 		{
-			name: "last live scope cannot widen capture",
+			name: "last live scope may widen historical capture",
 			source: SourceAuthorization{
 				Version:       SourceAuthorizationVersionV1,
 				Kind:          SourceKindVPS,
@@ -173,7 +173,6 @@ func TestRecordAuthNormalizeSourceAuthorizationEnforcesTombstoneTransitionWitnes
 				FinalFloor:    ptrVisibility(viewerGroup),
 				LastLiveScope: ptrVisibility(project),
 			},
-			wantErr: true,
 		},
 		{
 			name: "final floor may match prior live scope",
@@ -238,6 +237,26 @@ func TestRecordAuthNormalizeSourceAuthorizationEnforcesTombstoneTransitionWitnes
 				t.Fatalf("NormalizeSourceAuthorization() error = %v, want nil", err)
 			}
 		})
+	}
+}
+
+func TestRecordAuthNormalizeTombstoneCanonicalizesNarrowHistoricalCapture(t *testing.T) {
+	project := mustVisibility(t, VisibilityKindProject, nil, nil)
+	capture := mustVisibility(t, VisibilityKindRestricted, nil, []string{testGroupAlpha, testGroupBeta})
+	floor := mustVisibility(t, VisibilityKindRestricted, nil, []string{testGroupBeta, "rag_gamma"})
+	canonical := mustTombstonedSource(t, capture, project, floor)
+	input := canonical
+	input.CaptureScope.AllowedGroupIDs = []string{testGroupBeta, testGroupAlpha}
+
+	got, err := NormalizeSourceAuthorization(input)
+	if err != nil {
+		t.Fatalf("NormalizeSourceAuthorization() error = %v, want nil", err)
+	}
+	if !slices.Equal(got.CaptureScope.AllowedGroupIDs, []string{testGroupAlpha, testGroupBeta}) ||
+		!bytes.Equal(got.LastLiveScope.CanonicalBytes(), project.CanonicalBytes()) ||
+		!bytes.Equal(got.FinalFloor.CanonicalBytes(), floor.CanonicalBytes()) ||
+		got.Digest != canonical.Digest {
+		t.Fatal("equivalent tombstone evidence did not produce the expected canonical scopes and digest")
 	}
 }
 
@@ -489,6 +508,68 @@ func TestRecordAuthPolicyProjectAdminRespectsRestrictedScopeIntersection(t *test
 			}
 			if reason, ok := DenialReasonFromError(err); !ok || reason != tt.wantReason {
 				t.Fatalf("DenialReasonFromError() = (%q, %t), want (%q, true)", reason, ok, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestRecordAuthPolicyTombstoneIntersectsHistoricalCaptureAndFinalFloor(t *testing.T) {
+	project := mustVisibility(t, VisibilityKindProject, nil, nil)
+	capture := mustVisibility(t, VisibilityKindRestricted, nil, []string{testGroupAlpha, testGroupBeta})
+	floor := mustVisibility(t, VisibilityKindRestricted, nil, []string{testGroupBeta, "rag_gamma"})
+	resource := mustResource(t, project, mustTombstonedSource(t, capture, project, floor))
+
+	tests := []struct {
+		name      string
+		groups    []string
+		wantAllow bool
+	}{
+		{name: "in capture and floor", groups: []string{testGroupBeta}, wantAllow: true},
+		{name: "outside capture", groups: []string{"rag_gamma"}},
+		{name: "outside final floor", groups: []string{testGroupAlpha}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (Policy{}).Authorize(mustActor(t, RoleViewer, tt.groups), CapabilityRecordRead, resource)
+			if tt.wantAllow {
+				if err != nil {
+					t.Fatalf("Authorize() error = %v, want nil", err)
+				}
+			} else if !errors.Is(err, ErrDenied) {
+				t.Fatalf("Authorize() error = %v, want errors.Is(ErrDenied)", err)
+			}
+		})
+	}
+}
+
+func TestRecordAuthPolicyRejectsMalformedTombstoneWithBroadLastLive(t *testing.T) {
+	project := mustVisibility(t, VisibilityKindProject, nil, nil)
+	capture := mustVisibility(t, VisibilityKindRestricted, nil, []string{testGroupAlpha, testGroupBeta})
+	floor := mustVisibility(t, VisibilityKindRestricted, nil, []string{testGroupBeta, "rag_gamma"})
+	tests := []struct {
+		name   string
+		tamper func(*SourceAuthorization)
+	}{
+		{
+			name: "noncanonical final floor",
+			tamper: func(source *SourceAuthorization) {
+				source.FinalFloor.AllowedGroupIDs = []string{"rag_gamma", testGroupBeta}
+			},
+		},
+		{
+			name: "incorrect digest",
+			tamper: func(source *SourceAuthorization) {
+				source.Digest[0] ^= 0xff
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource := mustResource(t, project, mustTombstonedSource(t, capture, project, floor))
+			tt.tamper(&resource.Sources[0])
+			err := (Policy{}).Authorize(mustActor(t, RoleViewer, []string{testGroupBeta}), CapabilityRecordRead, resource)
+			if !errors.Is(err, ErrDenied) {
+				t.Fatalf("Authorize() error = %v, want errors.Is(ErrDenied)", err)
 			}
 		})
 	}

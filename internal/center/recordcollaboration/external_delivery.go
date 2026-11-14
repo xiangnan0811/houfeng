@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
 	"net/url"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 
 	"houfeng/internal/center/notify"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -53,7 +55,7 @@ func (delivery SafeExternalDelivery) Validate() error {
 	recordID := strings.TrimPrefix(parsed.Path, "/records/")
 	values := parsed.Query()
 	notificationValues, exists := values["notification"]
-	if !validRecordID(recordID) || !exists || len(values) != 1 || len(notificationValues) != 1 ||
+	if !recordidentity.IsValid(recordID) || !exists || len(values) != 1 || len(notificationValues) != 1 ||
 		!validNotificationID(notificationValues[0]) {
 		return ErrInvalidSafeExternalDelivery
 	}
@@ -175,7 +177,7 @@ func validScopedTransportBindingID(value string) bool {
 }
 
 func RenderSafeExternalDelivery(baseURL, recordID, notificationID string) (SafeExternalDelivery, error) {
-	if !validRecordID(recordID) || !validNotificationID(notificationID) {
+	if !recordidentity.IsValid(recordID) || !validNotificationID(notificationID) {
 		return SafeExternalDelivery{}, ErrInvalidSafeExternalDelivery
 	}
 	parsed, err := url.Parse(baseURL)
@@ -245,18 +247,22 @@ const (
 )
 
 type ExternalDeliveryOutboxResult struct {
-	Disposition ExternalDeliveryOutboxDisposition
-	RetryAfter  time.Duration
+	Disposition    ExternalDeliveryOutboxDisposition
+	RetryAfter     time.Duration
+	QueueFinalized bool
+	NextAttemptAt  time.Time
 }
 
 func (result ExternalDeliveryOutboxResult) Validate() error {
 	switch result.Disposition {
 	case ExternalDeliveryOutboxComplete, ExternalDeliveryOutboxCancel:
-		if result.RetryAfter != 0 {
+		if result.RetryAfter != 0 || !result.NextAttemptAt.IsZero() {
 			return ErrInvalidExternalDeliveryResult
 		}
 	case ExternalDeliveryOutboxRetry:
-		if result.RetryAfter.Microseconds() <= 0 {
+		if result.RetryAfter.Microseconds() <= 0 ||
+			(result.QueueFinalized && (result.NextAttemptAt.IsZero() || result.NextAttemptAt.Location() != time.UTC)) ||
+			(!result.QueueFinalized && !result.NextAttemptAt.IsZero()) {
 			return ErrInvalidExternalDeliveryResult
 		}
 	default:
@@ -284,7 +290,7 @@ type ExternalDeliveryAttempt struct {
 }
 
 func (attempt ExternalDeliveryAttempt) Validate() error {
-	if ValidateNotificationDeliveryID(attempt.DeliveryID) != nil || !validRecordID(attempt.RecordID) ||
+	if ValidateNotificationDeliveryID(attempt.DeliveryID) != nil || !recordidentity.IsValid(attempt.RecordID) ||
 		!validNotificationID(attempt.NotificationID) || recordauth.ValidateActorUserID(attempt.RecipientUserID) != nil ||
 		ValidateNotificationDeliveryChannel(attempt.Channel) != nil || !validScopedTransportBindingID(attempt.BindingID) ||
 		attempt.SourceVersion == 0 || attempt.SourceVersion > math.MaxInt64 ||
@@ -296,14 +302,75 @@ func (attempt ExternalDeliveryAttempt) Validate() error {
 	return nil
 }
 
+// ExternalDeliveryReportingCapability is held only by the sender that started
+// the attempt. Its bytes are transported solely to the restricted SQL command.
+type ExternalDeliveryReportingCapability struct {
+	bytes [32]byte
+	valid bool
+}
+
+func ParseExternalDeliveryReportingCapability(raw []byte) (ExternalDeliveryReportingCapability, error) {
+	if len(raw) != 32 {
+		return ExternalDeliveryReportingCapability{}, ErrInvalidExternalDeliveryResult
+	}
+	var capability ExternalDeliveryReportingCapability
+	copy(capability.bytes[:], raw)
+	capability.valid = true
+	return capability, nil
+}
+
+func (capability ExternalDeliveryReportingCapability) Validate() error {
+	if !capability.valid {
+		return ErrInvalidExternalDeliveryResult
+	}
+	return nil
+}
+
+// SQLHex exposes the capability only for the bounded outcome command payload.
+func (capability ExternalDeliveryReportingCapability) SQLHex() string {
+	if !capability.valid {
+		return ""
+	}
+	return hex.EncodeToString(capability.bytes[:])
+}
+
+func (ExternalDeliveryReportingCapability) String() string   { return "[redacted]" }
+func (ExternalDeliveryReportingCapability) GoString() string { return "[redacted]" }
+func (ExternalDeliveryReportingCapability) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte("[redacted]"))
+}
+func (ExternalDeliveryReportingCapability) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("external delivery reporting capability cannot be serialized")
+}
+
+type ExternalDeliveryFactLocator struct {
+	AttemptID      string
+	EvidenceDigest [32]byte
+}
+
+func (locator ExternalDeliveryFactLocator) Validate() error {
+	if len(locator.AttemptID) != len("rna_")+64 || ValidateNotificationDeliveryAttemptID(locator.AttemptID) != nil ||
+		locator.EvidenceDigest == ([32]byte{}) {
+		return ErrInvalidExternalDeliveryResult
+	}
+	for _, character := range locator.AttemptID[len("rna_"):] {
+		if (character < 'a' || character > 'f') && (character < '0' || character > '9') {
+			return ErrInvalidExternalDeliveryResult
+		}
+	}
+	return nil
+}
+
 type PreparedExternalDelivery struct {
-	Attempt ExternalDeliveryAttempt
-	Binding ScopedTransportBinding
-	Message SafeExternalDelivery
+	Attempt             ExternalDeliveryAttempt
+	ReportingCapability ExternalDeliveryReportingCapability
+	Binding             ScopedTransportBinding
+	Message             SafeExternalDelivery
 }
 
 func (prepared PreparedExternalDelivery) Validate() error {
-	if prepared.Attempt.Validate() != nil || prepared.Binding.Validate() != nil || prepared.Message.Validate() != nil {
+	if prepared.Attempt.Validate() != nil || prepared.ReportingCapability.Validate() != nil ||
+		prepared.Binding.Validate() != nil || prepared.Message.Validate() != nil {
 		return ErrInvalidExternalDeliveryResult
 	}
 	if prepared.Binding.ProjectID != recordauth.ProjectIDDefault ||
@@ -330,8 +397,9 @@ func (preparation ExternalDeliveryPreparation) Validate() error {
 }
 
 type ExternalDeliveryStore interface {
-	PrepareExternalDelivery(context.Context, recordplatform.ClaimedOutboxEventV1, string) (ExternalDeliveryPreparation, error)
-	FinalizeExternalDelivery(context.Context, recordplatform.ClaimedOutboxEventV1, ExternalDeliveryAttempt, ExternalDeliveryProviderOutcome, time.Duration) (ExternalDeliveryOutboxResult, error)
+	PrepareExternalDelivery(context.Context, recordplatform.ClaimedOutboxEventV1, string, time.Duration) (ExternalDeliveryPreparation, error)
+	ReportExternalDeliveryOutcome(context.Context, recordplatform.ClaimedOutboxEventV1, ExternalDeliveryAttempt, ExternalDeliveryReportingCapability, ExternalDeliveryProviderOutcome) (ExternalDeliveryFactLocator, error)
+	FinalizeExternalDelivery(context.Context, recordplatform.ClaimedOutboxEventV1, ExternalDeliveryAttempt, ExternalDeliveryFactLocator, time.Duration) (ExternalDeliveryOutboxResult, error)
 }
 
 type ScopedExternalDeliveryProcessorOptions struct {
@@ -367,7 +435,7 @@ func (processor *ScopedExternalDeliveryProcessor) ProcessExternalDelivery(ctx co
 		claim.Event.SubjectKind != recordplatform.OutboxSubjectKindDelivery {
 		return ExternalDeliveryOutboxResult{}, ErrInvalidExternalDeliveryProcessor
 	}
-	preparation, err := processor.store.PrepareExternalDelivery(ctx, claim, processor.options.PublicBaseURL)
+	preparation, err := processor.store.PrepareExternalDelivery(ctx, claim, processor.options.PublicBaseURL, processor.options.RetryBaseDelay)
 	if err != nil {
 		return ExternalDeliveryOutboxResult{}, err
 	}
@@ -407,6 +475,17 @@ func (processor *ScopedExternalDeliveryProcessor) ProcessExternalDelivery(ctx co
 	if outcome.Validate() != nil {
 		outcome = ExternalDeliveryProviderUnknownOutcome
 	}
+	// Reporting is a separate durable transaction and remains possible after the
+	// sender loses its queue lease or the caller cancels while I/O is in flight.
+	reportCtx, cancelReport := context.WithTimeout(context.WithoutCancel(ctx), MaxExternalDeliverySendTimeout)
+	fact, err := processor.store.ReportExternalDeliveryOutcome(reportCtx, claim, prepared.Attempt, prepared.ReportingCapability, outcome)
+	cancelReport()
+	if err != nil {
+		return ExternalDeliveryOutboxResult{}, err
+	}
+	if fact.Validate() != nil || fact.AttemptID != NotificationDeliveryAttemptID(prepared.Attempt.DeliveryID, prepared.Attempt.Attempt) {
+		return ExternalDeliveryOutboxResult{}, ErrInvalidExternalDeliveryResult
+	}
 	retryAfter := time.Duration(0)
 	if outcome == ExternalDeliveryProviderTemporaryFailure && prepared.Attempt.Attempt < MaxNotificationDeliveryAttempts {
 		var retryable bool
@@ -415,7 +494,16 @@ func (processor *ScopedExternalDeliveryProcessor) ProcessExternalDelivery(ctx co
 			return ExternalDeliveryOutboxResult{}, ErrInvalidExternalDeliveryResult
 		}
 	}
-	return processor.store.FinalizeExternalDelivery(ctx, claim, prepared.Attempt, outcome, retryAfter)
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), MaxExternalDeliverySendTimeout)
+	defer cancelFinalize()
+	result, err := processor.store.FinalizeExternalDelivery(finalizeCtx, claim, prepared.Attempt, fact, retryAfter)
+	if err != nil {
+		return ExternalDeliveryOutboxResult{}, err
+	}
+	if !result.QueueFinalized || result.Validate() != nil {
+		return ExternalDeliveryOutboxResult{}, ErrInvalidExternalDeliveryResult
+	}
+	return result, nil
 }
 
 func nilExternalDeliveryDependency(dependency any) bool {

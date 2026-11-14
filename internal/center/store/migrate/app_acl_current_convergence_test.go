@@ -20,18 +20,10 @@ func TestConvergeAppACLCurrentRejectsMissingFragmentBeforeBeginTx(t *testing.T) 
 	fsys["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}
 	beginCalls := 0
 
-	_, err := convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-			beginCalls++
-			return nil, errors.New("begin must not run")
-		},
-		"houfeng_center_runtime",
-		"houfeng_platform_admin",
-		fsys,
-		nil,
-		appACLCurrentConvergenceTestDependencies(),
-	)
+	_, err := convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+		beginCalls++
+		return nil, errors.New("begin must not run")
+	}, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, fsys, nil, appACLCurrentConvergenceTestDependencies())
 	if err == nil || !strings.Contains(err.Error(), `migration "0052_future.sql" has no current APP ACL fragment`) {
 		t.Fatalf("convergeAppACLCurrentWithDependencies() error = %v, want missing-fragment rejection", err)
 	}
@@ -46,21 +38,13 @@ func TestConvergeAppACLCurrentRegisteredFutureMigrationReachesBeginTx(t *testing
 	beginErr := errors.New("begin sentinel")
 	beginCalls := 0
 
-	_, err := convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-			beginCalls++
-			return nil, beginErr
-		},
-		"houfeng_center_runtime",
-		"houfeng_platform_admin",
-		fsys,
-		[]AppACLCurrentMigrationFragment{{
-			Migration:  "0052_future.sql",
-			Privileges: func(string) []AppACLPrivilege { return nil },
-		}},
-		appACLCurrentConvergenceTestDependencies(),
-	)
+	_, err := convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+		beginCalls++
+		return nil, beginErr
+	}, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, fsys, []AppACLCurrentMigrationFragment{{
+		Migration:  "0052_future.sql",
+		Privileges: func(string) []AppACLPrivilege { return nil },
+	}}, appACLCurrentConvergenceTestDependencies())
 	if !errors.Is(err, beginErr) {
 		t.Fatalf("convergeAppACLCurrentWithDependencies() error = %v, want wrapped begin sentinel", err)
 	}
@@ -70,15 +54,7 @@ func TestConvergeAppACLCurrentRegisteredFutureMigrationReachesBeginTx(t *testing
 }
 
 func TestConvergeAppACLCurrentRejectsNilTransaction(t *testing.T) {
-	_, err := convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return nil, nil },
-		"houfeng_center_runtime",
-		"houfeng_platform_admin",
-		appACLCurrentTestMigrationFS(t),
-		nil,
-		appACLCurrentConvergenceTestDependencies(),
-	)
+	_, err := convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return nil, nil }, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, appACLCurrentTestMigrationFS(t), nil, appACLCurrentConvergenceTestDependencies())
 	if err == nil || !strings.Contains(err.Error(), "begin current app ACL convergence transaction returned nil transaction") {
 		t.Fatalf("nil transaction error = %v, want defensive rejection", err)
 	}
@@ -150,15 +126,7 @@ func TestConvergeAppACLCurrentDifferentBaselineRequiresRebuildBeforeMutation(t *
 	}
 	_ = currentCatalog
 
-	_, err = convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
-		"houfeng_center_runtime",
-		"houfeng_platform_admin",
-		fsys,
-		fragments,
-		dependencies,
-	)
+	_, err = convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, fsys, fragments, dependencies)
 	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
 		t.Fatalf("convergeAppACLCurrentWithDependencies() error = %v, want rebuild-required sentinel", err)
 	}
@@ -240,15 +208,7 @@ func TestConvergeAppACLCurrentSuccessorManifestRequiresRebuildBeforeCatalogRead(
 		return AppACLEffectiveCatalogSnapshotR1{}, nil
 	}
 
-	_, err = convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
-		"houfeng_center_runtime",
-		"houfeng_platform_admin",
-		fsys,
-		nil,
-		dependencies,
-	)
+	_, err = convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, fsys, nil, dependencies)
 	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
 		t.Fatalf("successor manifest error = %v, want rebuild-required sentinel", err)
 	}
@@ -303,15 +263,7 @@ func TestConvergeAppACLCurrentExactRepeatOmitsMutation(t *testing.T) {
 	}
 
 	var options pgx.TxOptions
-	result, err := convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(_ context.Context, got pgx.TxOptions) (pgx.Tx, error) { options = got; return tx, nil },
-		"houfeng_center_runtime",
-		"houfeng_platform_admin",
-		fsys,
-		fragments,
-		dependencies,
-	)
+	result, err := convergeAppACLCurrentWithDependencies(context.Background(), func(_ context.Context, got pgx.TxOptions) (pgx.Tx, error) { options = got; return tx, nil }, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, fsys, fragments, dependencies)
 	if err != nil {
 		t.Fatalf("convergeAppACLCurrentWithDependencies() error = %v", err)
 	}
@@ -384,15 +336,7 @@ func TestConvergeAppACLCurrentFreshUsesSerializableTransaction(t *testing.T) {
 	}
 
 	var options pgx.TxOptions
-	result, err := convergeAppACLCurrentWithDependencies(
-		context.Background(),
-		func(_ context.Context, got pgx.TxOptions) (pgx.Tx, error) { options = got; return tx, nil },
-		"houfeng_center_runtime",
-		"houfeng_platform_admin",
-		fsys,
-		nil,
-		dependencies,
-	)
+	result, err := convergeAppACLCurrentWithDependencies(context.Background(), func(_ context.Context, got pgx.TxOptions) (pgx.Tx, error) { options = got; return tx, nil }, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, fsys, nil, dependencies)
 	if err != nil {
 		t.Fatalf("convergeAppACLCurrentWithDependencies() error = %v", err)
 	}
@@ -701,11 +645,11 @@ func appACLCurrentConvergenceExpected(
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := compileAppACLCurrentCatalogContract(sources, "houfeng", appACLCurrentCatalogTestBindings(), "houfeng_migrator")
+	catalog, err := compileAppACLCurrentCatalogContract(sources, "houfeng", appACLCurrentCatalogTestBindingsV2(), "houfeng_migrator")
 	if err != nil {
 		t.Fatal(err)
 	}
-	privileges, err := CanonicalPrivilegeSetBodyV1(catalog.RoleBindings, catalog.Privileges)
+	privileges, err := canonicalPrivilegeSetBodyForBindings(catalog.RoleBindings, catalog.Privileges)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,8 +659,8 @@ func appACLCurrentConvergenceExpected(
 func appACLCurrentConvergenceTestDependencies() appACLCurrentConvergenceDependencies {
 	return appACLCurrentConvergenceDependencies{
 		readDatabaseName: func(context.Context, pgx.Tx) (string, error) { return "houfeng", nil },
-		resolveRoles: func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error) {
-			return platformmigrate.AppRoleSetV1{CenterRuntime: "houfeng_center_runtime", PlatformAdmin: "houfeng_platform_admin", Migrator: "houfeng_migrator"}, nil
+		resolveRoles: func(context.Context, pgx.Tx, string, string, string) (platformmigrate.AppRoleSetV2, error) {
+			return platformmigrate.AppRoleSetV2{CenterRuntime: "houfeng_center_runtime", PlatformAdmin: "houfeng_platform_admin", DeletionWorker: "houfeng_record_deletion_worker", Migrator: "houfeng_migrator"}, nil
 		},
 		rejectMisplaced: func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error { return nil },
 		rejectLegacy: func(context.Context, pgx.Tx, migrationSourceSnapshot, appACLEffectiveCatalogContract, string) error {

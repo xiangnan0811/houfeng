@@ -22,16 +22,28 @@ const DefaultWorkerInterval = time.Minute
 // waste the lease exists to prevent.
 const DefaultSourceLeaseTTL = 5 * time.Minute
 
-// SourceLeases hands out the right to project one source at a time.
-//
-// This is a scheduling contract, not a safety one. Concurrent projection of one
-// source is already correct: allocation is contiguous under the head lock,
-// publication is keyed on source identity, and a checkpoint refuses to move
-// backwards. The lease exists so two processes do not spend their passes scanning
-// the same window and contending on the same head row.
+// ErrSourceLeaseLost means the observed owner or expiry no longer authorizes effects.
+var ErrSourceLeaseLost = errors.New("activity source lease lost")
+
+// SourceLease identifies one exact observation of a source claim. Renewing or
+// taking over the lease invalidates earlier observations, including the same owner.
+type SourceLease struct {
+	Generation uint64
+	Kind       SourceKind
+	OwnerID    string
+	ExpiresAt  time.Time
+}
+
+func (lease SourceLease) Validate() error {
+	if lease.Generation == 0 || !ValidSourceKind(lease.Kind) || !ValidOwnerID(lease.OwnerID) || lease.ExpiresAt.IsZero() {
+		return errors.New("invalid activity source lease")
+	}
+	return nil
+}
+
 type SourceLeases interface {
-	AcquireSourceLease(ctx context.Context, generation uint64, kind SourceKind, ownerID string, ttl time.Duration) (bool, error)
-	ReleaseSourceLease(ctx context.Context, generation uint64, kind SourceKind, ownerID string) error
+	AcquireSourceLease(ctx context.Context, generation uint64, kind SourceKind, ownerID string, ttl time.Duration) (SourceLease, bool, error)
+	ReleaseSourceLease(ctx context.Context, lease SourceLease) error
 }
 
 // GenerationStore reports which generation is currently being published into.
@@ -160,7 +172,7 @@ func (worker *Worker) runPass(ctx context.Context) {
 }
 
 func (worker *Worker) projectOneSource(ctx context.Context, generation uint64, kind SourceKind) {
-	acquired, err := worker.leases.AcquireSourceLease(ctx, generation, kind, worker.ownerID, worker.leaseTTL)
+	lease, acquired, err := worker.leases.AcquireSourceLease(ctx, generation, kind, worker.ownerID, worker.leaseTTL)
 	if err != nil {
 		if isContextDone(ctx) {
 			return
@@ -180,12 +192,12 @@ func (worker *Worker) projectOneSource(ctx context.Context, generation uint64, k
 		// own short-lived one.
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := worker.leases.ReleaseSourceLease(releaseCtx, generation, kind, worker.ownerID); err != nil {
+		if err := worker.leases.ReleaseSourceLease(releaseCtx, lease); err != nil {
 			worker.logger.Error("activity projection: release lease", "source", string(kind), "error", err)
 		}
 	}()
 
-	outcome, err := worker.projector.ProjectSource(ctx, generation, kind)
+	outcome, err := worker.projector.ProjectSource(ctx, lease)
 	if err != nil {
 		if isContextDone(ctx) {
 			return

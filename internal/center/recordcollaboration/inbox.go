@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 var (
@@ -38,7 +39,7 @@ func ValidateInboxNotificationID(value string) error {
 
 func (item InboxItem) Validate() error {
 	expected, ok := notificationSubjectForEvent(item.EventKind)
-	if !ok || item.SubjectKind != expected || !validNotificationID(item.NotificationID) || !validRecordID(item.RecordID) ||
+	if !ok || item.SubjectKind != expected || !validNotificationID(item.NotificationID) || !recordidentity.IsValid(item.RecordID) ||
 		!validNotificationSubjectIdentity(item.SubjectKind, item.SubjectID) || item.SourceVersion == 0 || item.SourceVersion > math.MaxInt64 ||
 		ValidateNotificationReason(item.Reason) != nil || item.Mandatory != item.Reason.Mandatory() || item.EventAt.IsZero() {
 		return ErrInvalidInboxRequest
@@ -76,7 +77,7 @@ type InboxDeepLinkTarget struct {
 }
 
 func (target InboxDeepLinkTarget) Validate() error {
-	if !validRecordID(target.RecordID) || !validNotificationSubjectIdentity(target.SubjectKind, target.SubjectID) {
+	if !recordidentity.IsValid(target.RecordID) || !validNotificationSubjectIdentity(target.SubjectKind, target.SubjectID) {
 		return ErrInvalidInboxRequest
 	}
 	return nil

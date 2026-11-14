@@ -7,6 +7,7 @@ import (
 	"reflect"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 var ErrInvalidPreparedCapture = errors.New("invalid prepared evidence capture")
@@ -104,7 +105,7 @@ func validatePreparedCapture(
 	authorization AuthorizationScope,
 	snapshot CanonicalSnapshot,
 ) error {
-	if !validClosedPreparedID(recordID, "rec_") {
+	if !recordidentity.IsValid(recordID) {
 		return preparedCaptureError("record identity", nil)
 	}
 	if !ValidSnapshotID(snapshotID) {

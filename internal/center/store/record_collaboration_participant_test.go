@@ -64,7 +64,7 @@ func TestCollaborationRevisionFollowerPlanBoundsDeduplicatedDesiredUsersBeforeMe
 	}
 }
 
-func TestCollaborationRevisionParticipantAppliesMembershipFenceFollowersActivitiesAndOutboxInOrder(t *testing.T) {
+func TestCollaborationRevisionParticipantProjectsFollowersAndNotifications(t *testing.T) {
 	t.Parallel()
 
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
@@ -105,30 +105,17 @@ func TestCollaborationRevisionParticipantAppliesMembershipFenceFollowersActiviti
 		t.Fatalf("ApplyRevision() error = %v", err)
 	}
 
-	wantSteps := []string{
-		"membership:usr_bbbbbbbbbbbbbbbbbbbbbbbb",
-		"membership:usr_cccccccccccccccccccccccc",
-		"membership:usr_dddddddddddddddddddddddd",
-		"deletion_reservation",
-		"fence_initialize",
-		"fence",
-		"deletion_fence_lease",
-		"deletion_reservation_recheck",
-		"fence",
-		"follower:usr_aaaaaaaaaaaaaaaaaaaaaaaa",
-		"follower:usr_bbbbbbbbbbbbbbbbbbbbbbbb",
-		"follower:usr_cccccccccccccccccccccccc",
-		"follower:usr_dddddddddddddddddddddddd",
-		"follower_delete_stale",
-		"follower_update_stale",
-		"activity:record_owner_changed",
-		"activity:record_participant_changed",
-		"activity:record_follow_up_changed",
-		"outbox:record_owner_changed",
-		"outbox:record_participant_changed",
+	for _, userID := range []string{
+		"usr_bbbbbbbbbbbbbbbbbbbbbbbb", "usr_cccccccccccccccccccccccc", "usr_dddddddddddddddddddddddd",
+	} {
+		if countCollaborationStep(steps, "membership:"+userID) != 1 {
+			t.Fatalf("membership checks = %#v, want one check for %s", steps, userID)
+		}
 	}
-	if !reflect.DeepEqual(steps, wantSteps) {
-		t.Fatalf("participant steps =\n%#v\nwant\n%#v", steps, wantSteps)
+	for _, kind := range []string{"record_owner_changed", "record_participant_changed", "record_follow_up_changed"} {
+		if countCollaborationStep(steps, "activity:"+kind) != 1 {
+			t.Fatalf("collaboration activity facts = %#v, want one %s", steps, kind)
+		}
 	}
 	if got, want := tx.followerFlags, map[string][3]bool{
 		"usr_aaaaaaaaaaaaaaaaaaaaaaaa": {true, false, false},
@@ -240,36 +227,6 @@ func TestCollaborationRevisionParticipantFailsClosedOnVisibilityAndSourceFloor(t
 	}
 }
 
-func TestCollaborationRevisionParticipantRechecksCurrentDeletionReservationBeforeFollowerWrites(t *testing.T) {
-	t.Parallel()
-
-	steps := make([]string, 0, 8)
-	reader := &collaborationMembershipReaderStub{read: func(_ context.Context, _ pgx.Tx, _ recordauth.ProjectID, userID string) (recordauth.ActorScope, error) {
-		return collaborationActor(t, userID, nil), nil
-	}}
-	tx := &fakeCollaborationParticipantTx{steps: &steps, reservationState: "fenced"}
-	err := NewCollaborationRevisionParticipant(reader).ApplyRevision(context.Background(), tx, records.RevisionCommitted{
-		Result: records.RevisionCommitResult{
-			RecordID: "rec_reservedcollaboration", RevisionID: "rrv_reservedcollaboration", RevisionNo: 1,
-			LockVersion: 1, AuthorizationEpoch: 1, Created: true, CommittedAt: time.Now().UTC(),
-		},
-		Input: collaborationRevisionInput(t, collaborationRevisionInputValues{
-			ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
-		}),
-		ActivityKind: records.DomainActivityRecordCreated,
-		OutboxTTL:    time.Hour,
-		Outbox:       &collaborationRevisionOutboxStub{},
-	})
-	if !errors.Is(err, records.ErrRecordDeletionReserved) {
-		t.Fatalf("ApplyRevision() error = %v, want ErrRecordDeletionReserved", err)
-	}
-	for _, step := range steps {
-		if strings.HasPrefix(step, "follower:") || strings.HasPrefix(step, "activity:") || strings.HasPrefix(step, "outbox:") {
-			t.Fatalf("reserved revision reached projection step %q: %#v", step, steps)
-		}
-	}
-}
-
 func TestCollaborationRevisionParticipantRejectsNilAndTypedNilDependencies(t *testing.T) {
 	t.Parallel()
 
@@ -333,7 +290,6 @@ type fakeCollaborationParticipantTx struct {
 	previousOwnerID        string
 	previousParticipantIDs []string
 	previousFollowUpAt     *time.Time
-	reservationState       string
 	followerFlags          map[string][3]bool
 	followerEpochs         []int64
 	failStep               string
@@ -343,19 +299,6 @@ type fakeCollaborationParticipantTx struct {
 func (tx *fakeCollaborationParticipantTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	compact := strings.ToLower(strings.Join(strings.Fields(sql), " "))
 	switch {
-	case strings.Contains(compact, "from public.deletion_reservations") &&
-		strings.Contains(compact, "state in ('previewed', 'fenced', 'committed')"):
-		tx.appendStep("deletion_reservation")
-		if tx.reservationState == "" {
-			return collaborationParticipantRow{err: pgx.ErrNoRows}
-		}
-		return collaborationParticipantRow{values: []any{tx.reservationState}}
-	case strings.Contains(compact, "from public.deletion_fence_leases"):
-		tx.appendStep("deletion_fence_lease")
-		return collaborationParticipantRow{err: pgx.ErrNoRows}
-	case strings.Contains(compact, "from public.deletion_reservations"):
-		tx.appendStep("deletion_reservation_recheck")
-		return collaborationParticipantRow{err: pgx.ErrNoRows}
 	case strings.Contains(compact, "from public.record_revisions"):
 		tx.appendStep("previous_revision")
 		if tx.shouldFail("previous_revision") {
@@ -402,8 +345,6 @@ func (tx *fakeCollaborationParticipantTx) Exec(_ context.Context, sql string, ar
 	compact := strings.ToLower(strings.Join(strings.Fields(sql), " "))
 	step := ""
 	switch {
-	case strings.Contains(compact, "insert into public.content_delivery_epochs"):
-		step = "fence_initialize"
 	case strings.Contains(compact, "insert into public.record_followers"):
 		userID := args[2].(string)
 		step = "follower:" + userID

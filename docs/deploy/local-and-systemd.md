@@ -210,6 +210,47 @@ substitute.
 
 Attachment storage has no implicit backend when Records runtime admission is enabled. `local` requires an absolute private directory that is neither `/` nor another broad system path. S3 deployments set `HOUFENG_ATTACHMENT_BLOB_BACKEND=s3`, endpoint, bucket, and TLS mode, and load credentials through `HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE` and `HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE`; do not put credential values in the environment file. Center and processor must use the same immutable Blob backend and scanner settings.
 
+### Local Blob namespace admission
+
+The unreleased C81 local-storage candidate requires an admitted namespace before Center or
+content-processor starts. Creating an empty directory is insufficient. The existing eight-service
+Compose graph does not perform this one-shot admission automatically; ordinary fresh-install
+and portable-copy release acceptance remains a separate gate. Schema migration alone is not
+storage admission and does not establish that this candidate is deployable.
+
+For a fresh isolated tree with all business writers stopped, run the built admin executable as
+the actual BlobRoot owner (Compose UID/GID `10001:10001`), with a direct platform-admin SQL
+login supplied only through a private one-shot request outside BlobRoot:
+
+```bash
+houfeng-record-platform-admin local-namespace provision --request-file /run/houfeng-local-provision/request.json
+```
+
+The strict JSON fields are `database_url`, absolute canonical `root`, `namespace_id`,
+`incarnation_id`, `request_id`, numeric `owner_uid`, and numeric `owner_gid`. Preserve the three
+random UUID identities for exact retry. The invoking user owns the private request directory
+and mode-0600 request. The command consumes the credential input before DB access. After an
+ambiguous failure keep writers stopped and resolve the same identities. Never leave privileged
+credentials in the business volume/runtime configuration, invoke the participant as root, or
+relax ownership to make it succeed.
+
+The tree uses 0700 directories, 0600 marker/lock/temp files and a dedicated fixed provision
+lock. Runtime opens the admitted physical binding without mkdir, repair or rebind; changed
+marker/directory/anchor identity fails closed. Both processes share one actual Linux
+filesystem/flock domain; btrfs is supported. The local writer also requires `O_TMPFILE`,
+user xattrs, and access to its own `/proc/self/fd` on procfs so an initialized, durably
+registered inode can be linked without extra capabilities. Missing support fails closed;
+there is no named-file fallback. Keep namespace rows, historical incarnations, anchors,
+obligations and registered temporary targets in the coordinated recovery point.
+
+Source-enabled adoption is rejected until the separate UID10002 source coordinator supplies
+the authenticated outer maintenance/RID handoff and final APP/W2 readback. The local UID10001
+participant cannot acquire/release that outer guard or activate source recovery. Copying or
+changing physical identity requires explicit cold handoff; deleting markers or inventing a new
+UUID is not a repair. A database inventory with `physical_evidence=not_observed` proves neither
+physical inventory nor stopped writers. See the [local I/O contract](../spec/contracts/platform/delivery-primitives.md#scenario-本地持久写入跨进程锁与清理).
+
+
 > Note: `HOUFENG_WEB_DIST_DIR` defaults to `web/dist`, but the configured directory must exist and contain the built SPA; otherwise center `/` returns 404 and the UI is unavailable. Production deployments should point it at the installed `web/dist` path.
 
 ## Local center run
@@ -385,7 +426,7 @@ active contract rather than creating a second identity or fabricating rows.
 
 Compose secrets are sourced from the private root `.env` and exposed as files to
 only the services that need them. PostgreSQL receives only its bootstrap
-secret. `houfeng-secrets-init` receives the bootstrap and three operator-managed
+secret. `houfeng-secrets-init` receives the bootstrap and four operator-managed
 database-role secrets, mounts only `data/secrets`, then writes separate private
 directories for db-init and the processor because Compose cannot inject
 environment-backed secret content into a read-only service root. It cannot read
@@ -394,8 +435,14 @@ runtime, initial-admin, and session secrets. The processor receives only a stage
 runtime secret. The
 authority reads only its generated private state and generated constrained
 database credential. Center and processor never receive bootstrap, migrator,
-platform-admin, or authority credentials; the processor never receives initial
-admin or session material.
+platform-admin, deletion-worker, or authority credentials; the processor never
+receives initial admin or session material.
+
+C81 requires an independent `HOUFENG_RECORD_DELETION_WORKER_PASSWORD`, staged as
+`houfeng_record_deletion_worker_password` for db-init only. Generate it separately
+with `openssl rand -hex 32`; do not reuse any other database password. Initialization
+binds the constrained `houfeng_record_deletion_worker` login into the current
+manifest. This does not start a deletion worker or enable permanent-deletion HTTP.
 
 All local durable state is visible in the deployment directory:
 
@@ -720,6 +767,23 @@ sudo systemctl enable --now houfeng-center houfeng-content-processor
 ```
 
 For S3, replace the local backend lines in both environment files with the same endpoint/bucket/TLS settings and private `HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE` / `HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE` paths. Grant the `houfeng` user read access to those mode-restricted files; never put S3 credentials directly in a tracked unit or environment example. The processor unit creates its private `0700` runtime workspace, sets `LimitCORE=0`, and grants writes only to that workspace and the durable Blob path.
+
+For record-backed processor work, configure the processor's own complete
+`HOUFENG_RECORD_INSTANCE_ID`, `HOUFENG_RECORD_DEPLOYMENT_ID` (or its `_FILE`),
+`HOUFENG_RECORD_INSTANCE_KIND`, and `HOUFENG_RECORD_INSTANCE_CAPABILITY` against
+an actually admitted deployment member. Reusing the API instance name does not
+establish processor membership. The current Compose example does not provision
+this additional identity automatically.
+
+An enrolled source also requires the independent reader URL in
+`HOUFENG_DELETION_WITNESS_DATABASE_URL` (or its `_FILE`) and the exact physical
+identity file in `HOUFENG_SOURCE_WITNESS_IDENTITY_FILE`. The processor verifies
+the APP enrollment binding with the same validator as Center and closes its
+witness pool when the runtime exits. Without witness configuration, source
+authorization checks APP enrollment and rejects enrolled record effects;
+standalone processing and existing cleanup retain their own authorization paths.
+Partial or invalid supplied witness configuration is a startup error. This
+configuration does not enable birth certification or permanent deletion.
 
 Then create or open the VPS in the web UI and use **创建并接入 agent** from the VPS detail page. That action creates the scoped MonitoringInstance and opens its onboarding workspace. The primary path is the generated one-command installer. During early development, the same generated command is also the accepted agent upgrade path for an already-bound systemd monitoring instance:
 

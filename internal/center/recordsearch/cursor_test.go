@@ -76,6 +76,30 @@ func TestCursorRoundTripsThroughItsOpaqueEncoding(t *testing.T) {
 	}
 }
 
+func TestCursorRoundTripsAllRecordIdentityDomains(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	actor := testActor(t, "usr_000000000000000000000001")
+	query := testQuery(t, QueryValues{Tags: []string{"disk"}})
+	for _, recordID := range []string{
+		"rec_legacy",
+		"rec2_70000000000000000000000000000000",
+		"rec2_80000000000000000000000000000000",
+	} {
+		t.Run(recordID, func(t *testing.T) {
+			values := testCursorValues(t, query, actor, now)
+			values.SortKey.RecordID = recordID
+			encoded, err := EncodeCursor(values)
+			if err != nil {
+				t.Fatalf("EncodeCursor() error = %v", err)
+			}
+			bound, err := BindCursor(encoded, query, actor, values.Generation, now)
+			if err != nil || bound.SortKey() != values.SortKey {
+				t.Fatalf("BindCursor() = %+v, %v, want %+v", bound.SortKey(), err, values.SortKey)
+			}
+		})
+	}
+}
+
 func TestEncodeCursorRejectsUnusableValues(t *testing.T) {
 	t.Parallel()
 
@@ -94,6 +118,8 @@ func TestEncodeCursorRejectsUnusableValues(t *testing.T) {
 		{name: "zero sort timestamp", mutate: func(values *CursorValues) { values.SortKey.UpdatedAt = time.Time{} }},
 		{name: "missing record id", mutate: func(values *CursorValues) { values.SortKey.RecordID = "" }},
 		{name: "malformed record id", mutate: func(values *CursorValues) { values.SortKey.RecordID = "rec_UPPER" }},
+		{name: "malformed new record id", mutate: func(values *CursorValues) { values.SortKey.RecordID = "rec2_7000000000000000000000000000000g" }},
+		{name: "revision as record id", mutate: func(values *CursorValues) { values.SortKey.RecordID = "rrv_0000000000000001" }},
 	}
 
 	for _, tt := range tests {

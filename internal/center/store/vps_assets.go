@@ -202,8 +202,12 @@ func (r *PostgresVPSAssetRepository) GetVPSAsset(ctx context.Context, vpsID stri
 }
 
 func (r *PostgresVPSAssetRepository) loadVPSRecordSubject(ctx context.Context, vpsID string) (vpsRecordSubject, error) {
+	return loadVPSRecordSubject(ctx, r.db, vpsID)
+}
+
+func loadVPSRecordSubject(ctx context.Context, db currentRecordAuthorizationDB, vpsID string) (vpsRecordSubject, error) {
 	var subject vpsRecordSubject
-	err := r.db.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		select vps_id, display_name, provider_name, region
 		from vps_assets
 		where vps_id = $1`, vpsID).Scan(
@@ -239,6 +243,9 @@ func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input v
 		return vpsassets.Record{}, fmt.Errorf("begin vps asset create transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "vps", vpsID); err != nil {
+		return vpsassets.Record{}, err
+	}
 
 	record, err := scanVPSAsset(tx.QueryRow(ctx, `
 		insert into vps_assets (
@@ -337,7 +344,7 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 		return vpsassets.Record{}, err
 	}
 	if !input.HasChanges() {
-		return r.GetVPSAsset(ctx, vpsID)
+		return r.getWritableVPSAsset(ctx, vpsID)
 	}
 
 	if patchRequiresVPSAssetHistory(input) {
@@ -352,6 +359,9 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 		return vpsassets.Record{}, fmt.Errorf("begin vps asset patch transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "vps", vpsID); err != nil {
+		return vpsassets.Record{}, err
+	}
 
 	current, err := scanVPSAsset(tx.QueryRow(ctx, `
 		select `+vpsAssetSelectColumns+`
@@ -410,7 +420,7 @@ func (r *PostgresVPSAssetRepository) PatchVPSAssetWithSubscriptionRenewalLinkage
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
 	}
 	if !input.HasChanges() {
-		record, err := r.GetVPSAsset(ctx, vpsID)
+		record, err := r.getWritableVPSAsset(ctx, vpsID)
 		return record, noRenewalSubscriptionLinkage(), err
 	}
 	if !input.RenewalDecision.Set || !vpsassets.IsCancellationRenewalDecision(input.RenewalDecision.Value) {
@@ -430,6 +440,9 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("begin vps asset history transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "vps", vpsID); err != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
+	}
 
 	current, err := scanVPSAsset(tx.QueryRow(ctx, `
 			select `+vpsAssetSelectColumns+`
@@ -972,4 +985,31 @@ func isVPSAssetInvalidPostgresError(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23503" || pgErr.Code == "23514"
+}
+
+// A no-op patch is still a management request, but must not advance timestamps
+// or bypass permanent-source authority by falling through to an unfenced read.
+func (r *PostgresVPSAssetRepository) getWritableVPSAsset(ctx context.Context, vpsID string) (vpsassets.Record, error) {
+	if r.beginTx == nil {
+		return vpsassets.Record{}, errors.New("vps asset repository requires transaction support")
+	}
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
+	if err != nil {
+		return vpsassets.Record{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "vps", vpsID); err != nil {
+		return vpsassets.Record{}, err
+	}
+	record, err := scanVPSAsset(tx.QueryRow(ctx, `select `+vpsAssetSelectColumns+` from vps_assets where vps_id=$1`, vpsID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+	}
+	if err != nil {
+		return vpsassets.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return vpsassets.Record{}, err
+	}
+	return record, nil
 }

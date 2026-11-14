@@ -46,16 +46,18 @@ func TestPostgresIntegrationComposeBootstrapRollback(t *testing.T) {
 		DatabaseName:  "hf_rollback_" + suffix,
 		BootstrapRole: "postgres",
 		AuthorityRole: "hf_rb_authority_" + suffix,
-		Roles: AppRoleSetV1{
-			CenterRuntime: "hf_rb_runtime_" + suffix,
-			PlatformAdmin: "hf_rb_admin_" + suffix,
-			Migrator:      "hf_rb_migrator_" + suffix,
+		Roles: AppRoleSetV2{
+			CenterRuntime:  "hf_rb_runtime_" + suffix,
+			PlatformAdmin:  "hf_rb_admin_" + suffix,
+			DeletionWorker: "hf_rb_deletion_" + suffix,
+			Migrator:       "hf_rb_migrator_" + suffix,
 		},
 		Passwords: ComposeRolePasswords{
-			Runtime:       "runtime rollback secret",
-			PlatformAdmin: "admin rollback secret",
-			Migrator:      "migrator rollback secret",
-			Authority:     "authority rollback secret",
+			Runtime:        "runtime rollback secret",
+			PlatformAdmin:  "admin rollback secret",
+			DeletionWorker: "deletion worker rollback secret",
+			Migrator:       "migrator rollback secret",
+			Authority:      "authority rollback secret",
 		},
 	}
 	if err := config.Validate(); err != nil {
@@ -159,7 +161,7 @@ func cleanupComposeBootstrapIntegration(t *testing.T, ctx context.Context, pool 
 	_, _ = pool.Exec(ctx, `select pg_catalog.pg_terminate_backend(pid) from pg_catalog.pg_stat_activity where datname = $1 and pid <> pg_backend_pid()`, config.DatabaseName)
 	for _, statement := range []string{
 		formatComposeBootstrapIntegrationDDL(t, ctx, pool, `DROP DATABASE IF EXISTS %I`, config.DatabaseName),
-		formatComposeBootstrapIntegrationDDL(t, ctx, pool, `DROP ROLE IF EXISTS %I, %I, %I, %I`, config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.Migrator, config.AuthorityRole),
+		formatComposeBootstrapIntegrationDDL(t, ctx, pool, `DROP ROLE IF EXISTS %I, %I, %I, %I, %I`, config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.DeletionWorker, config.Roles.Migrator, config.AuthorityRole),
 	} {
 		if _, err := pool.Exec(ctx, statement); err != nil && !errors.Is(err, context.Canceled) {
 			t.Errorf("cleanup Compose rollback resource: %v", err)

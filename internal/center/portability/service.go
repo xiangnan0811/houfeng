@@ -19,6 +19,7 @@ import (
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordmarkdown"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
@@ -54,73 +55,88 @@ type JobRepository interface {
 	RevokeExport(context.Context, string, uint64) error
 }
 
+// BirthAllocationReader retrieves the actor's persisted APP allocation.
+type BirthAllocationReader interface {
+	GetAllocation(context.Context, recordauth.ActorScope, string) (recordbirth.Allocation, error)
+}
+
 type Options struct {
-	Enabled         bool
-	BackendKind     string
-	Documents       DocumentSource
-	Jobs            JobRepository
-	Evidence        EvidenceExporter
-	Snapshots       SnapshotSource
-	Comparison      ComparisonExporter
-	Activity        activity.ActivityExportReader
-	PDF             DocumentPDFRenderer
-	Imports         ImportRepository
-	Importer        DocumentImporter
-	EvidenceImports EvidenceImporter
-	Kinds           KindSource
-	Subjects        records.SubjectAdapterRegistry
-	Attachments     AttachmentSource
-	AttachmentBlobs attachments.BlobStore
-	ImportBlobGC    attachments.ImportBlobGCObserver
-	Rebuilder       ImportProjectionRebuilder
-	Staging         *LeasedBlobStore
-	Now             func() time.Time
-	PreviewTTL      time.Duration
+	Enabled             bool
+	BackendKind         string
+	Documents           DocumentSource
+	Jobs                JobRepository
+	Evidence            EvidenceExporter
+	Snapshots           SnapshotSource
+	Comparison          ComparisonExporter
+	Activity            activity.ActivityExportReader
+	PDF                 DocumentPDFRenderer
+	Imports             ImportRepository
+	Importer            DocumentImporter
+	BirthCoordinator    *recordbirth.Coordinator
+	BirthAllocations    BirthAllocationReader
+	ImportAuthorization records.CurrentRecordAuthorizationSource
+	EvidenceImports     EvidenceImporter
+	Kinds               KindSource
+	Subjects            records.SubjectAdapterRegistry
+	Attachments         AttachmentSource
+	AttachmentBlobs     attachments.BlobStore
+	AttachmentWriter    attachments.BlobWriter
+	ImportBlobGC        attachments.ImportBlobGCObserver
+	Rebuilder           ImportProjectionRebuilder
+	Staging             *LeasedBlobStore
+	Now                 func() time.Time
+	PreviewTTL          time.Duration
 }
 
 type Service struct {
-	enabled         bool
-	backendKind     string
-	documents       DocumentSource
-	jobs            JobRepository
-	evidence        EvidenceExporter
-	snapshots       SnapshotSource
-	comparison      ComparisonExporter
-	activity        activity.ActivityExportReader
-	pdf             DocumentPDFRenderer
-	imports         ImportRepository
-	importer        DocumentImporter
-	evidenceImports EvidenceImporter
-	kinds           KindSource
-	subjects        records.SubjectAdapterRegistry
-	attachments     AttachmentSource
-	attachmentBlobs attachments.BlobStore
-	importBlobGC    attachments.ImportBlobGCObserver
-	rebuilder       ImportProjectionRebuilder
-	staging         *LeasedBlobStore
-	now             func() time.Time
-	previewTTL      time.Duration
-	mu              sync.Mutex
-	previews        map[string]PreviewRequest
-	confirmTokens   map[string]string
-	importPlans     map[string]cachedImportPlan
+	enabled             bool
+	backendKind         string
+	documents           DocumentSource
+	jobs                JobRepository
+	evidence            EvidenceExporter
+	snapshots           SnapshotSource
+	comparison          ComparisonExporter
+	activity            activity.ActivityExportReader
+	pdf                 DocumentPDFRenderer
+	imports             ImportRepository
+	importer            DocumentImporter
+	birthCoordinator    *recordbirth.Coordinator
+	birthAllocations    BirthAllocationReader
+	importAuthorization records.CurrentRecordAuthorizationSource
+	evidenceImports     EvidenceImporter
+	kinds               KindSource
+	subjects            records.SubjectAdapterRegistry
+	attachments         AttachmentSource
+	attachmentBlobs     attachments.BlobStore
+	attachmentWriter    attachments.BlobWriter
+	importBlobGC        attachments.ImportBlobGCObserver
+	rebuilder           ImportProjectionRebuilder
+	staging             *LeasedBlobStore
+	now                 func() time.Time
+	previewTTL          time.Duration
+	mu                  sync.Mutex
+	previews            map[string]PreviewRequest
+	confirmTokens       map[string]string
+	importPlans         map[string]cachedImportPlan
 }
 
 type cachedImportPlan struct {
-	jobID         string
-	lockVersion   uint64
-	jobState      string
-	actorID       string
-	expiresAt     time.Time
-	archiveDigest [32]byte
-	destination   records.SubjectReference
-	documents     []store.ImportDocumentPlan
-	evidence      []importedEvidencePlan
-	attachments   []importedAttachmentPlan
-	remaps        []ImportRemap
-	quarantine    []QuarantinedEvidence
-	digest        [32]byte
-	applied       []string
+	jobID          string
+	lockVersion    uint64
+	jobState       string
+	actorID        string
+	expiresAt      time.Time
+	archiveDigest  [32]byte
+	destination    records.SubjectReference
+	documents      []store.ImportDocumentPlan
+	evidence       []importedEvidencePlan
+	attachments    []importedAttachmentPlan
+	remaps         []ImportRemap
+	allocationIDs  map[string]string
+	ownerTargetIDs map[string]string
+	quarantine     []QuarantinedEvidence
+	digest         [32]byte
+	applied        []string
 }
 
 type importedEvidencePlan struct {
@@ -129,6 +145,7 @@ type importedEvidencePlan struct {
 	RecordSourceID string
 	Schema         string
 	Payload        []byte
+	ownerOmitted   bool
 }
 
 func NewService(options Options) (*Service, error) {
@@ -138,7 +155,7 @@ func NewService(options Options) (*Service, error) {
 	if options.Documents == nil || options.Jobs == nil || options.Staging == nil {
 		return nil, ErrExportUnavailable
 	}
-	if options.AttachmentBlobs != nil && options.ImportBlobGC == nil {
+	if options.AttachmentBlobs != nil && (options.ImportBlobGC == nil || options.AttachmentWriter == nil) {
 		return nil, ErrExportUnavailable
 	}
 	now := options.Now
@@ -150,30 +167,34 @@ func NewService(options Options) (*Service, error) {
 		ttl = defaultPreviewTTL
 	}
 	return &Service{
-		enabled:         options.Enabled,
-		backendKind:     options.BackendKind,
-		documents:       options.Documents,
-		jobs:            options.Jobs,
-		evidence:        options.Evidence,
-		snapshots:       options.Snapshots,
-		comparison:      options.Comparison,
-		activity:        options.Activity,
-		pdf:             options.PDF,
-		imports:         options.Imports,
-		importer:        options.Importer,
-		evidenceImports: options.EvidenceImports,
-		kinds:           options.Kinds,
-		subjects:        options.Subjects,
-		attachments:     options.Attachments,
-		attachmentBlobs: options.AttachmentBlobs,
-		importBlobGC:    options.ImportBlobGC,
-		rebuilder:       options.Rebuilder,
-		staging:         options.Staging,
-		now:             now,
-		previewTTL:      ttl,
-		previews:        make(map[string]PreviewRequest),
-		confirmTokens:   make(map[string]string),
-		importPlans:     make(map[string]cachedImportPlan),
+		enabled:             options.Enabled,
+		backendKind:         options.BackendKind,
+		documents:           options.Documents,
+		jobs:                options.Jobs,
+		evidence:            options.Evidence,
+		snapshots:           options.Snapshots,
+		comparison:          options.Comparison,
+		activity:            options.Activity,
+		pdf:                 options.PDF,
+		imports:             options.Imports,
+		importer:            options.Importer,
+		birthCoordinator:    options.BirthCoordinator,
+		birthAllocations:    options.BirthAllocations,
+		importAuthorization: options.ImportAuthorization,
+		evidenceImports:     options.EvidenceImports,
+		kinds:               options.Kinds,
+		subjects:            options.Subjects,
+		attachments:         options.Attachments,
+		attachmentBlobs:     options.AttachmentBlobs,
+		attachmentWriter:    options.AttachmentWriter,
+		importBlobGC:        options.ImportBlobGC,
+		rebuilder:           options.Rebuilder,
+		staging:             options.Staging,
+		now:                 now,
+		previewTTL:          ttl,
+		previews:            make(map[string]PreviewRequest),
+		confirmTokens:       make(map[string]string),
+		importPlans:         make(map[string]cachedImportPlan),
 	}, nil
 }
 
@@ -194,13 +215,14 @@ func (service *Service) Preview(ctx context.Context, request PreviewRequest) (Pr
 	}
 	expiresAt := service.now().Add(service.previewTTL)
 	job, err := service.jobs.ClaimExportJob(ctx, store.ClaimRecordExportJobInput{
-		ActorID:            request.Actor.UserID,
+		Actor:              request.Actor,
 		IdempotencyKey:     request.IdempotencyKey,
 		ExportKind:         request.ExportKind,
 		ExportMode:         request.ExportMode,
 		RequestFingerprint: material.fingerprint,
 		InventoryDigest:    material.inventory,
 		AuthorizationEpoch: material.document.AuthorizationEpoch,
+		RecordLockVersion:  material.document.LockVersion,
 		RecordID:           material.document.RecordID,
 		RevisionID:         material.document.RevisionID,
 		ExpiresAt:          expiresAt,
@@ -267,42 +289,49 @@ func (service *Service) Create(ctx context.Context, request CreateRequest) (Expo
 		return ExportView{}, ErrExportInventoryDrift
 	}
 	if err := service.jobs.AdvanceExportJob(ctx, store.AdvanceRecordExportJobInput{
-		ExportJobID: job.ExportJobID,
-		LockVersion: job.LockVersion,
-		JobState:    store.RecordExportJobStateStaging,
-		ExpiresAt:   job.ExpiresAt,
+		Actor:             request.Actor,
+		ExpectedJob:       job,
+		RecordLockVersion: material.document.LockVersion,
+		JobState:          store.RecordExportJobStateStaging,
 	}); err != nil {
 		return ExportView{}, mapJobError(err)
 	}
 	job.LockVersion++
-	if _, err := service.staging.Stage(ctx, job.ExportJobID, material.payload); err != nil {
+	job.JobState = store.RecordExportJobStateStaging
+	written, err := service.staging.Stage(ctx, attachments.WriteRequest{
+		ProjectID: string(job.ProjectID),
+		Origin:    attachments.WriteOrigin{Kind: "export_artifact", ID: job.ExportJobID, Generation: int64(job.LockVersion)},
+	}, material.payload)
+	if err != nil {
 		_ = service.jobs.AdvanceExportJob(ctx, store.AdvanceRecordExportJobInput{
-			ExportJobID: job.ExportJobID,
-			LockVersion: job.LockVersion,
+			Actor:       request.Actor,
+			ExpectedJob: job,
 			JobState:    store.RecordExportJobStateFailed,
 			FailureCode: "staging_failed",
-			ExpiresAt:   job.ExpiresAt,
 		})
 		return ExportView{}, ErrExportUnavailable
 	}
 	artifact, err := service.jobs.PublishExportArtifact(ctx, store.PublishRecordExportArtifactInput{
-		ExportJobID:  job.ExportJobID,
-		ArtifactKind: job.ExportKind,
-		ContentType:  material.file.MediaType,
-		BackendKind:  service.backendKind,
-		BlobKey:      "sha256/" + hex.EncodeToString(hashBytes(material.payload)),
-		SHA256:       sha256.Sum256(material.payload),
-		ByteSize:     uint64(len(material.payload)),
-		ExpiresAt:    job.ExpiresAt,
+		ExportJobID:     job.ExportJobID,
+		ArtifactKind:    job.ExportKind,
+		ContentType:     material.file.MediaType,
+		BackendKind:     service.backendKind,
+		BlobKey:         written.Version.Key,
+		ObjectVersionID: written.Version.VersionID,
+		NamespaceID:     written.NamespaceID,
+		ObligationID:    written.ObligationID,
+		SHA256:          written.Version.SHA256,
+		ByteSize:        uint64(written.Version.SizeBytes),
+		ExpiresAt:       job.ExpiresAt,
 	})
 	if err != nil {
 		return ExportView{}, mapJobError(err)
 	}
 	if err := service.jobs.AdvanceExportJob(ctx, store.AdvanceRecordExportJobInput{
-		ExportJobID: job.ExportJobID,
-		LockVersion: job.LockVersion,
-		JobState:    store.RecordExportJobStatePublished,
-		ExpiresAt:   job.ExpiresAt,
+		Actor:             request.Actor,
+		ExpectedJob:       job,
+		RecordLockVersion: material.document.LockVersion,
+		JobState:          store.RecordExportJobStatePublished,
 	}); err != nil {
 		return ExportView{}, mapJobError(err)
 	}
@@ -353,7 +382,9 @@ func (service *Service) OpenContent(ctx context.Context, actor recordauth.ActorS
 	if err := authorizeExportCapabilities(actor, job.ExportMode); err != nil {
 		return Content{}, err
 	}
-	body, _, err := service.staging.OpenLeased(ctx, job.ExportJobID)
+	body, _, err := service.staging.OpenPublished(ctx, job.ExportJobID, attachments.ObjectVersion{
+		Key: artifact.BlobKey, VersionID: artifact.ObjectVersionID, SHA256: artifact.SHA256, SizeBytes: int64(artifact.ByteSize),
+	}, artifact.NamespaceID)
 	if err != nil {
 		return Content{}, err
 	}
@@ -925,6 +956,9 @@ func mapDocumentError(err error) error {
 func mapJobError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, recordauth.ErrDenied) {
+		return ErrExportUnauthorized
 	}
 	if errors.Is(err, store.ErrRecordExportNotFound) {
 		return ErrExportNotFound

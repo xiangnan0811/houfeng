@@ -23,11 +23,7 @@ import (
 type PostgresRecordActionRepository struct {
 	platform      *PostgresRecordPlatformRepository
 	members       CollaborationMembershipReader
-	authorization currentRecordAuthorizationTransactionResolver
-}
-
-type currentRecordAuthorizationTransactionResolver interface {
-	resolveCurrentAuthorizationInTransaction(context.Context, pgx.Tx, recordauth.ActorScope, string) (records.CurrentRecordAuthorization, error)
+	authorization currentRecordAuthorizationPrefetcher
 }
 
 func NewPostgresRecordActionRepository(
@@ -49,20 +45,26 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 	if err := command.Validate(); err != nil {
 		return recordcollaboration.ActionMutationResult{}, err
 	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.RecordID})
+	if err != nil {
+		return recordcollaboration.ActionMutationResult{}, err
+	}
 
 	var result recordcollaboration.ActionMutationResult
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		claim, err := transaction.ClaimIdempotency(ctx, command.Idempotency)
+	err = repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		result = recordcollaboration.ActionMutationResult{}
+		users := []string{command.Actor.UserID}
+		if assigneeID := command.Fields.AssigneeID(); assigneeID != "" {
+			users = append(users, assigneeID)
+		}
+		claim, err := claimCollaborationEffect(ctx, transaction, command.RecordID, command.Actor.UserID, users, command.ActionID, command.Idempotency)
 		if err != nil {
 			return err
 		}
 		if (claim.ReplayResult == nil) == (claim.Owner == nil) {
 			return recordcollaboration.ErrInvalidActionCommand
 		}
-		if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
-			return err
-		}
-		binding, err := loadCollaborationRecordFenceBinding(ctx, transaction.tx, command.RecordID)
+		binding, err := readAcquiredCollaborationRecordFenceBinding(ctx, transaction.tx, command.RecordID)
 		if err != nil {
 			return err
 		}
@@ -76,7 +78,7 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 			return recordcollaboration.ErrActionConflict
 		}
 		actor, currentAuthorization, err := repository.loadCurrentActionAuthorization(
-			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordUpdate,
+			ctx, transaction.tx, authorization, command.Actor, command.RecordID, recordauth.CapabilityRecordUpdate,
 		)
 		if err != nil {
 			return err
@@ -207,8 +209,13 @@ func (repository *PostgresRecordActionRepository) ListActions(ctx context.Contex
 	if err := command.Validate(); err != nil {
 		return nil, err
 	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.RecordID})
+	if err != nil {
+		return nil, err
+	}
+
 	var result []recordcollaboration.ActionRecord
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		if err := assertRecordReadFence(ctx, transaction.tx, command.RecordID); err != nil {
 			return err
 		}
@@ -226,7 +233,7 @@ func (repository *PostgresRecordActionRepository) ListActions(ctx context.Contex
 			return recordcollaboration.ErrActionConflict
 		}
 		_, currentAuthorization, err := repository.loadCurrentActionAuthorization(
-			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordRead,
+			ctx, transaction.tx, authorization, command.Actor, command.RecordID, recordauth.CapabilityRecordRead,
 		)
 		if err != nil {
 			return err
@@ -305,6 +312,7 @@ func listRecordActions(ctx context.Context, tx pgx.Tx, recordID string, binding 
 func (repository *PostgresRecordActionRepository) loadCurrentActionAuthorization(
 	ctx context.Context,
 	tx pgx.Tx,
+	authorization currentRecordAuthorizationTransactionResolver,
 	actorInput recordauth.ActorScope,
 	recordID string,
 	capability recordauth.Capability,
@@ -319,7 +327,7 @@ func (repository *PostgresRecordActionRepository) loadCurrentActionAuthorization
 	if actor.UserID != actorInput.UserID || actor.ProjectID != actorInput.ProjectID || actor.Role != actorInput.Role {
 		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, recordauth.ErrDenied
 	}
-	current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
+	current, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
 	if err != nil {
 		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
 	}

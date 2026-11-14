@@ -2,10 +2,9 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,10 +14,9 @@ import (
 )
 
 const (
-	collaborationDeletionHealthDigestDomainV1  = "houfeng.record-collaboration.deletion-health.v1"
-	collaborationDeletionPreviewDigestDomainV1 = "houfeng.record-collaboration.deletion-preview.v1"
-	collaborationDeletionImpactDigestDomainV1  = "houfeng.record-collaboration.deletion-impact.v1"
-	collaborationDeletionReceiptDigestDomainV1 = "houfeng.record-collaboration.deletion-receipt.v1"
+	collaborationDeletionHealthDigestDomainV2  = "houfeng.record-collaboration.deletion-health.v2"
+	collaborationDeletionPreviewDigestDomainV2 = "houfeng.record-collaboration.deletion-preview.v2"
+	collaborationDeletionImpactDigestDomainV2  = "houfeng.record-collaboration.deletion-impact.v2"
 )
 
 func (repository *PostgresRecordDeletionRepository) CollaborationDeletionHealth(
@@ -29,48 +27,123 @@ func (repository *PostgresRecordDeletionRepository) CollaborationDeletionHealth(
 	}
 	var health recorddeletion.AdapterHealthSnapshot
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		surfaces := recorddeletion.RecordCollaborationSurfaceNames()
-		names := make([]string, len(surfaces))
-		for index, surface := range surfaces {
-			names[index] = string(surface)
-		}
-		var count int64
-		if err := transaction.tx.QueryRow(ctx, `
+		var err error
+		health, err = repository.collaborationDeletionHealthInTransaction(ctx, transaction.tx)
+		return err
+	})
+	return health, err
+}
+
+func (repository *PostgresRecordDeletionRepository) collaborationDeletionHealthInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+) (recorddeletion.AdapterHealthSnapshot, error) {
+	if ctx == nil || repository == nil || tx == nil {
+		return recorddeletion.AdapterHealthSnapshot{}, recordcollaboration.ErrInvalidDeletionAdapter
+	}
+	return collaborationDeletionHealthInTransaction(ctx, tx)
+}
+
+func collaborationDeletionHealthInTransaction(ctx context.Context, tx pgx.Tx) (recorddeletion.AdapterHealthSnapshot, error) {
+	if ctx == nil || tx == nil {
+		return recorddeletion.AdapterHealthSnapshot{}, recordcollaboration.ErrInvalidDeletionAdapter
+	}
+	surfaces := recorddeletion.RecordCollaborationSurfaceNames()
+	names := make([]string, 0, len(surfaces)+3)
+	for _, surface := range surfaces {
+		names = append(names, string(surface))
+	}
+	names = append(names, "record_notification_delivery_facts", "record_notification_delivery_completions", "record_notification_delivery_handoffs")
+	var count int64
+	if err := tx.QueryRow(ctx, `
 			select count(*)::bigint
 			from pg_catalog.pg_class as relation
 			join pg_catalog.pg_namespace as namespace on namespace.oid = relation.relnamespace
 			where namespace.nspname = 'public'
 			  and relation.relkind in ('r', 'p')
 			  and relation.relname = any($1::text[])`, names).Scan(&count); err != nil {
-			return fmt.Errorf("read collaboration deletion health: %w", err)
-		}
-		if count != int64(len(names)) {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		var err error
-		health, err = recorddeletion.NewAdapterHealthSnapshot(
-			true, 1, digestRecordPurgeStrings(collaborationDeletionHealthDigestDomainV1, names...),
-		)
-		if err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
-	})
-	return health, err
+		return recorddeletion.AdapterHealthSnapshot{}, fmt.Errorf("read collaboration deletion health: %w", err)
+	}
+	if count != int64(len(names)) {
+		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	if err := requireCollaborationDeletionFunctions(ctx, tx); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	health, err := recorddeletion.NewAdapterHealthSnapshot(
+		true, 2, digestRecordPurgeStrings(collaborationDeletionHealthDigestDomainV2, names...),
+	)
+	if err != nil {
+		return health, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return health, nil
+}
+
+// Catalog readiness is independent of which login executes a command. Role
+// admission and purpose-specific EXECUTE grants are checked at their boundary.
+func requireCollaborationDeletionFunctions(ctx context.Context, tx pgx.Tx) error {
+	var invalid int64
+	if err := tx.QueryRow(ctx, `
+		select count(*)::bigint
+		from (values
+		  ('public.record_collaboration_purge_v2(bytea)',
+		   array['removed_surface_digest','receipt_digest','removed_row_count','verified_absent_at'],
+		   array['bytea'::regtype::oid,'bytea'::regtype::oid,'bigint'::regtype::oid,'timestamptz'::regtype::oid]),
+		  ('public.record_collaboration_purge_verify_v2(bytea)',
+		   array['removed_surface_digest','receipt_digest','removed_row_count','verified_absent_at'],
+		   array['bytea'::regtype::oid,'bytea'::regtype::oid,'bigint'::regtype::oid,'timestamptz'::regtype::oid]),
+		  ('public.record_outbox_drain_v2(bytea)',
+		   array['drained_count','remaining'], array['bigint'::regtype::oid,'boolean'::regtype::oid]),
+		  ('public.record_collaboration_start_inventory(text,bigint)',
+		   array['start_digest','start_count','mismatched'], array['bytea'::regtype::oid,'bigint'::regtype::oid,'boolean'::regtype::oid]),
+		  ('public.record_collaboration_delivery_inventory(text,bigint)',
+		   array['notification_id','delivery_id','classification','evidence_digest','mismatched'],
+		   array['text'::regtype::oid,'text'::regtype::oid,'text'::regtype::oid,'bytea'::regtype::oid,'boolean'::regtype::oid])
+		) as required(signature, output_names, output_types)
+		left join pg_catalog.pg_proc as proc on proc.oid = pg_catalog.to_regprocedure(required.signature)
+		where proc.oid is null or proc.prosecdef is not true or proc.proretset is not true
+		   or proc.prorettype <> 'record'::regtype
+		   or not coalesce(proc.proconfig @> array['search_path=pg_catalog'], false)
+		   or proc.proargnames[(proc.pronargs::int + 1):] is distinct from required.output_names
+		   or proc.proallargtypes[(proc.pronargs::int + 1):] is distinct from required.output_types
+		   or proc.proargmodes[(proc.pronargs::int + 1):] is distinct from
+		      array_fill('t'::"char", array[cardinality(required.output_names)])`).Scan(&invalid); err != nil {
+		return fmt.Errorf("read collaboration deletion function contracts: %w", err)
+	}
+	if invalid != 0 {
+		return recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return nil
 }
 
 func (repository *PostgresRecordDeletionRepository) PreviewCollaborationDeletion(
 	ctx context.Context,
 	target recorddeletion.PreviewTarget,
 ) (recorddeletion.AdapterPreviewSnapshot, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || target.Validate() != nil {
+	if ctx == nil || repository == nil || repository.platform == nil || !validClientDeletionPreviewTarget(target) {
 		return recorddeletion.AdapterPreviewSnapshot{}, recordcollaboration.ErrInvalidDeletionAdapter
 	}
 	var snapshot recorddeletion.AdapterPreviewSnapshot
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var dependencyMaterial, impactMaterial []byte
-		var deliveredCount, possibleCount int64
-		err := transaction.tx.QueryRow(ctx, `
+		var err error
+		snapshot, err = previewCollaborationDeletionInTransaction(ctx, transaction.tx, target)
+		return err
+	})
+	return snapshot, err
+}
+
+func previewCollaborationDeletionInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	target recorddeletion.PreviewTarget,
+) (recorddeletion.AdapterPreviewSnapshot, error) {
+	if ctx == nil || tx == nil || !validClientDeletionPreviewTarget(target) {
+		return recorddeletion.AdapterPreviewSnapshot{}, recordcollaboration.ErrInvalidDeletionAdapter
+	}
+	var dependencyMaterial, impactMaterial []byte
+	var deliveredCount, possibleCount int64
+	var invalidInventory bool
+	err := tx.QueryRow(ctx, `
 			with root as materialized (
 				select record.record_id
 				from public.records as record
@@ -84,6 +157,9 @@ func (repository *PostgresRecordDeletionRepository) PreviewCollaborationDeletion
 				  and record.lock_version = $4
 				  and record.authorization_epoch = $5
 				  and epoch.delivery_epoch = $6
+			), responsibilities as materialized (
+				select inventory.* from root
+				cross join lateral public.record_collaboration_delivery_inventory(root.record_id, $6) as inventory
 			), material as (
 				select jsonb_build_object(
 				  'actions', coalesce((select jsonb_agg(jsonb_build_array(
@@ -122,6 +198,10 @@ func (repository *PostgresRecordDeletionRepository) PreviewCollaborationDeletion
 				  'delivery_attempts', coalesce((select jsonb_agg(jsonb_build_array(
 				    attempt_id, delivery_id, attempt_no, outcome, reason_code, record_fence_epoch
 				  ) order by attempt_id) from public.record_notification_delivery_attempts where record_id = root.record_id), '[]'::jsonb)
+				  , 'delivery_starts', encode(starts.start_digest, 'hex')
+				  , 'delivery_responsibilities', coalesce((select jsonb_agg(jsonb_build_array(
+				    notification_id, delivery_id, classification, encode(evidence_digest, 'hex')
+				  ) order by notification_id, delivery_id) from responsibilities), '[]'::jsonb)
 				  , 'notification_audit_summaries', coalesce((select jsonb_agg(jsonb_build_array(
 				    notification_id, event_kind, subject_kind, source_version, recipient_count,
 				    delivery_count, sent_count, unknown_count, permanent_failed_count, record_fence_epoch
@@ -140,134 +220,135 @@ func (repository *PostgresRecordDeletionRepository) PreviewCollaborationDeletion
 				  'recipients', (select count(*) from public.record_notification_recipients where record_id = root.record_id),
 				  'deliveries', (select count(*) from public.record_notification_deliveries where record_id = root.record_id),
 				  'delivery_attempts', (select count(*) from public.record_notification_delivery_attempts where record_id = root.record_id)
+				  , 'retained_delivery_starts', starts.start_count
 				  , 'notification_audit_summaries', (select count(*) from public.record_notification_audit_summaries where record_id = root.record_id)
 				) as impact_material,
-				((select count(*) from public.record_notification_deliveries
-				  where record_id = root.record_id and delivery_state = 'sent') +
+				((select count(*) from responsibilities where classification = 'sent') +
 				 (select coalesce(sum(sent_count), 0) from public.record_notification_audit_summaries
 				  where record_id = root.record_id)) as delivered_count,
-				((select count(*) from public.record_notification_deliveries
-				  where record_id = root.record_id and delivery_state = 'unknown_outcome') +
+				((select count(*) from responsibilities where classification = 'possible_external') +
 				 (select coalesce(sum(unknown_count), 0) from public.record_notification_audit_summaries
-				  where record_id = root.record_id)) as possible_count
+				  where record_id = root.record_id)) as possible_count,
+				(starts.mismatched or exists (
+				  select 1 from responsibilities
+				  where mismatched is distinct from false or notification_id is null or notification_id = ''
+				     or delivery_id is null or delivery_id = ''
+				     or classification is null or classification not in ('sent', 'possible_external', 'permanent_failure', 'none')
+				     or evidence_digest is null or octet_length(evidence_digest) <> 32
+				) or (select count(*) <> count(distinct delivery_id) from responsibilities)
+				  or exists (select 1 from public.record_notification_audit_summaries as audit
+				    where audit.record_id = root.record_id and (
+				      exists (select 1 from responsibilities where notification_id = audit.notification_id)
+				      or exists (select 1 from public.record_notifications as notification
+				        where notification.record_id = root.record_id and notification.notification_id = audit.notification_id)
+				    ))) as invalid_inventory
 				from root
+				cross join lateral public.record_collaboration_start_inventory(root.record_id, $6) as starts
 			)
 			select pg_catalog.convert_to(dependency_material::text, 'UTF8'),
 			       pg_catalog.convert_to(impact_material::text, 'UTF8'),
-			       delivered_count, possible_count
+			       delivered_count, possible_count, invalid_inventory
 			from material`,
-			target.Object.ProjectID, target.Object.ObjectID, target.CurrentRevisionID,
-			int64(target.LockVersion), int64(target.AuthorizationEpoch), int64(target.ContentDeliveryEpoch),
-		).Scan(&dependencyMaterial, &impactMaterial, &deliveredCount, &possibleCount)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return recorddeletion.ErrDeletionPreviewStale
-		}
-		if err != nil {
-			return fmt.Errorf("preview collaboration deletion: %w", err)
-		}
-		if len(dependencyMaterial) == 0 || len(impactMaterial) == 0 || deliveredCount < 0 || possibleCount < 0 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		snapshot = recorddeletion.AdapterPreviewSnapshot{
-			DependencyDigest: digestRecordPurgeBytes(
-				collaborationDeletionPreviewDigestDomainV1, target.DependencyGraphDigest[:], dependencyMaterial,
-			),
-			ImpactDigest:    digestRecordPurgeBytes(collaborationDeletionImpactDigestDomainV1, impactMaterial),
-			SurvivingCopies: []recorddeletion.AdapterSurvivingCopy{},
-		}
-		if deliveredCount > 0 {
-			snapshot.SurvivingCopies = append(snapshot.SurvivingCopies, recorddeletion.AdapterSurvivingCopy{
-				Kind: recorddeletion.SurvivingCopyKindDeliveredNotification, CopyCount: uint64(deliveredCount),
-			})
-		}
-		if possibleCount > 0 {
-			snapshot.SurvivingCopies = append(snapshot.SurvivingCopies, recorddeletion.AdapterSurvivingCopy{
-				Kind: recorddeletion.SurvivingCopyKindPossibleExternalDelivery, CopyCount: uint64(possibleCount),
-			})
-		}
-		if err := snapshot.Validate(); err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
-	})
-	return snapshot, err
+		target.Object.ProjectID, target.Object.ObjectID, target.CurrentRevisionID,
+		int64(target.LockVersion), int64(target.AuthorizationEpoch), int64(target.ContentDeliveryEpoch),
+	).Scan(&dependencyMaterial, &impactMaterial, &deliveredCount, &possibleCount, &invalidInventory)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionPreviewStale
+	}
+	if err != nil {
+		return recorddeletion.AdapterPreviewSnapshot{}, fmt.Errorf("preview collaboration deletion: %w", err)
+	}
+	if len(dependencyMaterial) == 0 || len(impactMaterial) == 0 || deliveredCount < 0 || possibleCount < 0 || invalidInventory {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	snapshot := recorddeletion.AdapterPreviewSnapshot{
+		DependencyDigest: digestRecordPurgeBytes(
+			collaborationDeletionPreviewDigestDomainV2, target.DependencyGraphDigest[:], dependencyMaterial,
+		),
+		ImpactDigest:    digestRecordPurgeBytes(collaborationDeletionImpactDigestDomainV2, impactMaterial),
+		SurvivingCopies: []recorddeletion.AdapterSurvivingCopy{},
+	}
+	if deliveredCount > 0 {
+		snapshot.SurvivingCopies = append(snapshot.SurvivingCopies, recorddeletion.KnownAdapterSurvivingCopy(
+			recorddeletion.SurvivingCopyKindDeliveredNotification, uint64(deliveredCount),
+		))
+	}
+	if possibleCount > 0 {
+		snapshot.SurvivingCopies = append(snapshot.SurvivingCopies, recorddeletion.KnownAdapterSurvivingCopy(
+			recorddeletion.SurvivingCopyKindPossibleExternalDelivery, uint64(possibleCount),
+		))
+	}
+	if err := snapshot.Validate(); err != nil {
+		return snapshot, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return snapshot, nil
 }
 
 func (repository *PostgresRecordDeletionRepository) PurgeRecordCollaboration(
 	ctx context.Context,
 	command recordcollaboration.DeletionCommand,
 ) (recorddeletion.AdapterPurgeReceipt, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil ||
-		command.Operation.LedgerSequence > math.MaxInt64 || uint64(command.Operation.FenceEpoch) > math.MaxInt64 {
+	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, recordcollaboration.ErrInvalidDeletionAdapter
+	}
+	if err := repository.drainCollaborationOutbox(ctx, command); err != nil {
+		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
 	var receipt recorddeletion.AdapterPurgeReceipt
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := validateLockedEvidencePurgeOperation(ctx, transaction.tx, command.Operation); err != nil {
-			return err
-		}
-		existing, found, err := loadCollaborationPurgeReceipt(ctx, transaction.tx, command)
-		if err != nil {
-			return err
-		}
-		if found {
-			if err := assertRecordCollaborationSurfacesAbsent(ctx, transaction.tx, command.Operation.Object.ObjectID); err != nil {
-				return err
-			}
-			receipt = existing
-			return nil
-		}
-		var removed int64
-		encoded, err := encodeRecordPurgeCommand(recordPurgeFunctionCommand{
-			OperationID: command.Operation.OperationID, ReservationID: command.Operation.ReservationID,
-			ProjectID: command.Operation.Object.ProjectID, RecordID: command.Operation.Object.ObjectID,
-			FenceEpoch: int64(command.Operation.FenceEpoch), LedgerSequence: int64(command.Operation.LedgerSequence),
-			LedgerEntryHash: encodeRecordPurgeLedgerHash(command.Operation.LedgerEntryHash),
-		})
-		if err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		if err := transaction.tx.QueryRow(ctx, `
-			select public.record_collaboration_purge($1)`, encoded,
-		).Scan(&removed); err != nil {
-			return fmt.Errorf("purge record collaboration through constrained function: %w", err)
-		}
-		if removed < 0 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		if err := assertRecordCollaborationSurfacesAbsent(ctx, transaction.tx, command.Operation.Object.ObjectID); err != nil {
-			return err
-		}
-		removedRows := uint64(removed)
-		receiptDigest := collaborationDeletionReceiptDigest(command, removedRows)
-		var verifiedAt time.Time
-		if err := transaction.tx.QueryRow(ctx, `
-			insert into public.record_collaboration_purge_receipts (
-				operation_id, removed_surface_digest, receipt_digest,
-				removed_row_count, verified_absent_at
-			) values ($1, $2, $3, $4, transaction_timestamp())
-			returning verified_absent_at`, command.Operation.OperationID, command.SurfaceDigest[:],
-			receiptDigest[:], removed,
-		).Scan(&verifiedAt); err != nil {
-			return fmt.Errorf("insert collaboration purge receipt: %w", err)
-		}
-		if verifiedAt.IsZero() {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		receipt = recorddeletion.AdapterPurgeReceipt{
-			AdapterName: recorddeletion.AdapterNameRecordCollaboration, OperationID: command.Operation.OperationID,
-			SurfaceDigest: command.SurfaceDigest, ReceiptDigest: receiptDigest,
-			RemovedRowCount: removedRows, VerifiedAbsentAt: verifiedAt.UTC(),
-		}
-		return nil
+		var err error
+		receipt, err = runClientComparisonPurgeFunction(ctx, transaction.tx, `
+			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
+			from public.record_collaboration_purge_v2($1)`, recorddeletion.AdapterNameRecordCollaboration,
+			command.Operation, command.OwnerClaim, command.SurfaceDigest)
+		return err
 	})
 	if err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
-	if err := repository.VerifyRecordCollaborationPurge(ctx, command, receipt); err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, err
-	}
 	return receipt, nil
+}
+
+// Each transaction commits at most one bounded batch. A later owner can resume
+// after an error or unknown commit, but only with its own exact claim.
+func (repository *PostgresRecordDeletionRepository) drainCollaborationOutbox(
+	ctx context.Context,
+	command recordcollaboration.DeletionCommand,
+) error {
+	expires := command.OwnerClaim.Owner.ExpiresAt.UTC()
+	expiresText := expires.Format(time.RFC3339Nano)
+	parsed, err := time.Parse(time.RFC3339Nano, expiresText)
+	if err != nil || !parsed.Equal(expires) || expires.Nanosecond()%1000 != 0 {
+		return recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	encoded, err := encodeRecordPurgeCommand(clientComparisonPurgeEnvelope{
+		OperationID: command.Operation.OperationID, RecordID: command.Operation.Object.ObjectID,
+		ReservationID: command.Operation.ReservationID, FenceEpoch: uint64(command.Operation.FenceEpoch),
+		OwnerID: command.OwnerClaim.Owner.OwnerID, OwnerGeneration: command.OwnerClaim.Owner.Generation,
+		OwnerExpiresAt: expiresText, SurfaceDigest: hex.EncodeToString(command.SurfaceDigest[:]),
+	})
+	if err != nil {
+		return recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	for {
+		var drained int64
+		var remaining bool
+		err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+			if err := transaction.tx.QueryRow(ctx, `select drained_count, remaining from public.record_outbox_drain_v2($1)`, encoded).Scan(&drained, &remaining); err != nil {
+				return fmt.Errorf("drain collaboration outbox: %w", err)
+			}
+			if drained < 0 || drained > 100 || (remaining && drained == 0) {
+				return recorddeletion.ErrDeletionSafetyUnavailable
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if !remaining {
+			return nil
+		}
+	}
 }
 
 func (repository *PostgresRecordDeletionRepository) VerifyRecordCollaborationPurge(
@@ -275,110 +356,24 @@ func (repository *PostgresRecordDeletionRepository) VerifyRecordCollaborationPur
 	command recordcollaboration.DeletionCommand,
 	receipt recorddeletion.AdapterPurgeReceipt,
 ) error {
-	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil ||
-		receipt.AdapterName != recorddeletion.AdapterNameRecordCollaboration ||
-		receipt.OperationID != command.Operation.OperationID || receipt.SurfaceDigest != command.SurfaceDigest ||
-		receipt.VerifiedAbsentAt.IsZero() ||
-		receipt.ReceiptDigest != collaborationDeletionReceiptDigest(command, receipt.RemovedRowCount) {
+	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil {
 		return recordcollaboration.ErrInvalidDeletionAdapter
 	}
-	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := validateLockedEvidencePurgeOperation(ctx, transaction.tx, command.Operation); err != nil {
-			return err
-		}
-		var rawSurface, rawReceipt []byte
-		var removed int64
-		var verifiedAt time.Time
-		if err := transaction.tx.QueryRow(ctx, `
-			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_collaboration_purge_receipts
-			where operation_id = $1 and adapter_name = 'record_collaboration'`,
-			command.Operation.OperationID,
-		).Scan(&rawSurface, &rawReceipt, &removed, &verifiedAt); err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		if removed < 0 || uint64(removed) != receipt.RemovedRowCount ||
-			!verifiedAt.Equal(receipt.VerifiedAbsentAt) ||
-			!equalRecordPurgeDigest(rawSurface, receipt.SurfaceDigest) ||
-			!equalRecordPurgeDigest(rawReceipt, receipt.ReceiptDigest) {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return assertRecordCollaborationSurfacesAbsent(ctx, transaction.tx, command.Operation.Object.ObjectID)
-	})
-}
-
-func assertRecordCollaborationSurfacesAbsent(ctx context.Context, tx pgx.Tx, recordID string) error {
-	var remaining int64
-	if err := tx.QueryRow(ctx, `
-		select
-		  (select count(*) from public.record_action_events where record_id = $1) +
-		  (select count(*) from public.record_actions where record_id = $1) +
-		  (select count(*) from public.record_comment_mentions where record_id = $1) +
-		  (select count(*) from public.record_comment_replies where record_id = $1) +
-		  (select count(*) from public.record_comment_revisions where record_id = $1) +
-		  (select count(*) from public.record_comment_tombstones where record_id = $1) +
-		  (select count(*) from public.record_comments where record_id = $1) +
-		  (select count(*) from public.record_followers where record_id = $1) +
-		  (select count(*) from public.record_notification_deliveries where record_id = $1) +
-		  (select count(*) from public.record_notification_delivery_attempts where record_id = $1) +
-		  (select count(*) from public.record_notification_audit_summaries where record_id = $1) +
-		  (select count(*) from public.record_notification_recipients where record_id = $1) +
-		  (select count(*) from public.record_notifications where record_id = $1)`, recordID,
-	).Scan(&remaining); err != nil {
-		return fmt.Errorf("verify record collaboration purge absence: %w", err)
-	}
-	if remaining != 0 {
+	descriptor, err := recorddeletion.NewAdapterDescriptor(recorddeletion.AdapterNameRecordCollaboration, recorddeletion.RecordCollaborationSurfaceNames())
+	target := recorddeletion.PurgeTarget{Operation: command.Operation, OwnerClaim: command.OwnerClaim}
+	if err != nil || recorddeletion.ValidateAdapterPurgeReceipt(receipt, target, descriptor) != nil {
 		return recorddeletion.ErrDeletionSafetyUnavailable
 	}
-	return nil
-}
-
-func loadCollaborationPurgeReceipt(
-	ctx context.Context,
-	tx pgx.Tx,
-	command recordcollaboration.DeletionCommand,
-) (recorddeletion.AdapterPurgeReceipt, bool, error) {
-	var rawSurface, rawReceipt []byte
-	var removed int64
-	var verifiedAt time.Time
-	err := tx.QueryRow(ctx, `
-		select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-		from public.record_collaboration_purge_receipts
-		where operation_id = $1 and adapter_name = 'record_collaboration'`,
-		command.Operation.OperationID,
-	).Scan(&rawSurface, &rawReceipt, &removed, &verifiedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, nil
-	}
-	if err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, false, fmt.Errorf("load collaboration purge receipt: %w", err)
-	}
-	if removed < 0 || verifiedAt.IsZero() || !equalRecordPurgeDigest(rawSurface, command.SurfaceDigest) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	receipt := recorddeletion.AdapterPurgeReceipt{
-		AdapterName: recorddeletion.AdapterNameRecordCollaboration, OperationID: command.Operation.OperationID,
-		SurfaceDigest: command.SurfaceDigest, ReceiptDigest: collaborationDeletionReceiptDigest(command, uint64(removed)),
-		RemovedRowCount: uint64(removed), VerifiedAbsentAt: verifiedAt.UTC(),
-	}
-	if !equalRecordPurgeDigest(rawReceipt, receipt.ReceiptDigest) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return receipt, true, nil
-}
-
-func collaborationDeletionReceiptDigest(
-	command recordcollaboration.DeletionCommand,
-	removed uint64,
-) [sha256.Size]byte {
-	return digestRecordPurgeBytes(
-		collaborationDeletionReceiptDigestDomainV1,
-		[]byte(command.Operation.OperationID),
-		[]byte(command.Operation.Object.ProjectID),
-		[]byte(command.Operation.Object.ObjectID),
-		command.SurfaceDigest[:],
-		recordPurgeUint64(removed),
-	)
+	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		actual, err := runClientComparisonPurgeFunction(ctx, transaction.tx, `
+			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
+			from public.record_collaboration_purge_verify_v2($1)`, recorddeletion.AdapterNameRecordCollaboration,
+			command.Operation, command.OwnerClaim, command.SurfaceDigest)
+		if err != nil {
+			return err
+		}
+		return matchClientComparisonPurgeReceipt(receipt, actual)
+	})
 }
 
 var _ recordcollaboration.DeletionStore = (*PostgresRecordDeletionRepository)(nil)

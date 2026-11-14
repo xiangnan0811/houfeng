@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,11 +16,14 @@ import (
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/records"
 )
 
 type PostgresRecordDraftRepository struct {
 	platform        *PostgresRecordPlatformRepository
+	members         CollaborationMembershipReader
+	authorization   currentRecordAuthorizationPrefetcher
 	newCheckpointID func() (string, error)
 }
 
@@ -34,6 +39,20 @@ func NewPostgresRecordDraftRepository(pool *pgxpool.Pool, gate AdmissionGate) *P
 			return ids.New("rdc")
 		},
 	}
+}
+
+// ConfigureRecordMutationAuthorization supplies the current actor and source
+// checks for draft effects. Expiry cleanup retains its own authority.
+func (repository *PostgresRecordDraftRepository) ConfigureRecordMutationAuthorization(
+	members CollaborationMembershipReader,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+) error {
+	if repository == nil || nilRecordSubjectDependency(members) || authorization == nil {
+		return ErrRecordSubjectUnavailable
+	}
+	repository.members = members
+	repository.authorization = authorization
+	return nil
 }
 
 func (repository *PostgresRecordDraftRepository) AuthorizeDraftAttachmentUpload(
@@ -391,34 +410,49 @@ func (repository *PostgresRecordDraftRepository) PatchDraft(
 		return records.Draft{}, err
 	}
 
-	var updated records.Draft
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var recordID *string
-		err := transaction.tx.QueryRow(ctx, `
-			select drafts.record_id
-			from public.record_drafts drafts
-			where drafts.draft_id = $1 and drafts.author_id = $2
-			  and (
-				drafts.record_id is null
-				or not exists (
-					select 1
-					from public.deletion_reservations reservations
-					where reservations.project_id = drafts.project_id
-					  and reservations.object_kind = $3
-					  and reservations.object_id = drafts.record_id
-					  and reservations.state in ('fenced', 'committed')
-				)
-			  )`, command.DraftID, command.AuthorID, recordObjectKind).Scan(&recordID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return records.ErrDraftNotFound
-		}
+	for attempt := 0; ; attempt++ {
+		routing, err := repository.GetDraftRouting(ctx, command.DraftID, command.AuthorID)
 		if err != nil {
-			return fmt.Errorf("load record draft routing metadata for patch: %w", err)
+			return records.Draft{}, err
 		}
-		if recordID != nil {
-			if err := assertRecordMutationFence(ctx, transaction.tx, *recordID); err != nil {
-				return err
-			}
+		prepared, err := repository.prepareDraftAuthorization(ctx, routing.RecordID)
+		if err != nil {
+			return records.Draft{}, err
+		}
+		updated, err := repository.patchDraftWithAuthorization(ctx, command, routing, prepared)
+		if draftSerializationFailure(err) && attempt < 2 {
+			continue
+		}
+		return updated, err
+	}
+}
+
+func (repository *PostgresRecordDraftRepository) patchDraftWithAuthorization(
+	ctx context.Context, command records.DraftPatchCommand, routing records.DraftRouting,
+	prepared currentRecordAuthorizationTransactionResolver,
+) (records.Draft, error) {
+	var updated records.Draft
+	err := repository.platform.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		updated = records.Draft{}
+		resources, err := acquireDraftMutation(ctx, transaction.tx, []string{command.DraftID})
+		if err != nil {
+			return err
+		}
+		if len(resources.resources.Drafts) != 1 {
+			return draftRouteChanged()
+		}
+		observed := resources.resources.Drafts[0]
+		if observed.ProjectID != string(routing.ProjectID) || observed.RecordID != routing.RecordID ||
+			observed.AuthorID != command.AuthorID {
+			return draftRouteChanged()
+		}
+		if err := repository.authorizeDraftMutation(ctx, transaction.tx, observed.ProjectID, observed.AuthorID,
+			observed.RecordID, recordauth.CapabilityDraftUpdate, prepared); err != nil {
+			return err
+		}
+		var recordID *string
+		if observed.RecordID != "" {
+			recordID = &observed.RecordID
 		}
 		var head *recordDraftRebaseHead
 		if command.BaseRevisionID != "" && recordID != nil {
@@ -602,38 +636,34 @@ func (repository *PostgresRecordDraftRepository) DeleteDraft(
 		return err
 	}
 
-	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var recordID *string
-		err := transaction.tx.QueryRow(ctx, `
-			select drafts.record_id
-			from public.record_drafts drafts
-			where drafts.draft_id = $1 and drafts.author_id = $2
-			  and (
-				drafts.record_id is null
-				or not exists (
-					select 1
-					from public.deletion_reservations reservations
-					where reservations.project_id = drafts.project_id
-					  and reservations.object_kind = $3
-					  and reservations.object_id = drafts.record_id
-					  and reservations.state in ('fenced', 'committed')
-				)
-			  )`, command.DraftID, command.AuthorID, recordObjectKind).Scan(&recordID)
-		if errors.Is(err, pgx.ErrNoRows) {
+	return repository.platform.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		resources, err := acquireDraftMutation(ctx, transaction.tx, []string{command.DraftID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, records.ErrRecordDeletionReserved) {
+				return records.ErrDraftNotFound
+			}
+			return err
+		}
+		if len(resources.resources.Drafts) != 1 || resources.resources.Drafts[0].AuthorID != command.AuthorID {
 			return records.ErrDraftNotFound
 		}
-		if err != nil {
-			return fmt.Errorf("load record draft routing metadata for cleanup: %w", err)
+		observed := resources.resources.Drafts[0]
+		members := repository.members
+		if nilRecordSubjectDependency(members) {
+			members = NewPostgresCollaborationMembershipReader()
 		}
-		if recordID != nil {
-			if err := assertRecordMutationFence(ctx, transaction.tx, *recordID); err != nil {
-				return err
-			}
+		actor, err := members.ReadMemberActor(ctx, transaction.tx, recordauth.ProjectID(observed.ProjectID), command.AuthorID)
+		if err != nil || actor.UserID != command.AuthorID ||
+			(observed.RecordID == "" && actor.Role != recordauth.RoleProjectAdmin) {
+			return recordauth.ErrDenied
 		}
 
 		server, err := loadRecordDraftForUpdate(ctx, transaction.tx, command.DraftID, command.AuthorID)
 		if err != nil {
 			return err
+		}
+		if server.RecordID != observed.RecordID || string(server.ProjectID) != observed.ProjectID {
+			return draftRouteChanged()
 		}
 		if command.Reason == records.DraftDeletePublished && server.ETag != command.IfMatch {
 			return records.ErrDraftConflict
@@ -688,22 +718,17 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 	}
 
 	claimed := make([]string, 0, limit)
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err := repository.platform.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		claimed = claimed[:0]
 		rows, err := transaction.tx.Query(ctx, `
 			select drafts.draft_id, drafts.record_id
 			from public.record_drafts drafts
-			where drafts.expires_at <= transaction_timestamp()
-			  and (
-				drafts.record_id is null
-				or not exists (
-					select 1
-					from public.deletion_reservations reservations
-					where reservations.project_id = drafts.project_id
-					  and reservations.object_kind = $2
-					  and reservations.object_id = drafts.record_id
-					  and reservations.state in ('fenced', 'committed')
-				)
-			  )
+			where drafts.expires_at <= clock_timestamp()
+			  and (drafts.record_id is null or not exists (
+				select 1 from public.deletion_reservations reservations
+				where reservations.project_id=drafts.project_id and reservations.object_kind=$2
+				  and reservations.object_id=drafts.record_id and reservations.state in ('fenced','committed')
+			  ))
 			  -- 附件仍在处理的草稿在 limit 之前排除，否则它们会反复占满批次，饿死后面的草稿。
 			  and not exists (
 				select 1
@@ -714,7 +739,7 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 				  on job.attachment_id = attachment.attachment_id
 				where attachment.draft_id = drafts.draft_id
 				  and ((upload.temporary_object_key is not null and upload.temporary_object_deleted_at is null)
-				    or (job.processor_state = 'claimed' and job.lease_expires_at > transaction_timestamp())
+				    or (job.processor_state = 'claimed' and job.lease_expires_at > clock_timestamp())
 				    or exists (
 					  select 1 from public.content_processor_workspaces as workspace
 					  where workspace.processor_job_id = job.processor_job_id
@@ -728,14 +753,12 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 				    ))
 			  )
 			order by drafts.expires_at, drafts.draft_id
-			for update skip locked
 			limit $1`, int64(limit), recordObjectKind)
 		if err != nil {
 			return fmt.Errorf("claim expired record drafts: %w", err)
 		}
 		defer rows.Close()
-		recordIDs := make([]string, 0, limit)
-		seenRecordIDs := make(map[string]struct{})
+		draftRoutes := make(map[string]string)
 		for rows.Next() {
 			var draftID string
 			var recordID *string
@@ -745,14 +768,12 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 			if err := records.ValidateDraftID(draftID); err != nil {
 				return fmt.Errorf("validate expired record draft: %w", err)
 			}
+			draftRoutes[draftID] = ""
 			if recordID != nil {
-				if !validStoredRecordIdentity(*recordID, "rec_") {
+				if !recordidentity.IsValid(*recordID) {
 					return fmt.Errorf("%w: cleanup record identity", records.ErrInvalidDraftCommand)
 				}
-				if _, exists := seenRecordIDs[*recordID]; !exists {
-					seenRecordIDs[*recordID] = struct{}{}
-					recordIDs = append(recordIDs, *recordID)
-				}
+				draftRoutes[draftID] = *recordID
 			}
 			claimed = append(claimed, draftID)
 		}
@@ -763,9 +784,86 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 		if len(claimed) == 0 {
 			return nil
 		}
-		for _, recordID := range recordIDs {
-			if err := assertRecordMutationFence(ctx, transaction.tx, recordID); err != nil {
+		var namespaces []string
+		route := attachmentWriterRoute{draftIDs: claimed, heldNamespaces: &namespaces}
+		if err := lockAttachmentWriterPrefix(ctx, transaction.tx, route); err != nil {
+			return err
+		}
+		observedByDraft := make(map[string]recordMutationResources, len(claimed))
+		sets := make([]records.RevisionMutationResources, 0, len(claimed))
+		for _, draftID := range claimed {
+			observed, err := discoverDraftMutationResources(ctx, transaction.tx, []string{draftID}, false)
+			if err != nil {
+				return draftRouteChanged()
+			}
+			if len(observed.resources.Drafts) != 1 || observed.resources.Drafts[0].RecordID != draftRoutes[draftID] {
+				return draftRouteChanged()
+			}
+			observedByDraft[draftID] = observed
+			sets = append(sets, observed.resources)
+		}
+		all, err := normalizeRecordMutationDeclarations(sets...)
+		if err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResourceRange(ctx, transaction.tx, all, 10, 60); err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResourceRange(ctx, transaction.tx, all, 70, 71); err != nil {
+			return err
+		}
+		// Candidate discovery grants no ownership. After the low-rank locks,
+		// claim only still-expired candidates and preserve SKIP LOCKED behavior.
+		locked, err := transaction.tx.Query(ctx, `select draft_id,coalesce(record_id,'') from public.record_drafts
+			where draft_id=any($1::text[]) and expires_at<=clock_timestamp()
+			order by draft_id for update skip locked`, claimed)
+		if err != nil {
+			return err
+		}
+		claimed = claimed[:0]
+		for locked.Next() {
+			var draftID, recordID string
+			if err := locked.Scan(&draftID, &recordID); err != nil {
+				locked.Close()
 				return err
+			}
+			if recordID != draftRoutes[draftID] {
+				locked.Close()
+				return &pgconn.PgError{Code: "40001", Message: "expired draft route changed; restart transaction"}
+			}
+			claimed = append(claimed, draftID)
+		}
+		locked.Close()
+		if err := locked.Err(); err != nil {
+			return err
+		}
+		if len(claimed) == 0 {
+			return nil
+		}
+		sets = sets[:0]
+		for _, draftID := range claimed {
+			sets = append(sets, observedByDraft[draftID].resources)
+		}
+		selected, err := normalizeRecordMutationDeclarations(sets...)
+		if err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResourceRange(ctx, transaction.tx, selected, 72, 75); err != nil {
+			return err
+		}
+		for _, draftID := range claimed {
+			current, err := discoverDraftMutationResources(ctx, transaction.tx, []string{draftID}, false)
+			if err != nil || !reflect.DeepEqual(observedByDraft[draftID].resources, current.resources) {
+				return draftRouteChanged()
+			}
+		}
+		currentNamespaces, err := revisionBatchNamespaces(ctx, transaction.tx, nil, claimed, nil, "")
+		if err != nil {
+			return err
+		}
+		for _, namespace := range currentNamespaces {
+			if _, held := slices.BinarySearch(namespaces, namespace); !held {
+				return draftRouteChanged()
 			}
 		}
 		released, err := releaseExpiredDraftAttachments(ctx, transaction.tx, claimed)
@@ -898,16 +996,35 @@ func (repository *PostgresRecordDraftRepository) CreateDraft(
 		return records.Draft{}, err
 	}
 	payloadHash := command.Payload.Hash()
+	prepared, err := repository.prepareDraftAuthorization(ctx, command.RecordID)
+	if err != nil {
+		return records.Draft{}, err
+	}
 
 	var createdAt time.Time
 	var updatedAt time.Time
 	var warningAt time.Time
 	var expiresAt time.Time
-	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := lockAttachmentWriterPrefix(ctx, transaction.tx, attachmentWriterRoute{}); err != nil {
+			return err
+		}
+		observed, err := discoverDraftCreationResources(ctx, transaction.tx, string(command.ProjectID), command.AuthorID, command.RecordID)
+		if err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResources(ctx, transaction.tx, observed); err != nil {
+			return err
+		}
+		current, err := discoverDraftCreationResources(ctx, transaction.tx, string(command.ProjectID), command.AuthorID, command.RecordID)
+		if err != nil || !reflect.DeepEqual(observed.resources, current.resources) {
+			return draftRouteChanged()
+		}
+		if err := repository.authorizeDraftMutation(ctx, transaction.tx, string(command.ProjectID), command.AuthorID,
+			command.RecordID, recordauth.CapabilityDraftCreate, prepared); err != nil {
+			return err
+		}
 		if command.RecordID != "" {
-			if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
-				return err
-			}
 			var currentRevisionID string
 			var lifecycle string
 			err := transaction.tx.QueryRow(ctx, `

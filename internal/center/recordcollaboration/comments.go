@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 const (
@@ -121,7 +122,7 @@ type CommentMutationResult struct {
 }
 
 func (result CommentMutationResult) Validate() error {
-	if ValidateCommentID(result.CommentID) != nil || !validRecordID(result.RecordID) || result.Version == 0 ||
+	if ValidateCommentID(result.CommentID) != nil || !recordidentity.IsValid(result.RecordID) || result.Version == 0 ||
 		result.Version > MaxCommentVersion || !validCommentMutationKind(result.EventKind) || result.ChangedAt.IsZero() ||
 		(result.EventKind == CommentMutationRedact) != (result.State == CommentStateRedacted) ||
 		(result.EventKind != CommentMutationRedact) != (result.State == CommentStateActive) {
@@ -146,7 +147,7 @@ type CommentRecord struct {
 }
 
 func (record CommentRecord) Validate() error {
-	if ValidateCommentID(record.CommentID) != nil || !validRecordID(record.RecordID) ||
+	if ValidateCommentID(record.CommentID) != nil || !recordidentity.IsValid(record.RecordID) ||
 		recordauth.ValidateActorUserID(record.AuthorID) != nil || record.Version == 0 || record.Version > MaxCommentVersion ||
 		record.CreatedAt.IsZero() || record.UpdatedAt.Before(record.CreatedAt) ||
 		(record.ReplyToCommentID != "" && ValidateCommentID(record.ReplyToCommentID) != nil) {

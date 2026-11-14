@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../lib/apiRequest'
 import type { EvidenceCapturePreview, EvidenceCapturePreviewInput } from '../../../lib/types'
+import { recordAllocationFixture } from '../testFixtures'
 import { EvidenceCapturePicker, type EvidenceCaptureSubject } from './EvidenceCapturePicker'
 import type { OtherEvidenceSourceLoaders } from './useOtherEvidenceSource'
 
@@ -15,9 +16,13 @@ const subjects: readonly EvidenceCaptureSubject[] = [
   { kind: 'monitoring_instance', source_id: 'mi_backup', label: '备用监控实例' },
 ]
 
+const NEW_TARGET = recordAllocationFixture('picker', { purpose: 'evidence_preview' })
+
+// New targets get the server reservation back; existing records only echo their ID.
 function previewFor(input: EvidenceCapturePreviewInput, overrides: Partial<EvidenceCapturePreview> = {}): EvidenceCapturePreview {
   return {
-    record_id: input.record_id ?? 'rec_allocated',
+    record_id: input.record_id ?? NEW_TARGET.record_id,
+    ...(input.record_id === undefined || input.allocation ? { allocation: input.allocation ?? NEW_TARGET } : {}),
     snapshot_id: 'evs_picker',
     capture_intent_id: 'eci_picker',
     kind: input.kind,
@@ -66,6 +71,50 @@ async function generatePreview() {
 }
 
 describe('EvidenceCapturePicker', () => {
+  it('keeps an unavailable preview inert while reservation state is loading', () => {
+    const requestPreview = echoPreview()
+    render(<EvidenceCapturePicker subjects={subjects} requestPreview={requestPreview} onConfirm={vi.fn()} previewBlocked now={now} />)
+    const button = screen.getByRole('button', { name: '生成预览' })
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(button)
+    expect(requestPreview).not.toHaveBeenCalled()
+  })
+
+  it('returns focus to the source when discarding before a preview can be generated', () => {
+    const loaders: OtherEvidenceSourceLoaders = { listVPS: vi.fn().mockResolvedValue([]), listMonitoringInstances: vi.fn().mockResolvedValue([]) }
+    const onDiscard = vi.fn().mockResolvedValue(undefined)
+    render(<EvidenceCapturePicker subjects={[]} otherSources={loaders} requestPreview={echoPreview()} onConfirm={vi.fn()}
+      reservationNotice={{ message: '预留待确认', canDiscard: true }} onDiscardReservation={onDiscard} now={now} />)
+    expect(screen.getByRole('button', { name: '生成预览' })).toBeDisabled()
+    const discard = screen.getByRole('button', { name: '放弃预留确认' })
+    discard.focus()
+    fireEvent.click(discard)
+    expect(screen.getByLabelText('来源')).toHaveFocus()
+    expect(onDiscard).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces a generic preview error with the reservation notice and clears it on discard', async () => {
+    const requestPreview = vi.fn().mockRejectedValue(new TypeError('allocation unavailable'))
+    const onDiscard = vi.fn().mockResolvedValue(undefined)
+    const picker = (notice: { message: string; canDiscard: boolean } | null) => (
+      <EvidenceCapturePicker subjects={subjects} requestPreview={requestPreview} onConfirm={vi.fn()}
+        reservationNotice={notice} onDiscardReservation={onDiscard} now={now} />
+    )
+    const view = render(picker(null))
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    view.rerender(picker({ message: '预留待确认', canDiscard: true }))
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getByRole('alert')).toHaveTextContent('预留待确认')
+    const discard = screen.getByRole('button', { name: '放弃预留确认' })
+    discard.focus()
+    fireEvent.click(discard)
+    view.rerender(picker(null))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成预览' })).toHaveFocus()
+    expect(onDiscard).toHaveBeenCalledTimes(1)
+  })
+
   it('预选记录主体与常用指标，按字典序提交已结束的 24 小时窗口', async () => {
     const requestPreview = echoPreview()
     const onConfirm = vi.fn()
@@ -240,6 +289,32 @@ describe('EvidenceCapturePicker', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('预览结果与当前选择不一致，请重新生成')
     expect(screen.queryByRole('region', { name: '证据预览' })).not.toBeInTheDocument()
     expect(screen.queryByText('disk nearly full on db-1')).not.toBeInTheDocument()
+  })
+
+  it('新建记录：首个预览缺少服务端预留时拒绝，之后的预览与加入沿用同一预留', async () => {
+    const unreserved = vi.fn((input: EvidenceCapturePreviewInput) => {
+      const preview = previewFor(input)
+      delete preview.allocation
+      return Promise.resolve(preview)
+    })
+    const onConfirm = vi.fn()
+    const { rerender } = render(<EvidenceCapturePicker subjects={subjects} requestPreview={unreserved} onConfirm={onConfirm} now={now} />)
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('预览结果与当前选择不一致，请重新生成')
+
+    const requestPreview = echoPreview()
+    rerender(<EvidenceCapturePicker recordId={NEW_TARGET.record_id} allocation={NEW_TARGET} subjects={subjects} requestPreview={requestPreview} onConfirm={onConfirm} now={now} />)
+    const region = await generatePreview()
+    expect(lastInput(requestPreview)).toMatchObject({ record_id: NEW_TARGET.record_id, allocation: NEW_TARGET })
+    fireEvent.click(within(region).getByRole('button', { name: '加入记录' }))
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ record_id: NEW_TARGET.record_id, allocation: NEW_TARGET }))
+
+    const moved = vi.fn((input: EvidenceCapturePreviewInput) => Promise.resolve(previewFor(input, {
+      allocation: recordAllocationFixture('other', { purpose: 'evidence_preview', record_id: NEW_TARGET.record_id }),
+    })))
+    rerender(<EvidenceCapturePicker recordId={NEW_TARGET.record_id} allocation={NEW_TARGET} subjects={subjects} requestPreview={moved} onConfirm={onConfirm} now={now} />)
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('预览结果与当前选择不一致，请重新生成')
   })
 
   it('记录发布进行中可以预览但不能加入', async () => {

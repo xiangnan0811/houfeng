@@ -9,6 +9,12 @@ import { SubjectRecordsPage } from './SubjectRecordsPage'
 import { RecordNewPage } from './records/RecordNewPage'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import { formatDateTime } from '../lib/format'
+import type * as DraftBuffers from './records/draftBuffer'
+
+vi.mock('./records/draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof DraftBuffers>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 vi.mock('../lib/api', async (importOriginal) => {
 

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"houfeng/internal/center/assetrelations"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -101,6 +102,9 @@ func insertAssetRelation(ctx context.Context, tx assetServiceQueryer, vpsID, kin
 	if err != nil {
 		return assetrelations.Record{}, err
 	}
+	if err := assertAssetRelationSourcesWritable(ctx, tx, vpsID, input.TargetID); err != nil {
+		return assetrelations.Record{}, err
+	}
 	var lifecycle vpsassets.LifecycleStatus
 	if err = tx.QueryRow(ctx, `select lifecycle_status from vps_assets where vps_id=$1 for update`, vpsID).Scan(&lifecycle); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -169,12 +173,18 @@ func (r *PostgresAssetRelationRepository) End(ctx context.Context, vpsID, kind, 
 		return assetrelations.Record{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertAssetRelationSourcesWritable(ctx, tx, vpsID, nil); err != nil {
+		return assetrelations.Record{}, err
+	}
 	record, err := scanAssetRelation(tx.QueryRow(ctx, `select `+relationColumns(kind)+` from `+table+` where id=$1 and vps_id=$2 for update`, id, vpsID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return record, assetrelations.ErrNotFound
 	}
 	if err != nil {
 		return record, err
+	}
+	if err := assertAssetRelationSourcesWritable(ctx, tx, vpsID, record.TargetID); err != nil {
+		return assetrelations.Record{}, err
 	}
 	if record.EndedAt != nil {
 		return record, assetrelations.ErrConflict
@@ -192,11 +202,32 @@ func (r *PostgresAssetRelationRepository) End(ctx context.Context, vpsID, kind, 
 // archiveVPSRelations runs inside the caller's asset graph transaction. Object
 // identities and associations to other VPS assets are deliberately retained.
 func archiveVPSRelations(ctx context.Context, tx pgx.Tx, vpsID, reason string) error {
+	if err := assertVPSLifecycleSourcesWritable(ctx, tx, vpsID); err != nil {
+		return err
+	}
 	for _, kind := range []string{assetrelations.Service, assetrelations.Domain} {
 		table, objects, idColumn, _ := relationTables(kind)
 		_, err := tx.Exec(ctx, `update `+table+` a set ended_at=now(),end_reason=$2,ended_by='system:archive',snapshot=(select to_jsonb(o) from `+objects+` o where o.`+idColumn+`=a.`+idColumn+`) where a.vps_id=$1 and a.ended_at is null`, vpsID, reason)
 		if err != nil {
 			return fmt.Errorf("end %s associations: %w", kind, err)
+		}
+	}
+	return nil
+}
+
+func assertAssetRelationSourcesWritable(ctx context.Context, tx assetServiceQueryer, vpsID string, targetID *string) error {
+	if err := assertSourceWritable(ctx, tx, "vps", vpsID); err != nil {
+		if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+			return assetrelations.ErrNotFound
+		}
+		return err
+	}
+	if targetID != nil {
+		if err := assertSourceWritable(ctx, tx, "target", *targetID); err != nil {
+			if errors.Is(err, targets.ErrTargetNotFound) {
+				return assetrelations.ErrNotFound
+			}
+			return err
 		}
 	}
 	return nil

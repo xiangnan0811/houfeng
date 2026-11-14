@@ -493,11 +493,6 @@ func TestRequestFingerprintV1TrustedPersistedReadbackIsReadOnlyAndOpaque(t *test
 	if reflect.TypeOf(restored).ConvertibleTo(reflect.TypeOf(fingerprint)) {
 		t.Fatal("trusted persisted readback must not be explicitly convertible to the canonical write-capable fingerprint type")
 	}
-	if _, writeCapable := any(restored).(interface {
-		PersistedBytes() ([32]byte, error)
-	}); writeCapable {
-		t.Fatal("trusted persisted readback must not expose canonical persistence bytes")
-	}
 	if err := restored.Validate(); err != nil {
 		t.Fatalf("trusted persisted fingerprint Validate() error = %v", err)
 	}

@@ -17,6 +17,7 @@ type MarkdownPreviewProps = {
   model?: unknown
   modelStatus?: RecordRenderModelStatus | undefined
   references?: readonly DocumentReference[] | undefined
+  pendingReferences?: boolean
 }
 
 const sanitizeSchema = {
@@ -46,12 +47,12 @@ function remarkHoufengRefs() {
   }
 }
 
-export function MarkdownPreview({ source = '', model, modelStatus, references = [] }: MarkdownPreviewProps) {
+export function MarkdownPreview({ source = '', model, modelStatus, references = [], pendingReferences = false }: MarkdownPreviewProps) {
   const decoded = decodeClosedModel(model)
   if (decoded) {
     return (
       <div className="record-document" data-render-contract={decoded.version}>
-        {decoded.nodes.map((node, index) => renderBlock(node, `block-${index}`, references))}
+        {decoded.nodes.map((node, index) => renderBlock(node, `block-${index}`, references, pendingReferences))}
       </div>
     )
   }
@@ -72,13 +73,13 @@ export function MarkdownPreview({ source = '', model, modelStatus, references = 
             <ul className={className?.includes('contains-task-list') ? `${className} record-task-list` : className}>{children}</ul>
           ),
           a(props) {
-            return renderReferenceOrLink(props.href ?? '', props.children, references, 'live')
+            return renderReferenceOrLink(props.href ?? '', props.children, references, pendingReferences, 'live')
           },
           span(props) {
             const href = 'data-houfeng-ref' in props && typeof props['data-houfeng-ref'] === 'string'
               ? props['data-houfeng-ref']
               : ''
-            if (href) return renderReferenceOrLink(href, props.children, references, 'live')
+            if (href) return renderReferenceOrLink(href, props.children, references, pendingReferences, 'live')
             return <span {...props}>{props.children}</span>
           },
         }}
@@ -115,7 +116,7 @@ function taskStateLabel(checked: boolean): string {
   return checked ? '已完成' : '未完成'
 }
 
-function renderBlock(node: DocumentRenderNodeV1, key: string, references: readonly DocumentReference[]): ReactNode {
+function renderBlock(node: DocumentRenderNodeV1, key: string, references: readonly DocumentReference[], pendingReferences: boolean): ReactNode {
   switch (node.type) {
     case 'paragraph':
       return <p key={key}>{renderInlines(node.children, key)}</p>
@@ -124,7 +125,7 @@ function renderBlock(node: DocumentRenderNodeV1, key: string, references: readon
       return <HeadingTag key={key}>{renderInlines(node.children, key)}</HeadingTag>
     }
     case 'blockquote':
-      return <blockquote key={key}>{node.children.map((child, index) => renderBlock(child, `${key}-${index}`, references))}</blockquote>
+      return <blockquote key={key}>{node.children.map((child, index) => renderBlock(child, `${key}-${index}`, references, pendingReferences))}</blockquote>
     case 'thematic_break':
       return <hr key={key} />
     case 'fenced_code':
@@ -173,7 +174,7 @@ function renderBlock(node: DocumentRenderNodeV1, key: string, references: readon
       return (
         <aside key={key} className="record-footnote">
           <strong>{node.text}</strong>
-          {node.children.map((child, index) => renderBlock(child, `${key}-${index}`, references))}
+          {node.children.map((child, index) => renderBlock(child, `${key}-${index}`, references, pendingReferences))}
         </aside>
       )
     case 'reference':
@@ -182,7 +183,7 @@ function renderBlock(node: DocumentRenderNodeV1, key: string, references: readon
       // paragraph the live path produces and drift from it structurally.
       return (
         <p key={key}>
-          {renderReferenceMark(node.kind, node.id, renderInlines(node.children, key), references, key)}
+          {renderReferenceMark(node.kind, node.id, renderInlines(node.children, key), references, pendingReferences, key)}
         </p>
       )
   }
@@ -217,6 +218,7 @@ function renderReferenceOrLink(
   href: string,
   children: ReactNode,
   references: readonly DocumentReference[],
+  pendingReferences: boolean,
   key: string,
 ): ReactNode {
   const evidence = href.startsWith('houfeng-evidence:')
@@ -227,7 +229,7 @@ function renderReferenceOrLink(
   }
   const kind = evidence ? 'evidence' : 'attachment'
   const id = href.slice(href.indexOf(':') + 1)
-  return renderReferenceMark(kind, id, children, references, key)
+  return renderReferenceMark(kind, id, children, references, pendingReferences, key)
 }
 
 function renderReferenceMark(
@@ -235,12 +237,13 @@ function renderReferenceMark(
   id: string,
   children: ReactNode,
   references: readonly DocumentReference[],
+  pendingReferences: boolean,
   key: string,
 ): ReactNode {
   return (
     <span key={key} className={referenceClass(kind, id, references)} data-ref-kind={kind} data-ref-id={id}>
       {children}
-      {!isAuthorized(kind, id, references) ? <span className="record-ref__stale">引用已失效</span> : null}
+      {!isAuthorized(kind, id, references) ? <span className="record-ref__stale">{pendingReferences ? '确认中' : '引用已失效'}</span> : null}
     </span>
   )
 }

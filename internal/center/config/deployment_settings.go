@@ -101,6 +101,13 @@ func sensitiveDeploymentSettingKey(key string) bool {
 		"HOUFENG_COMPARISON_INTENT_KEYRING",
 		"HOUFENG_ATTACHMENT_S3_ACCESS_KEY",
 		"HOUFENG_ATTACHMENT_S3_SECRET_KEY",
+		birthProducerDatabaseURLEnv,
+		birthAuthorityIdentityEnv,
+		birthProducerCredentialEnv,
+		birthReaderDatabaseURLEnv,
+		birthReaderIdentityEnv,
+		birthReaderCredentialEnv,
+		birthLaunchFileEnv,
 		"HOUFENG_DELETION_WITNESS_DATABASE_URL",
 		"HOUFENG_RECORD_DELETION_KEY_FILE",
 		"HOUFENG_BACKUP_HMAC_KEY_FILE":
@@ -141,7 +148,7 @@ func (snapshot DeploymentSettingsSnapshot) WithConfiguredOnly(key string, group 
 }
 
 func newDeploymentSettingSnapshot(cfg CenterConfig) DeploymentSettingsSnapshot {
-	items := make([]DeploymentSettingItem, 0, 44)
+	items := make([]DeploymentSettingItem, 0, 51)
 	add := func(key string, group DeploymentSettingGroup, source DeploymentSettingSource, value *string, configured, sensitive bool, application DeploymentSettingApplication) {
 		items = append(items, DeploymentSettingItem{
 			Key: key, Group: group, Source: source, Value: value,
@@ -175,6 +182,12 @@ func newDeploymentSettingSnapshot(cfg CenterConfig) DeploymentSettingsSnapshot {
 
 	add("HOUFENG_DATABASE_URL", DeploymentSettingGroupDatabase, sourceForOptionalEnv("HOUFENG_DATABASE_URL"), nil, strings.TrimSpace(cfg.DatabaseURL) != "", true, DeploymentSettingApplicationStartup)
 	addBool("HOUFENG_DATABASE_REQUIRE_TLS", DeploymentSettingGroupDatabase, sourceForDefaultedEnv("HOUFENG_DATABASE_REQUIRE_TLS"), cfg.DatabaseRequireTLS, envConfigured("HOUFENG_DATABASE_REQUIRE_TLS"), DeploymentSettingApplicationStartup)
+	for _, key := range []string{birthProducerDatabaseURLEnv, birthAuthorityIdentityEnv, birthProducerCredentialEnv} {
+		add(key, DeploymentSettingGroupRecords, sourceForOptionalEnv(key), nil, cfg.BirthProducer.Connection != nil, true, DeploymentSettingApplicationStartup)
+	}
+	for _, key := range []string{birthReaderDatabaseURLEnv, birthReaderIdentityEnv, birthReaderCredentialEnv} {
+		add(key, DeploymentSettingGroupRecords, sourceForOptionalEnv(key), nil, cfg.BirthReader.Connection != nil, true, DeploymentSettingApplicationStartup)
+	}
 
 	telegramTokenSource := sourceForOptionalEnv("HOUFENG_TELEGRAM_BOT_TOKEN")
 	add("HOUFENG_TELEGRAM_BOT_TOKEN", DeploymentSettingGroupNotifications, telegramTokenSource, nil, strings.TrimSpace(cfg.TelegramBotToken) != "", true, DeploymentSettingApplicationFallback)
@@ -199,6 +212,11 @@ func newDeploymentSettingSnapshot(cfg CenterConfig) DeploymentSettingsSnapshot {
 		recordIdentityApplication = DeploymentSettingApplicationStartup
 		recordFeatureApplication = DeploymentSettingApplicationStartup
 	}
+	launchSource := sourceForOptionalEnv(birthLaunchFileEnv)
+	if recordsEnabled {
+		launchSource = sourceForDefaultedEnv(birthLaunchFileEnv)
+	}
+	add(birthLaunchFileEnv, DeploymentSettingGroupRecords, launchSource, nil, envConfigured(birthLaunchFileEnv), true, recordIdentityApplication)
 	addOptionalString("HOUFENG_RECORD_INSTANCE_ID", DeploymentSettingGroupRecords, strings.TrimSpace(cfg.RecordInstanceID), recordIdentityApplication)
 	deploymentIDSource, _ := sourceForSecret("HOUFENG_RECORD_DEPLOYMENT_ID")
 	if _, fileConfigured := os.LookupEnv("HOUFENG_RECORD_DEPLOYMENT_ID_FILE"); fileConfigured && strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DEPLOYMENT_ID_FILE")) != "" {

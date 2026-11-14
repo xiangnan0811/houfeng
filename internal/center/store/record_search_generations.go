@@ -24,7 +24,21 @@ func EnsurePublishedRecordSearchGeneration(ctx context.Context, pool *pgxpool.Po
 	if ctx == nil || pool == nil {
 		return errors.New("ensure published record search generation: nil dependency")
 	}
-	_, err := pool.Exec(ctx, `
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("ensure published record search generation: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockComparisonDecisionForWriter(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockRecordSearchCoordination(ctx, tx, string(recordplatform.ProjectIDDefault)); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		with published as (
 		  select 1
 		  from public.record_search_generations
@@ -43,6 +57,9 @@ func EnsurePublishedRecordSearchGeneration(ctx context.Context, pool *pgxpool.Po
 		recordplatform.ProjectIDDefault,
 	)
 	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("ensure published record search generation: commit: %w", err)
+		}
 		return nil
 	}
 	// A concurrent center that published first is the outcome this wants, so a

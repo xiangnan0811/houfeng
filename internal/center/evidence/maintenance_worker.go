@@ -92,6 +92,7 @@ type MaintenanceRepository interface {
 	CollectUnreferencedPayloads(context.Context, uint64) ([]PayloadGCReceipt, error)
 	ReadEvidenceLifecycleBacklog(context.Context, uint64) (EvidenceLifecycleBacklog, error)
 	ReadEvidenceCapacityAggregate(context.Context) (EvidenceCapacityAggregate, error)
+	BackfillComparisonDependencyIndex(context.Context, string, uint64) (ComparisonDependencyIndexBatchResult, error)
 }
 
 type MaintenanceAlert string
@@ -246,9 +247,11 @@ type MaintenanceWorkerOptions struct {
 }
 
 type MaintenanceWorker struct {
-	repository MaintenanceRepository
-	observer   *MaintenanceObserver
-	options    MaintenanceWorkerOptions
+	repository           MaintenanceRepository
+	observer             *MaintenanceObserver
+	options              MaintenanceWorkerOptions
+	passMu               sync.Mutex
+	comparisonIndexAfter string
 }
 
 func NewMaintenanceWorker(repository MaintenanceRepository, observer *MaintenanceObserver, options MaintenanceWorkerOptions) *MaintenanceWorker {
@@ -296,6 +299,8 @@ func (worker *MaintenanceWorker) RunOnce(ctx context.Context) error {
 	if ctx == nil || worker == nil || worker.validate() != nil {
 		return ErrInvalidMaintenanceWorker
 	}
+	worker.passMu.Lock()
+	defer worker.passMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -368,6 +373,22 @@ func (worker *MaintenanceWorker) RunOnce(ctx context.Context) error {
 		worker.observer.recordCanceled(result)
 		return cancellation
 	}
+	indexed, err := worker.repository.BackfillComparisonDependencyIndex(ctx, worker.comparisonIndexAfter, MaxMaintenanceBatchSize)
+	if err != nil {
+		if cancellation := maintenanceCancellation(ctx, err); cancellation != nil {
+			worker.observer.recordCanceled(result)
+			return cancellation
+		}
+		worker.observer.recordFailure(result, MaintenanceAlertJanitorUnavailable)
+		return fmt.Errorf("backfill comparison dependency index: %w", err)
+	}
+	if indexed.Examined > MaxMaintenanceBatchSize || indexed.Incomplete > indexed.Examined ||
+		(indexed.AfterSnapshotID != "" && (!ValidSnapshotID(indexed.AfterSnapshotID) ||
+			indexed.AfterSnapshotID <= worker.comparisonIndexAfter || indexed.Examined != MaxMaintenanceBatchSize)) {
+		worker.observer.recordFailure(result, MaintenanceAlertJanitorUnavailable)
+		return ErrInvalidMaintenanceResult
+	}
+	worker.comparisonIndexAfter = indexed.AfterSnapshotID
 	backlog, err := worker.repository.ReadEvidenceLifecycleBacklog(ctx, worker.options.BacklogProbeLimit)
 	if err != nil {
 		if cancellation := maintenanceCancellation(ctx, err); cancellation != nil {

@@ -46,11 +46,11 @@ func (input appACLEffectiveCatalogVerifierInput) Validate() error {
 	if !validCatalogRoleName(input.MigratorRole) {
 		return fmt.Errorf("invalid app ACL migrator role")
 	}
-	canonicalBody, err := CanonicalPrivilegeSetBodyV1(input.Contract.RoleBindings, input.Contract.Privileges)
+	canonicalBody, err := canonicalPrivilegeSetBodyForBindings(input.Contract.RoleBindings, input.Contract.Privileges)
 	if err != nil {
 		return fmt.Errorf("canonicalize app ACL catalog privileges: %w", err)
 	}
-	canonicalSet, err := ParseCanonicalPrivilegeSetBodyV1(canonicalBody)
+	canonicalSet, _, err := parseCanonicalPrivilegeSetBodyAnyVersion(canonicalBody)
 	if err != nil {
 		return fmt.Errorf("parse app ACL catalog privileges: %w", err)
 	}
@@ -368,15 +368,10 @@ func verifyAppACLEffectiveCatalogSnapshot(
 	if _, ok := roleStates[input.MigratorRole]; !ok {
 		return fmt.Errorf("app ACL catalog snapshot is missing migrator role %q", input.MigratorRole)
 	}
-	for _, roleName := range []string{
-		input.Contract.RoleBindings[0].CatalogRole,
-		input.Contract.RoleBindings[1].CatalogRole,
-		input.MigratorRole,
-	} {
-		role := roleStates[roleName]
-		if !role.Login || role.Inherit || role.Superuser || role.CreateDatabase || role.CreateRole || role.Replication || role.BypassRLS {
-			return fmt.Errorf("app ACL role %q must be LOGIN, NOINHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS", role.Name)
-		}
+	// Every bound application role was checked above; the migrator shares the
+	// same direct-login constraints.
+	if role := roleStates[input.MigratorRole]; !role.Login || role.Inherit || role.Superuser || role.CreateDatabase || role.CreateRole || role.Replication || role.BypassRLS {
+		return fmt.Errorf("app ACL role %q must be LOGIN, NOINHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS", role.Name)
 	}
 	presentAuxiliaryRoles := make(map[string]struct{})
 	for _, privilege := range input.Contract.AuxiliaryPrivileges {

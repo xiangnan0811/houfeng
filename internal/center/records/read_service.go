@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 var ErrInvalidRecordReadRequest = errors.New("invalid record read request")
@@ -180,7 +181,7 @@ func NewRecordReadService(
 
 func (service *RecordReadService) GetRecord(ctx context.Context, request RecordGetRequest) (Record, error) {
 	if ctx == nil || service == nil || nilRecordReadDependency(service.current) ||
-		nilRecordReadDependency(service.store) || !validRecordRootID(request.RecordID) {
+		nilRecordReadDependency(service.store) || !recordidentity.IsValid(request.RecordID) {
 		return Record{}, ErrInvalidRecordReadRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
@@ -313,7 +314,7 @@ func (service *RecordReadService) ListRecords(ctx context.Context, request Recor
 func (service *RecordReadService) GetRevision(ctx context.Context, request RecordRevisionGetRequest) (RecordRevision, error) {
 	if ctx == nil || service == nil || nilRecordReadDependency(service.current) ||
 		nilRecordReadDependency(service.revisions) ||
-		nilRecordReadDependency(service.store) || !validRecordRootID(request.RecordID) || !validRevisionID(request.RevisionID) {
+		nilRecordReadDependency(service.store) || !recordidentity.IsValid(request.RecordID) || !validRevisionID(request.RevisionID) {
 		return RecordRevision{}, ErrInvalidRecordReadRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
@@ -383,7 +384,7 @@ func (service *RecordReadService) ListRevisions(
 ) ([]RecordRevision, error) {
 	if ctx == nil || service == nil || nilRecordReadDependency(service.current) ||
 		nilRecordReadDependency(service.revisions) || nilRecordReadDependency(service.store) ||
-		!validRecordRootID(request.RecordID) || request.Limit == 0 || request.Limit > 200 {
+		!recordidentity.IsValid(request.RecordID) || request.Limit == 0 || request.Limit > 200 {
 		return nil, ErrInvalidRecordReadRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)

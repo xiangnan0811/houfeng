@@ -10,10 +10,11 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 )
 
-func TestRevisionServiceResolvesServerSubjectsAuthorizesAndCommitsCreate(t *testing.T) {
+func TestRevisionServiceResolvesServerSubjectsForHistoricalCreateReplay(t *testing.T) {
 	t.Parallel()
 
 	actor := mustRecordActor(t)
@@ -27,9 +28,9 @@ func TestRevisionServiceResolvesServerSubjectsAuthorizesAndCommitsCreate(t *test
 	current := &currentRecordAuthorizationSourceStub{steps: &steps}
 	store := &revisionCommitStoreStub{
 		steps:  &steps,
-		result: RevisionCommitResult{RecordID: request.RecordID, RevisionID: "rrv_created00000001", RevisionNo: 1, Created: true},
+		result: RevisionCommitResult{RecordID: request.RecordID, RevisionID: "rrv_created00000001", RevisionNo: 1, Created: true, Replayed: true},
 	}
-	service, err := NewRevisionService(registry, current, store)
+	service, err := NewRevisionService(registry, current, store, nil)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}
@@ -90,28 +91,29 @@ func TestRevisionServiceBindsPublishedDraftToCommandAndRequestFingerprint(t *tes
 	if err != nil {
 		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
 	}
-	store := &revisionCommitStoreStub{result: RevisionCommitResult{RecordID: request.RecordID, RevisionNo: 1, Created: true}}
-	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store)
+	store := &revisionCommitStoreStub{}
+	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store, nil)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}
 
-	if _, err := service.SaveRevision(context.Background(), request); err != nil {
-		t.Fatalf("SaveRevision(first) error = %v", err)
+	firstCommand, err := service.prepareRevisionCommit(context.Background(), request)
+	if err != nil {
+		t.Fatalf("prepareRevisionCommit(first) error = %v", err)
 	}
-	firstCommand := store.command
 	if firstCommand.DraftID != request.DraftID || firstCommand.DraftETag != firstETag {
 		t.Fatalf("SaveRevision(first) draft binding = (%q, %q)", firstCommand.DraftID, firstCommand.DraftETag.String())
 	}
 	request.DraftETag = secondETag
-	if _, err := service.SaveRevision(context.Background(), request); err != nil {
-		t.Fatalf("SaveRevision(second) error = %v", err)
+	secondCommand, err := service.prepareRevisionCommit(context.Background(), request)
+	if err != nil {
+		t.Fatalf("prepareRevisionCommit(second) error = %v", err)
 	}
 	firstFingerprint, err := firstCommand.Idempotency.RequestFingerprint.PersistedBytes()
 	if err != nil {
 		t.Fatalf("PersistedBytes(first) error = %v", err)
 	}
-	secondFingerprint, err := store.command.Idempotency.RequestFingerprint.PersistedBytes()
+	secondFingerprint, err := secondCommand.Idempotency.RequestFingerprint.PersistedBytes()
 	if err != nil {
 		t.Fatalf("PersistedBytes(second) error = %v", err)
 	}
@@ -161,7 +163,7 @@ func TestRevisionServiceAuthorizesCurrentBeforeResolvingProposedUpdate(t *testin
 		},
 	}
 	store := &revisionCommitStoreStub{steps: &steps, result: RevisionCommitResult{RecordID: request.RecordID, RevisionNo: 5, Created: true}}
-	service, err := NewRevisionService(registry, current, store)
+	service, err := NewRevisionService(registry, current, store, nil)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}
@@ -223,7 +225,7 @@ func TestRevisionServiceRejectsCurrentDenialOrConflictBeforeProposedResolution(t
 			}
 			current := &currentRecordAuthorizationSourceStub{steps: &steps, current: state}
 			store := &revisionCommitStoreStub{steps: &steps}
-			service, err := NewRevisionService(registry, current, store)
+			service, err := NewRevisionService(registry, current, store, nil)
 			if err != nil {
 				t.Fatalf("NewRevisionService() error = %v", err)
 			}
@@ -261,7 +263,7 @@ func TestRevisionServiceRejectsClientOwnedSubjectEvidence(t *testing.T) {
 		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
 	}
 	store := &revisionCommitStoreStub{}
-	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store)
+	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store, nil)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}
@@ -291,8 +293,8 @@ func TestRevisionServiceCarriesExplicitEvidencePreparationIntoInputCommandAndFin
 	if err != nil {
 		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
 	}
-	store := &revisionCommitStoreStub{result: RevisionCommitResult{RecordID: request.RecordID, RevisionNo: 1, Created: true}}
-	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store)
+	store := &revisionCommitStoreStub{}
+	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store, nil)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}
@@ -300,16 +302,17 @@ func TestRevisionServiceCarriesExplicitEvidencePreparationIntoInputCommandAndFin
 	fingerprints := make([][sha256.Size]byte, 0, 3)
 	for _, preparation := range []evidence.RevisionPreparation{firstPreparation, secondPreparation, thirdPreparation} {
 		request.EvidencePreparation = preparation
-		if _, err := service.SaveRevision(context.Background(), request); err != nil {
-			t.Fatalf("SaveRevision() error = %v", err)
+		command, err := service.prepareRevisionCommit(context.Background(), request)
+		if err != nil {
+			t.Fatalf("prepareRevisionCommit() error = %v", err)
 		}
-		if got := store.command.Input.EvidenceSnapshotIDs(); !reflect.DeepEqual(got, preparation.SnapshotIDs()) {
+		if got := command.Input.EvidenceSnapshotIDs(); !reflect.DeepEqual(got, preparation.SnapshotIDs()) {
 			t.Fatalf("command evidence IDs = %#v, want %#v", got, preparation.SnapshotIDs())
 		}
-		if got := store.command.EvidencePreparation.SnapshotIDs(); !reflect.DeepEqual(got, preparation.SnapshotIDs()) {
+		if got := command.EvidencePreparation.SnapshotIDs(); !reflect.DeepEqual(got, preparation.SnapshotIDs()) {
 			t.Fatalf("command preparation IDs = %#v, want %#v", got, preparation.SnapshotIDs())
 		}
-		fingerprint, err := store.command.Idempotency.RequestFingerprint.PersistedBytes()
+		fingerprint, err := command.Idempotency.RequestFingerprint.PersistedBytes()
 		if err != nil {
 			t.Fatalf("PersistedBytes() error = %v", err)
 		}
@@ -348,6 +351,39 @@ func TestRevisionServiceCarriesExplicitEvidencePreparationIntoInputCommandAndFin
 	}
 	if adapter.calls != adapterCalls || store.calls != storeCalls {
 		t.Fatalf("actor-mismatched preparation reached adapter/store: adapter=%d store=%d", adapter.calls-adapterCalls, store.calls-storeCalls)
+	}
+}
+
+func TestRevisionServiceFinishingRejectsNonImportAllocationBeforePreparation(t *testing.T) {
+	actor := mustRecordActor(t)
+	request, resolved := testRevisionServiceRequest(t, actor, DomainActivityRecordCreated)
+	request.Allocation = &recordbirth.Allocation{Request: recordbirth.Request{Purpose: recordbirth.PurposeCreate}}
+	adapter := &revisionServiceSubjectAdapter{kind: SubjectKindVPS, resolved: resolved}
+	registry, err := NewSubjectAdapterRegistry([]SubjectSourceAdapter{adapter})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &revisionCommitStoreStub{}
+	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish := RevisionCommitFinish{
+		Actor: actor, OriginKind: "import", OriginDigest: [32]byte{1}, ImportJobID: "rij_fixture", JobLockVersion: 1,
+	}
+	if _, err := service.SaveRevisionsFinishing(context.Background(), []RevisionSaveRequest{request}, finish); !errors.Is(err, ErrInvalidRevisionServiceRequest) {
+		t.Fatalf("non-import allocation error = %v", err)
+	}
+	if adapter.calls != 0 || store.calls != 0 {
+		t.Fatal("wrong-purpose allocation reached source resolution or the writer")
+	}
+	request.Allocation = nil
+	finish.Actor.UserID = "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
+	if _, err := service.SaveRevisionsFinishing(context.Background(), []RevisionSaveRequest{request}, finish); !errors.Is(err, ErrInvalidRevisionCommand) {
+		t.Fatalf("different finishing actor error = %v", err)
+	}
+	if adapter.calls != 0 || store.calls != 0 {
+		t.Fatal("different finishing actor reached source resolution or the writer")
 	}
 }
 

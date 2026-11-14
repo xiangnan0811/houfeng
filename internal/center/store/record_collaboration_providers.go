@@ -286,6 +286,7 @@ func assertCollaborationPortabilityRowsBound(
 		  exists (select 1 from public.record_notification_recipients where record_id = $1 and record_fence_epoch <> $2) or
 		  exists (select 1 from public.record_notification_deliveries where record_id = $1 and record_fence_epoch <> $2) or
 		  exists (select 1 from public.record_notification_delivery_attempts where record_id = $1 and record_fence_epoch <> $2) or
+		  exists (select 1 from public.record_collaboration_start_inventory($1, $2) where mismatched) or
 		  exists (select 1 from public.record_notification_audit_summaries where record_id = $1 and record_fence_epoch <> $2)`,
 		binding.RecordID(), int64(binding.Epoch()),
 	).Scan(&mismatched); err != nil {
@@ -293,6 +294,38 @@ func assertCollaborationPortabilityRowsBound(
 	}
 	if mismatched {
 		return recordcollaboration.ErrInvalidRecordFenceBinding
+	}
+	// A portable aggregate has no delivery IDs. If an old aggregate overlaps a
+	// retained obligation, or the notification metadata is gone, neither a
+	// merge nor a synthetic audit can preserve its exact responsibility.
+	var unrepresentable bool
+	if err := tx.QueryRow(ctx, `
+		with inventory as materialized (
+		  select * from public.record_collaboration_delivery_inventory($1, $2)
+		)
+		select exists (
+		  select 1 from inventory as item
+		  left join public.record_notifications as notification
+		    on notification.record_id = $1 and notification.notification_id = item.notification_id
+		  where item.mismatched is distinct from false or item.notification_id is null or item.notification_id = ''
+		     or item.delivery_id is null or item.delivery_id = ''
+		     or item.classification is null
+		     or item.classification not in ('sent', 'possible_external', 'permanent_failure', 'none')
+		     or item.evidence_digest is null or octet_length(item.evidence_digest) <> 32
+		     or notification.notification_id is null
+		) or (select count(*) <> count(distinct delivery_id) from inventory)
+		  or exists (
+		    select 1 from public.record_notification_audit_summaries as audit
+		    where audit.record_id = $1 and (
+		      exists (select 1 from inventory where notification_id = audit.notification_id)
+		      or exists (select 1 from public.record_notifications as notification
+		        where notification.record_id = $1 and notification.notification_id = audit.notification_id)
+		    )
+		  )`, binding.RecordID(), int64(binding.Epoch())).Scan(&unrepresentable); err != nil {
+		return fmt.Errorf("verify collaboration delivery responsibility inventory: %w", err)
+	}
+	if unrepresentable {
+		return recordcollaboration.ErrInvalidPortabilitySnapshot
 	}
 	return nil
 }
@@ -587,19 +620,20 @@ func backupPortableFollowersAndAudits(ctx context.Context, tx pgx.Tx, binding re
 	rows.Close()
 
 	rows, err = tx.Query(ctx, `
-		with live as (
+		with inventory as materialized (
+		  select * from public.record_collaboration_delivery_inventory($2, $3)
+		), live as (
 		  select notification.notification_id, notification.event_kind,
 		         notification.subject_kind, notification.source_version, notification.event_at,
 		         count(distinct recipient.recipient_user_id) as recipient_count,
-		         count(distinct delivery.delivery_id) as delivery_count,
-		         count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'sent') as sent_count,
-		         count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'unknown_outcome') as unknown_count,
-		         count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'permanent_failure') as permanent_failed_count
+		         count(distinct inventory.delivery_id) as delivery_count,
+		         count(distinct inventory.delivery_id) filter (where inventory.classification = 'sent') as sent_count,
+		         count(distinct inventory.delivery_id) filter (where inventory.classification = 'possible_external') as unknown_count,
+		         count(distinct inventory.delivery_id) filter (where inventory.classification = 'permanent_failure') as permanent_failed_count
 		  from public.record_notifications as notification
 		  left join public.record_notification_recipients as recipient
 		    on recipient.notification_id = notification.notification_id and recipient.record_id = notification.record_id
-		  left join public.record_notification_deliveries as delivery
-		    on delivery.notification_id = notification.notification_id and delivery.record_id = notification.record_id
+		  left join inventory on inventory.notification_id = notification.notification_id
 		  where notification.project_id = $1 and notification.record_id = $2 and notification.record_fence_epoch = $3
 		  group by notification.notification_id, notification.event_kind,
 		           notification.subject_kind, notification.source_version, notification.event_at

@@ -49,6 +49,7 @@ func (r *workerRepositoryStub) RecordBlobPublicationVersion(_ context.Context, r
 		return intent, nil
 	}
 	intent.ObjectVersion = request.Object.VersionID
+	intent.ObligationID = request.ObligationID
 	intent.State = BlobPublicationStatePublished
 	r.publicationIntent = intent
 	return intent, nil
@@ -129,15 +130,8 @@ func TestProcessorWorkerExpiresAbandonedUploadBeforeClaimingProcessorJob(t *test
 	}
 	claim := workerTestClaim([]byte("hello"), ProcessorProfileText)
 	repository := &workerRepositoryStub{claim: &claim, abandonedResult: result}
-	worker, err := NewProcessorWorker(
-		repository,
-		&workerBlobStub{data: []byte("hello")},
-		&workerWorkspaceStub{},
-		ProcessorWorkerConfig{
-			OwnerID: "worker1", OwnerLeaseDuration: time.Minute,
-			Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3,
-		},
-	)
+	worker, err := newWorkerWithFixtureWriter(repository, &workerBlobStub{data: []byte("hello")}, &workerWorkspaceStub{}, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute,
+		Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +150,7 @@ func TestProcessorWorkerClaimsExactSourceProcessesAndCompletes(t *testing.T) {
 	repository := &workerRepositoryStub{claim: &claim}
 	blob := &workerBlobStub{data: source}
 	workspace := &workerWorkspaceStub{artifact: PreviewArtifact{HasPreview: true, MediaType: ManagedPreviewMediaTypeTextUTF8, Bytes: source}}
-	worker, err := NewProcessorWorker(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
+	worker, err := newWorkerWithFixtureWriter(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +174,7 @@ func TestProcessorWorkerCancellationDoesNotComplete(t *testing.T) {
 	repository := &workerRepositoryStub{claim: &claim}
 	blob := &workerBlobStub{data: source}
 	workspace := &workerWorkspaceStub{err: context.Canceled}
-	worker, err := NewProcessorWorker(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
+	worker, err := newWorkerWithFixtureWriter(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +194,7 @@ func TestProcessorWorkerArchiveRequiresScanner(t *testing.T) {
 	claim.DisplayName = "bundle.zip"
 	claim.DeclaredMediaType = "application/zip"
 	repository := &workerRepositoryStub{claim: &claim}
-	worker, err := NewProcessorWorker(repository, &workerBlobStub{data: content}, &workerWorkspaceStub{}, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
+	worker, err := newWorkerWithFixtureWriter(repository, &workerBlobStub{data: content}, &workerWorkspaceStub{}, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +214,7 @@ func TestProcessorWorkerArchiveScannerVerdictIsTyped(t *testing.T) {
 	repository := &workerRepositoryStub{claim: &claim}
 	blob := &workerBlobStub{data: content}
 	workspace := &workerWorkspaceStub{}
-	worker, err := NewProcessorWorker(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3, Scan: func(_ context.Context, content io.Reader) (ProcessorResultCode, error) {
+	worker, err := newWorkerWithFixtureWriter(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3, Scan: func(_ context.Context, content io.Reader) (ProcessorResultCode, error) {
 		got, _ := io.ReadAll(content)
 		if !bytes.Equal(got, blob.data) {
 			t.Fatalf("scanner content differs from exact archive")
@@ -242,7 +236,7 @@ func TestProcessorWorkerSourceCloseFailureDoesNotCompleteClean(t *testing.T) {
 	source := []byte("hello")
 	claim := workerTestClaim(source, ProcessorProfileText)
 	repository := &workerRepositoryStub{claim: &claim}
-	worker, err := NewProcessorWorker(repository, &workerBlobStub{data: source, closeErr: errors.New("close")}, &workerWorkspaceStub{artifact: PreviewArtifact{HasPreview: true, MediaType: ManagedPreviewMediaTypeTextUTF8, Bytes: source}}, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
+	worker, err := newWorkerWithFixtureWriter(repository, &workerBlobStub{data: source, closeErr: errors.New("close")}, &workerWorkspaceStub{artifact: PreviewArtifact{HasPreview: true, MediaType: ManagedPreviewMediaTypeTextUTF8, Bytes: source}}, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,10 +258,8 @@ func TestProcessorWorkerRunsAdmissionBeforePreview(t *testing.T) {
 	workspace := &workerWorkspaceStub{artifact: PreviewArtifact{
 		HasPreview: true, MediaType: ManagedPreviewMediaTypeTextUTF8, Bytes: source,
 	}}
-	worker, err := NewProcessorWorker(repository, blob, workspace, ProcessorWorkerConfig{
-		OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(),
-		PreviewBackendKind: BackendKindS3,
-	})
+	worker, err := newWorkerWithFixtureWriter(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(),
+		PreviewBackendKind: BackendKindS3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,10 +284,8 @@ func TestProcessorWorkerRejectsPreviewBackendMismatch(t *testing.T) {
 	workspace := &workerWorkspaceStub{artifact: PreviewArtifact{
 		HasPreview: true, MediaType: ManagedPreviewMediaTypeTextUTF8, Bytes: source,
 	}}
-	worker, err := NewProcessorWorker(repository, blob, workspace, ProcessorWorkerConfig{
-		OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(),
-		PreviewBackendKind: BackendKindLocal,
-	})
+	worker, err := newWorkerWithFixtureWriter(repository, blob, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(),
+		PreviewBackendKind: BackendKindLocal})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,10 +304,8 @@ func TestProcessorWorkerRejectsMissingAdmissionMetadata(t *testing.T) {
 	claim := workerTestClaim([]byte("hello"), ProcessorProfileText)
 	claim.DisplayName = ""
 	repository := &workerRepositoryStub{claim: &claim}
-	worker, err := NewProcessorWorker(repository, &workerBlobStub{data: []byte("hello")}, &workerWorkspaceStub{}, ProcessorWorkerConfig{
-		OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(),
-		PreviewBackendKind: BackendKindS3,
-	})
+	worker, err := newWorkerWithFixtureWriter(repository, &workerBlobStub{data: []byte("hello")}, &workerWorkspaceStub{}, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(),
+		PreviewBackendKind: BackendKindS3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,4 +321,9 @@ func workerTestClaim(source []byte, profile ProcessorProfile) ProcessorClaim {
 	digest := sha256.Sum256(source)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	return ProcessorClaim{ProjectID: "default", ProcessorJobID: "apj_worker1", UploadID: "aup_worker1", AttachmentID: "att_worker1", DisplayName: "notes.txt", DeclaredMediaType: "text/plain", Source: BlobObject{Key: "sha256/" + hexDigest(digest), SHA256: digest, ObjectVersion: "source-v1", SizeBytes: int64(len(source)), BackendKind: BackendKindS3}, Profile: profile, Attempt: 1, MaxAttempts: 3, OwnerID: "worker1", OwnerGeneration: 1, LeaseExpiresAt: now.Add(time.Minute), ExpiresAt: now.Add(time.Hour)}
+}
+
+func newWorkerWithFixtureWriter(repository ProcessorRepository, blob BlobStore, workspace processorWorkspaceRunner, config ProcessorWorkerConfig) (*ProcessorWorker, error) {
+	config.Writer = fixtureBlobWriter{blob: blob}
+	return NewProcessorWorker(repository, blob, workspace, config)
 }

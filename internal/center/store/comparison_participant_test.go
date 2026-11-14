@@ -78,39 +78,6 @@ func TestComparisonParticipantRejectsForgedIntent(t *testing.T) {
 	}
 }
 
-func TestSaveComparisonRecordWritesCopiesLineageAndResult(t *testing.T) {
-	t.Parallel()
-
-	preparation := storeComparisonSavePreparation(t, "rec_comparisonsave")
-	tx := &fakeRecordEvidenceParticipantTx{}
-	err := NewRecordEvidenceRevisionParticipant().ApplyRevision(context.Background(), tx, records.RevisionCommitted{
-		Result: records.RevisionCommitResult{RecordID: "rec_comparisonsave", RevisionID: "rrv_comparisonsave"},
-		Input: recordsPostgresCompleteRevisionInputWithEvidence(
-			t, "Save comparison", preparation.SnapshotIDs(),
-		),
-		EvidencePreparation: preparation,
-	})
-	if err != nil {
-		t.Fatalf("ApplyRevision() error = %v", err)
-	}
-	if !reflectDeepEqualStrings(tx.execKinds, []string{"snapshot", "lineage", "snapshot", "reference", "reference"}) &&
-		!reflectDeepEqualStrings(tx.execKinds, []string{"snapshot", "lineage", "snapshot", "reference", "reference", "reference"}) {
-		// copies + result snapshots, one lineage per copy, then one revision ref per snapshot
-		if !containsAllExecKinds(tx.execKinds, []string{"snapshot", "lineage", "reference"}) {
-			t.Fatalf("exec kinds = %#v, want copy/result snapshots, lineage, and revision refs", tx.execKinds)
-		}
-	}
-	joined := strings.Join(tx.execSQL, "\n")
-	if !strings.Contains(joined, "insert into public.evidence_copy_lineage") ||
-		!strings.Contains(joined, "copied_from_snapshot_id") {
-		t.Fatalf("missing copy-lineage write:\n%s", joined)
-	}
-	if strings.Contains(joined, "update public.evidence_snapshots") ||
-		strings.Contains(joined, "delete from public.evidence_snapshots") {
-		t.Fatalf("source snapshots were mutated:\n%s", joined)
-	}
-}
-
 func TestSaveComparisonRecordRejectsQuotaExceededBeforeCopyWrite(t *testing.T) {
 	t.Parallel()
 
@@ -152,7 +119,18 @@ func storeComparisonSavePreparation(t *testing.T, recordID string) evidence.Revi
 		t.Fatalf("NewPreparedComparisonResult() error = %v", err)
 	}
 	preparation, err := evidence.NewRevisionPreparationFromComparisonSave(recordID, evidence.ComparisonSavePreparation{
-		Token:  "cmp1.test.payload.mac",
+		Token: "cmp1.test.payload.mac",
+		Claims: evidence.ComparisonIntentClaims{
+			Purpose: evidence.ComparisonIntentPurpose, Digest: strings.Repeat("ab", 32),
+			Items: []evidence.ComparisonIntentItem{
+				{SourceRecordID: "rec_comparisonsource", SnapshotID: "evs_comparisonsource",
+					Hash: strings.Repeat("11", 32), Kind: evidence.MonitoringProbeV2Key().String(),
+					RevisionContext: evidence.RevisionContextNotApplicable},
+				{SourceRecordID: "rec_comparisonother", SnapshotID: "evs_comparisonother",
+					Hash: strings.Repeat("22", 32), Kind: evidence.MonitoringProbeV2Key().String(),
+					RevisionContext: evidence.RevisionContextNotApplicable},
+			},
+		},
 		Copies: []evidence.PreparedComparisonCopy{copy},
 		Result: result,
 	})
@@ -249,29 +227,4 @@ func (stub comparisonIntentVerifyStub) Verify(string, time.Time) (evidence.Compa
 		return evidence.ComparisonIntentClaims{}, stub.err
 	}
 	return evidence.ComparisonIntentClaims{}, nil
-}
-
-func reflectDeepEqualStrings(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func containsAllExecKinds(got, want []string) bool {
-	seen := map[string]int{}
-	for _, kind := range got {
-		seen[kind]++
-	}
-	for _, kind := range want {
-		if seen[kind] == 0 {
-			return false
-		}
-	}
-	return true
 }

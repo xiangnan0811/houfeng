@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"path"
 	"strings"
 	"unicode/utf8"
@@ -214,12 +215,8 @@ func (service *Service) restoreImportedAttachments(
 	if len(cached.attachments) == 0 {
 		return map[string][]attachments.ImportedAvailableAttachment{}, map[string][]string{}, nil
 	}
-	if service == nil || service.attachmentBlobs == nil || service.importBlobGC == nil {
+	if service == nil || service.attachmentBlobs == nil || service.attachmentWriter == nil || service.importBlobGC == nil {
 		return nil, nil, ErrExportUnavailable
-	}
-	recordBySource := make(map[string]string, len(cached.documents))
-	for _, document := range cached.documents {
-		recordBySource[document.SourceID] = document.TargetID
 	}
 	type preparedAttachment struct {
 		targetRecord string
@@ -229,10 +226,7 @@ func (service *Service) restoreImportedAttachments(
 	prepared := make([]preparedAttachment, len(cached.attachments))
 	digests := make([][sha256.Size]byte, len(cached.attachments))
 	for index, item := range cached.attachments {
-		targetRecord := recordBySource[item.RecordSourceID]
-		if targetRecord == "" && len(cached.documents) == 1 {
-			targetRecord = cached.documents[0].TargetID
-		}
+		targetRecord := cached.ownerTargetIDs[importRemapKey("attachment", item.SourceID)]
 		if targetRecord == "" {
 			return nil, nil, ErrInvalidImportRequest
 		}
@@ -260,26 +254,34 @@ func (service *Service) restoreImportedAttachments(
 	if backend != attachments.BackendKindLocal && backend != attachments.BackendKindS3 {
 		backend = attachments.BackendKindLocal
 	}
+	planDigest := hex.EncodeToString(cached.digest[:])
+	archiveDigest := hex.EncodeToString(cached.archiveDigest[:])
 	for index, item := range cached.attachments {
 		temporaryKey, err := attachments.NewBlobTemporaryKey()
 		if err != nil {
 			return nil, nil, err
 		}
-		object, err := service.attachmentBlobs.Put(ctx, attachments.PutRequest{
-			ExpectedSHA256:    digests[index],
-			ExpectedSizeBytes: int64(len(item.Payload)),
-			TemporaryKey:      temporaryKey,
+		admitted := prepared[index]
+		written, err := service.attachmentWriter.Put(ctx, attachments.WriteRequest{
+			Content:   attachments.PutRequest{ExpectedSHA256: digests[index], ExpectedSizeBytes: int64(len(item.Payload)), TemporaryKey: temporaryKey},
+			ProjectID: string(actor.ProjectID),
+			Origin: attachments.WriteOrigin{Kind: "import_attachment", ID: cached.jobID, Generation: int64(cached.lockVersion),
+				PlanDigest: &planDigest, ArchiveDigest: &archiveDigest, TargetRecordID: &admitted.targetRecord, TargetAttachmentID: &item.TargetID},
 		}, bytes.NewReader(item.Payload))
 		if err != nil {
 			return nil, nil, err
 		}
-		admitted := prepared[index]
+		if written.NamespaceID != service.attachmentWriter.NamespaceID() || written.ObligationID == "" {
+			return nil, nil, ErrExportUnavailable
+		}
 		available := attachments.ImportedAvailableAttachment{
 			AttachmentID:     item.TargetID,
 			DisplayName:      admitted.displayName,
 			MediaType:        admitted.mediaType,
 			LogicalSizeBytes: int64(len(item.Payload)),
-			Object:           object,
+			Object:           written.Version,
+			NamespaceID:      written.NamespaceID,
+			ObligationID:     written.ObligationID,
 			BackendKind:      backend,
 			CreatedBy:        actor.UserID,
 			GCObservation:    observations[index],

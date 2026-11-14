@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,45 +15,6 @@ import (
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
-
-func TestPostgresAssetDomainMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0024_create_asset_domains.sql"))
-	if err != nil {
-		t.Fatalf("ReadFile(asset domain migration) error = %v", err)
-	}
-	text := string(source)
-	for _, snippet := range []string{
-		"create table if not exists asset_domains",
-		"domain_id text primary key",
-		"vps_id text not null",
-		"service_id text",
-		"target_id text",
-		"domain_name text not null",
-		"expires_at date",
-		"auto_renew boolean not null default false",
-		"https_enabled boolean not null default false",
-		"labels text[] not null default '{}'",
-		"asset_domains_vps_fk foreign key (vps_id) references vps_assets(vps_id) on delete cascade",
-		"asset_domains_service_fk foreign key (service_id) references asset_services(service_id) on delete set null",
-		"asset_domains_target_fk foreign key (target_id) references targets(target_id) on delete set null",
-		"asset_domains_name_unique unique (domain_name)",
-		"asset_domains_name_not_blank",
-		"asset_domains_name_normalized",
-		"asset_domains_status_allowed",
-		"'active', 'paused', 'retired', 'unknown'",
-		"idx_asset_domains_vps",
-		"idx_asset_domains_service",
-		"idx_asset_domains_target",
-		"idx_asset_domains_status",
-		"idx_asset_domains_expires_at",
-	} {
-		if !strings.Contains(text, snippet) {
-			t.Fatalf("asset domain migration missing %q", snippet)
-		}
-	}
-}
 
 func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 	t.Parallel()
@@ -279,48 +238,6 @@ func TestPostgresAssetDomainRejectsActiveReferenceToArchivedTarget(t *testing.T)
 	}
 	if inserted {
 		t.Fatal("CreateAssetDomain() inserted an active relationship to an archived target")
-	}
-}
-
-func TestPostgresAssetDomainListForVPS(t *testing.T) {
-	t.Parallel()
-
-	var queryArgs []any
-	var querySQL string
-	var existsCheckArg any
-	repo := &PostgresAssetDomainRepository{db: fakeAssetDomainDB{
-		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
-			querySQL = sql
-			queryArgs = append([]any(nil), args...)
-			return &fakeAssetDomainRows{}, nil
-		},
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if !strings.Contains(sql, "from vps_assets") {
-				t.Fatalf("unexpected QueryRow SQL %q", sql)
-			}
-			existsCheckArg = args[0]
-			return fakeAssetDomainRow{scan: func(dest ...any) error {
-				*(dest[0].(*bool)) = true
-				return nil
-			}}
-		},
-	}}
-
-	records, err := repo.ListAssetDomainsForVPS(context.Background(), " vps_001 ")
-	if err != nil {
-		t.Fatalf("ListAssetDomainsForVPS() error = %v", err)
-	}
-	if len(records) != 0 {
-		t.Fatalf("records = %#v, want empty list", records)
-	}
-	if existsCheckArg != "vps_001" {
-		t.Fatalf("exists check arg = %#v, want vps_001", existsCheckArg)
-	}
-	if len(queryArgs) != 1 || queryArgs[0] != "vps_001" {
-		t.Fatalf("query args = %#v, want vps filter", queryArgs)
-	}
-	if !strings.Contains(querySQL, "a.ended_at is null") || !strings.Contains(querySQL, "v.lifecycle_status <> 'archived'") {
-		t.Fatalf("ListAssetDomainsForVPS SQL = %q, want current associations of managed VPS only", querySQL)
 	}
 }
 

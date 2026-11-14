@@ -20,7 +20,7 @@ import (
 type PostgresRecordWatchRepository struct {
 	platform      *PostgresRecordPlatformRepository
 	members       CollaborationMembershipReader
-	authorization *PostgresCurrentRecordAuthorizationSource
+	authorization currentRecordAuthorizationPrefetcher
 }
 
 func NewPostgresRecordWatchRepository(
@@ -36,25 +36,28 @@ func NewPostgresRecordWatchRepository(
 
 func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, command recordcollaboration.WatchCommand) (recordcollaboration.WatchStatus, error) {
 	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
-		repository.authorization == nil || nilRecordSubjectDependency(repository.authorization.resolver) {
+		nilRecordSubjectDependency(repository.authorization) {
 		return recordcollaboration.WatchStatus{}, recordcollaboration.ErrInvalidWatchCommand
 	}
 	if err := command.Validate(); err != nil {
 		return recordcollaboration.WatchStatus{}, err
 	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.RecordID})
+	if err != nil {
+		return recordcollaboration.WatchStatus{}, err
+	}
+
 	var result recordcollaboration.WatchStatus
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		claim, err := transaction.ClaimIdempotency(ctx, command.Idempotency)
+	err = repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		result = recordcollaboration.WatchStatus{}
+		claim, err := claimCollaborationEffect(ctx, transaction, command.RecordID, command.Actor.UserID, []string{command.Actor.UserID}, "", command.Idempotency)
 		if err != nil {
 			return err
 		}
 		if (claim.ReplayResult == nil) == (claim.Owner == nil) {
 			return recordcollaboration.ErrInvalidWatchCommand
 		}
-		if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
-			return err
-		}
-		binding, err := loadCollaborationRecordFenceBinding(ctx, transaction.tx, command.RecordID)
+		binding, err := readAcquiredCollaborationRecordFenceBinding(ctx, transaction.tx, command.RecordID)
 		if err != nil {
 			return err
 		}
@@ -77,7 +80,7 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 		if member.UserID != command.Actor.UserID || member.ProjectID != command.Actor.ProjectID || member.Role != command.Actor.Role {
 			return recordauth.ErrDenied
 		}
-		currentAuthorization, err := repository.authorization.resolveCurrentAuthorizationInTransaction(
+		currentAuthorization, err := authorization.resolveCurrentAuthorizationInTransaction(
 			ctx, transaction.tx, member, command.RecordID,
 		)
 		if err != nil {
@@ -200,14 +203,19 @@ func loadRecordWatchResultFingerprint(
 
 func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, command recordcollaboration.WatchReadCommand) (recordcollaboration.WatchStatus, error) {
 	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
-		repository.authorization == nil || nilRecordSubjectDependency(repository.authorization.resolver) {
+		nilRecordSubjectDependency(repository.authorization) {
 		return recordcollaboration.WatchStatus{}, recordcollaboration.ErrInvalidWatchCommand
 	}
 	if err := command.Validate(); err != nil {
 		return recordcollaboration.WatchStatus{}, err
 	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.RecordID})
+	if err != nil {
+		return recordcollaboration.WatchStatus{}, err
+	}
+
 	var result recordcollaboration.WatchStatus
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		if err := assertRecordReadFence(ctx, transaction.tx, command.RecordID); err != nil {
 			return err
 		}
@@ -234,7 +242,7 @@ func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, c
 		if member.UserID != command.Actor.UserID || member.ProjectID != command.Actor.ProjectID || member.Role != command.Actor.Role {
 			return recordauth.ErrDenied
 		}
-		currentAuthorization, err := repository.authorization.resolveCurrentAuthorizationInTransaction(
+		currentAuthorization, err := authorization.resolveCurrentAuthorizationInTransaction(
 			ctx, transaction.tx, member, command.RecordID,
 		)
 		if err != nil {

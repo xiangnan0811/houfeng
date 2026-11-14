@@ -3,9 +3,14 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
@@ -13,23 +18,10 @@ import (
 
 func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitIsAtomicIdempotentAndContinuous(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-recovery-delete", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgrecoverydelete",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Recovery delete record"),
-		"record-recovery-delete-create",
-	))
-	if err != nil {
-		t.Fatalf("CommitRevision() error = %v", err)
-	}
+	legacy, created := newRecordsPostgresLegacyDeletionFixture(t, ctx,
+		"rec_pgrecoverydelete", "Recovery delete record", "record-recovery-delete-create")
+	fixture, runtimePool := legacy.platform, legacy.Runtime
+	draftRepository := newAdmittedCoreDraftRepository(t, runtimePool, legacy.Gate)
 	draft, err := draftRepository.CreateDraft(ctx, records.DraftCreateCommand{
 		DraftID:        "rdf_pgrecoverydelete",
 		ProjectID:      "default",
@@ -52,26 +44,14 @@ func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitIsAtomicIdempotent
 		t.Fatalf("PatchDraft() error = %v", err)
 	}
 
-	cursor := recorddeletion.RecoveryReplayCursor{
-		Sequence:  30,
-		EntryHash: testStoreRecordPlatformDigest(0xa1),
-	}
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
+	ledger := newRecordsPostgresRecoveryLedger(t, ctx, legacy)
+	cursor := ledger.prior(t, ctx, deploymentID)
 	seedRecordsPostgresRecoveryCursor(t, ctx, fixture, cursor)
-	entry, fingerprintBytes := recordsPostgresRecoveryLedgerEntry(
-		t,
-		created,
-		"rpo_pgrecoverydelete",
-		recordplatform.DeploymentID("dp-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
-		cursor.Sequence+1,
-		recorddeletion.LedgerEntryDeleteCommit,
-		0,
-	)
-	replayRequest := recordsPostgresRecoveryReplayRequest(entry, cursor, fingerprintBytes)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	adapter, err := recorddeletion.NewRecoveryAdapter(repository)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
+	entry, witnessProof := ledger.record(t, ctx, recordsPostgresRecoveryRequest(
+		t, created, "rpo_pgrecoverydelete", deploymentID, recorddeletion.LedgerEntryDeleteCommit, 0))
+	replayRequest := ledger.replayRequest(cursor, entry)
+	adapter := ledger.adapter
 
 	first, err := adapter.Replay(ctx, replayRequest)
 	if err != nil {
@@ -213,7 +193,7 @@ func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitIsAtomicIdempotent
 	if !recoveryReplayed || reservationState != "committed" || fenceEpoch != 1 || !previewTupleNull ||
 		operationState != string(recorddeletion.DeletionStateOnlinePurged) || entryType != string(recorddeletion.LedgerEntryDeleteCommit) ||
 		ledgerSequence != int64(entry.Sequence) || !deletionStoreDigestEqual(ledgerHash, entry.EntryHash) ||
-		!deletionStoreDigestEqual(witnessDigest, replayRequest.WitnessProofDigest) || len(receiptDigest) != 32 ||
+		!deletionStoreDigestEqual(witnessDigest, witnessProof) || len(receiptDigest) != 32 ||
 		auditCount != 1 || coreReceiptCount != 1 || cursorSequence != int64(entry.Sequence) ||
 		!deletionStoreDigestEqual(cursorHash, entry.EntryHash) {
 		t.Fatalf("recovery terminal projection replayed/state/fence/null/op/type/sequence/audit/receipt/cursor = %t/%q/%d/%t/%q/%q/%d/%d/%d/%d",
@@ -221,25 +201,22 @@ func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitIsAtomicIdempotent
 			entryType, ledgerSequence, auditCount, coreReceiptCount, cursorSequence)
 	}
 
-	staleCursor := recorddeletion.RecoveryReplayCursor{
-		Sequence:  entry.Sequence + 1,
-		EntryHash: testStoreRecordPlatformDigest(0xa2),
-	}
-	staleEntry := entry
-	staleEntry.Request.OperationID = "rpo_pgrecoverystale"
-	staleEntry.Sequence = staleCursor.Sequence + 1
-	staleEntry.EntryHash = testStoreRecordPlatformDigest(0xa3)
-	if err := staleEntry.Validate(); err != nil {
-		t.Fatalf("stale recovery entry invalid: %v", err)
-	}
-	_, err = adapter.Replay(ctx, recordsPostgresRecoveryReplayRequest(staleEntry, staleCursor, fingerprintBytes))
-	if !errors.Is(err, recorddeletion.ErrRecoveryContractUnavailable) {
-		t.Fatalf("Replay(stale cursor) error = %v, want ErrRecoveryContractUnavailable", err)
+	// A ledger-consistent cursor ahead of APP's applied entry is rejected by
+	// the replay command before any reservation, operation or cursor effect.
+	gap, _ := ledger.record(t, ctx, recordsPostgresRecoveryRequest(
+		t, created, "rpo_pgrecoverygap", deploymentID, recorddeletion.LedgerEntryDeleteCommit, 0))
+	staleEntry, _ := ledger.record(t, ctx, recordsPostgresRecoveryRequest(
+		t, created, "rpo_pgrecoverystale", deploymentID, recorddeletion.LedgerEntryDeleteCommit, 0))
+	staleCursor := recorddeletion.RecoveryReplayCursor{Sequence: gap.Sequence, EntryHash: gap.EntryHash}
+	_, err = adapter.Replay(ctx, ledger.replayRequest(staleCursor, staleEntry))
+	var stalePgErr *pgconn.PgError
+	if !errors.As(err, &stalePgErr) || stalePgErr.Code != "40001" || stalePgErr.Message != "record recovery predecessor changed" {
+		t.Fatalf("Replay(stale cursor) error = %v, want predecessor change rejection", err)
 	}
 	var staleOperationCount int
 	if err := fixture.db.QueryRow(ctx, `
-		select count(*)::int from public.record_purge_operations where operation_id = $1`,
-		staleEntry.Request.OperationID,
+		select count(*)::int from public.record_purge_operations where operation_id in ($1, $2)`,
+		gap.Request.OperationID, staleEntry.Request.OperationID,
 	).Scan(&staleOperationCount); err != nil {
 		t.Fatalf("count stale recovery operation: %v", err)
 	}
@@ -298,74 +275,32 @@ func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitIsAtomicIdempotent
 		  and event_kind = 'committed'`, entry.Request.OperationID); err != nil {
 		t.Fatalf("remove recovery audit for idempotent verification: %v", err)
 	}
-	if _, err := adapter.Replay(ctx, replayRequest); !errors.Is(err, recorddeletion.ErrRecoveryContractUnavailable) {
-		t.Fatalf("Replay(idempotent with missing audit) error = %v, want ErrRecoveryContractUnavailable", err)
+	_, err = adapter.Replay(ctx, replayRequest)
+	var auditPgErr *pgconn.PgError
+	if !errors.As(err, &auditPgErr) || auditPgErr.Code != "42501" || auditPgErr.Message != "record recovery audit mismatch" {
+		t.Fatalf("Replay(idempotent with missing audit) error = %v, want audit mismatch rejection", err)
 	}
 }
 
 func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitReusesPreviewReservationWithoutOperation(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-recovery-preview", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgrecoverypreview",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Recovery preview record"),
-		"record-recovery-preview-create",
-	))
-	if err != nil {
-		t.Fatalf("CommitRevision() error = %v", err)
-	}
-
-	deploymentID := recordplatform.DeploymentID("dp-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-	createCommand, _ := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	repository.newReservationID = func() (string, error) { return "drs_pgrecoverypreview", nil }
-	preview, err := repository.CreatePreview(ctx, createCommand)
-	if err != nil {
-		t.Fatalf("CreatePreview() error = %v", err)
-	}
-	fingerprintBytes, err := createCommand.RequestFingerprint.PersistedBytes()
-	if err != nil {
-		t.Fatalf("PersistedBytes() error = %v", err)
-	}
-
-	cursor := recorddeletion.RecoveryReplayCursor{
-		Sequence:  35,
-		EntryHash: testStoreRecordPlatformDigest(0xaa),
-	}
+	var request recorddeletion.LedgerAppendRequest
+	legacy, _ := newRecordsPostgresLegacyDeletionFixture(t, ctx,
+		"rec_pgrecoverypreview", "Recovery preview record", "record-recovery-preview-create",
+		func(ctx context.Context, conn *pgx.Conn, created records.RevisionCommitResult, deploymentID recordplatform.DeploymentID) error {
+			request = recordsPostgresRecoveryRequest(t, created, "rpo_pgrecoverypreview", deploymentID, recorddeletion.LedgerEntryDeleteCommit, 0)
+			return seedRecordsPostgresLegacyDeletionHistory(ctx, conn, created, request, "drs_pgrecoverypreview", false)
+		})
+	fixture := legacy.platform
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
+	ledger := newRecordsPostgresRecoveryLedger(t, ctx, legacy)
+	cursor := ledger.prior(t, ctx, deploymentID)
 	seedRecordsPostgresRecoveryCursor(t, ctx, fixture, cursor)
-	request := recorddeletion.LedgerAppendRequest{
-		EntryType:               recorddeletion.LedgerEntryDeleteCommit,
-		DeploymentID:            deploymentID,
-		ProjectID:               recordplatform.ProjectIDDefault,
-		OperationID:             "rpo_pgrecoverypreview",
-		ActorID:                 "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
-		Object:                  preview.Object,
-		TokenCommitment:         preview.TokenCommitment,
-		RequestFingerprint:      preview.RequestFingerprint,
-		ReasonCode:              recorddeletion.DeletionReasonUserConfirmed,
-		DeletionContractVersion: recorddeletion.RecordDeletionContractVersionV1,
+	if request.DeploymentID != deploymentID {
+		t.Fatal("historical preview deployment differs from activated deployment")
 	}
-	entry := recorddeletion.DeletionLedgerEntry{
-		Request:   request,
-		Sequence:  cursor.Sequence + 1,
-		EntryHash: testStoreRecordPlatformDigest(0xab),
-	}
-	if err := entry.Validate(); err != nil {
-		t.Fatalf("recovery preview entry invalid: %v", err)
-	}
-	adapter, err := recorddeletion.NewRecoveryAdapter(repository)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
-
-	if _, err := adapter.Replay(ctx, recordsPostgresRecoveryReplayRequest(entry, cursor, fingerprintBytes)); err != nil {
+	entry, _ := ledger.record(t, ctx, request)
+	if _, err := ledger.adapter.Replay(ctx, ledger.replayRequest(cursor, entry)); err != nil {
 		t.Fatalf("Replay(delete commit from preview-only backup) error = %v", err)
 	}
 
@@ -393,82 +328,34 @@ func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitReusesPreviewReser
 	); err != nil {
 		t.Fatalf("read preview-only recovery projection: %v", err)
 	}
-	if reservationID != preview.ReservationID || recoveryReplayed || reservationCount != 1 || rootCount != 0 {
-		t.Fatalf("preview-only recovery reservation/replayed/count/root = %q/%t/%d/%d, want %q/false/1/0",
-			reservationID, recoveryReplayed, reservationCount, rootCount, preview.ReservationID)
+	if reservationID != "drs_pgrecoverypreview" || recoveryReplayed || reservationCount != 1 || rootCount != 0 {
+		t.Fatalf("preview-only recovery reservation/replayed/count/root = %q/%t/%d/%d, want drs_pgrecoverypreview/false/1/0",
+			reservationID, recoveryReplayed, reservationCount, rootCount)
 	}
 }
 
 func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedReleasesExistingFenceWithoutPurging(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-recovery-outcome", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgrecoveryoutcome",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Recovery outcome record"),
-		"record-recovery-outcome-create",
-	))
-	if err != nil {
-		t.Fatalf("CommitRevision() error = %v", err)
+	var request recorddeletion.LedgerAppendRequest
+	legacy, created := newRecordsPostgresLegacyDeletionFixture(t, ctx,
+		"rec_pgrecoveryoutcome", "Recovery outcome record", "record-recovery-outcome-create",
+		func(ctx context.Context, conn *pgx.Conn, created records.RevisionCommitResult, deploymentID recordplatform.DeploymentID) error {
+			request = recordsPostgresRecoveryRequest(t, created, "rpo_pgrecoveryoutcome", deploymentID, recorddeletion.LedgerEntryDeleteCommit, 0)
+			return seedRecordsPostgresLegacyDeletionHistory(ctx, conn, created, request, "drs_pgrecoveryoutcome", true)
+		})
+	fixture := legacy.platform
+	recordRepository := newRevisionMutationAdmittedRepository(t, legacy)
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
+	if request.DeploymentID != deploymentID {
+		t.Fatal("historical operation deployment differs from activated deployment")
 	}
-
-	deploymentID := recordplatform.DeploymentID("dp-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
-	createCommand, _ := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	repository.newReservationID = func() (string, error) { return "drs_pgrecoveryoutcome", nil }
-	repository.newOperationID = func() (string, error) { return "rpo_pgrecoveryoutcome", nil }
-	repository.newAuditID = func() (string, error) { return "rda_pgrecoveryoutcome", nil }
-	preview, err := repository.CreatePreview(ctx, createCommand)
-	if err != nil {
-		t.Fatalf("CreatePreview() error = %v", err)
-	}
-	reserveCommand := recordsPostgresDeletionReserveCommand(createCommand, preview, deploymentID)
-	reserveCommand.OwnerID = "recovery_outcome_owner"
-	operation, err := repository.ReservePreview(ctx, reserveCommand)
-	if err != nil {
-		t.Fatalf("ReservePreview() error = %v", err)
-	}
-
-	fingerprintBytes, err := createCommand.RequestFingerprint.PersistedBytes()
-	if err != nil {
-		t.Fatalf("PersistedBytes() error = %v", err)
-	}
-	request := recorddeletion.LedgerAppendRequest{
-		EntryType:               recorddeletion.LedgerEntryDeleteCommit,
-		DeploymentID:            deploymentID,
-		ProjectID:               recordplatform.ProjectIDDefault,
-		OperationID:             operation.OperationID,
-		ActorID:                 reserveCommand.ActorID,
-		Object:                  operation.Object,
-		TokenCommitment:         preview.TokenCommitment,
-		RequestFingerprint:      preview.RequestFingerprint,
-		ReasonCode:              operation.ReasonCode,
-		DeletionContractVersion: recorddeletion.RecordDeletionContractVersionV1,
-	}.AttemptNotCommitted(7)
-	cursor := recorddeletion.RecoveryReplayCursor{
-		Sequence:  40,
-		EntryHash: testStoreRecordPlatformDigest(0xb1),
-	}
+	request = request.AttemptNotCommitted(7)
+	ledger := newRecordsPostgresRecoveryLedger(t, ctx, legacy)
+	cursor := ledger.prior(t, ctx, deploymentID)
 	seedRecordsPostgresRecoveryCursor(t, ctx, fixture, cursor)
-	entry := recorddeletion.DeletionLedgerEntry{
-		Request:   request,
-		Sequence:  cursor.Sequence + 1,
-		EntryHash: testStoreRecordPlatformDigest(0xb2),
-	}
-	if err := entry.Validate(); err != nil {
-		t.Fatalf("recovery outcome entry invalid: %v", err)
-	}
-	replayRequest := recordsPostgresRecoveryReplayRequest(entry, cursor, fingerprintBytes)
-	adapter, err := recorddeletion.NewRecoveryAdapter(repository)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
+	entry, _ := ledger.record(t, ctx, request)
+	replayRequest := ledger.replayRequest(cursor, entry)
+	adapter := ledger.adapter
 	receipt, err := adapter.Replay(ctx, replayRequest)
 	if err != nil {
 		t.Fatalf("Replay(attempt not committed) error = %v", err)
@@ -525,7 +412,7 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedReleasesExistingFe
 		  on reservation.reservation_id = operation.reservation_id
 		join public.deletion_replay_state replay
 		  on replay.project_id = operation.project_id
-		where operation.operation_id = $1`, operation.OperationID).Scan(
+		where operation.operation_id = $1`, request.OperationID).Scan(
 		&recoveryReplayed,
 		&reservationState,
 		&reservationEpoch,
@@ -558,25 +445,22 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedReleasesExistingFe
 		from public.content_delivery_epochs
 		where project_id = $1 and object_kind = $2 and object_id = $3`,
 		recordplatform.ProjectIDDefault,
-		operation.Object.ObjectKind,
-		operation.Object.ObjectID,
+		request.Object.ObjectKind,
+		request.Object.ObjectID,
 	).Scan(&currentDeliveryEpoch); err != nil {
 		t.Fatalf("read current content delivery epoch: %v", err)
 	}
-	newCreateCommand, _ := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
-	newCreateCommand.Record.ContentDeliveryEpoch = recordplatform.ContentEpoch(currentDeliveryEpoch)
-	repository.newReservationID = func() (string, error) { return "drs_pgrecoverynewer", nil }
-	repository.newOperationID = func() (string, error) { return "rpo_pgrecoverynewer", nil }
-	repository.newAuditID = func() (string, error) { return "rda_pgrecoverynewer", nil }
-	newPreview, err := repository.CreatePreview(ctx, newCreateCommand)
-	if err != nil {
-		t.Fatalf("CreatePreview(newer operation) error = %v", err)
-	}
-	newReserveCommand := recordsPostgresDeletionReserveCommand(newCreateCommand, newPreview, deploymentID)
-	newReserveCommand.OwnerID = "recovery_newer_owner"
-	newOperation, err := repository.ReservePreview(ctx, newReserveCommand)
-	if err != nil {
-		t.Fatalf("ReservePreview(newer operation) error = %v", err)
+	// A delayed V1 outcome must preserve an independently acquired newer lease.
+	// V1 preview/reserve is closed after C81, so install only the live lease.
+	if result, err := fixture.db.Exec(ctx, `
+		insert into public.deletion_fence_leases
+			(project_id, object_kind, object_id, owner_id, owner_generation, expires_at)
+		values ($1, $2, $3, 'recovery_newer_owner', 2, clock_timestamp() + interval '5 minutes')
+		on conflict (project_id, object_kind, object_id) do update
+		set owner_id=excluded.owner_id, owner_generation=excluded.owner_generation, expires_at=excluded.expires_at
+		where public.deletion_fence_leases.expires_at <= clock_timestamp()`,
+		request.Object.ProjectID, request.Object.ObjectKind, request.Object.ObjectID); err != nil || result.RowsAffected() != 1 {
+		t.Fatalf("seed newer independent fence: rows=%d error=%v", result.RowsAffected(), err)
 	}
 
 	var (
@@ -588,9 +472,9 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedReleasesExistingFe
 		select owner_id, owner_generation, expires_at
 		from public.deletion_fence_leases
 		where project_id = $1 and object_kind = $2 and object_id = $3`,
-		newOperation.Object.ProjectID,
-		newOperation.Object.ObjectKind,
-		newOperation.Object.ObjectID,
+		request.Object.ProjectID,
+		request.Object.ObjectKind,
+		request.Object.ObjectID,
 	).Scan(&newFenceOwner, &newFenceGeneration, &newFenceExpiresAt); err != nil {
 		t.Fatalf("read newer deletion fence: %v", err)
 	}
@@ -622,9 +506,9 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedReleasesExistingFe
 		select owner_id, owner_generation, expires_at
 		from public.deletion_fence_leases
 		where project_id = $1 and object_kind = $2 and object_id = $3`,
-		newOperation.Object.ProjectID,
-		newOperation.Object.ObjectKind,
-		newOperation.Object.ObjectID,
+		request.Object.ProjectID,
+		request.Object.ObjectKind,
+		request.Object.ObjectID,
 	).Scan(&preservedOwner, &preservedGeneration, &preservedExpiresAt); err != nil {
 		t.Fatalf("read newer deletion fence after delayed replay: %v", err)
 	}
@@ -647,43 +531,19 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedReleasesExistingFe
 
 func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedCreatesSyntheticTerminalProjectionWithoutPurging(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-recovery-synthetic-outcome", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgrecoverysynthetic",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Recovery synthetic outcome record"),
-		"record-recovery-synthetic-outcome-create",
-	))
-	if err != nil {
-		t.Fatalf("CommitRevision() error = %v", err)
-	}
+	legacy, created := newRecordsPostgresLegacyDeletionFixture(t, ctx,
+		"rec_pgrecoverysynthetic", "Recovery synthetic outcome record", "record-recovery-synthetic-outcome-create")
+	fixture := legacy.platform
+	recordRepository := newRevisionMutationAdmittedRepository(t, legacy)
 
-	cursor := recorddeletion.RecoveryReplayCursor{
-		Sequence:  45,
-		EntryHash: testStoreRecordPlatformDigest(0xb5),
-	}
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
+	ledger := newRecordsPostgresRecoveryLedger(t, ctx, legacy)
+	cursor := ledger.prior(t, ctx, deploymentID)
 	seedRecordsPostgresRecoveryCursor(t, ctx, fixture, cursor)
-	entry, fingerprintBytes := recordsPostgresRecoveryLedgerEntry(
-		t,
-		created,
-		"rpo_pgrecoverysynthetic",
-		recordplatform.DeploymentID("dp-2222222222222222222222222222222222222222222222222222222222222222"),
-		cursor.Sequence+1,
-		recorddeletion.LedgerEntryAttemptNotCommitted,
-		9,
-	)
-	replayRequest := recordsPostgresRecoveryReplayRequest(entry, cursor, fingerprintBytes)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	adapter, err := recorddeletion.NewRecoveryAdapter(repository)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
+	entry, witnessProof := ledger.record(t, ctx, recordsPostgresRecoveryRequest(
+		t, created, "rpo_pgrecoverysynthetic", deploymentID, recorddeletion.LedgerEntryAttemptNotCommitted, 9))
+	replayRequest := ledger.replayRequest(cursor, entry)
+	adapter := ledger.adapter
 
 	first, err := adapter.Replay(ctx, replayRequest)
 	if err != nil {
@@ -793,7 +653,7 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedCreatesSyntheticTe
 		reservationState != "not_committed" || reservationEpoch != 9 || !previewTupleNull ||
 		operationState != string(recorddeletion.DeletionStateNotCommitted) || operationEpoch != 9 ||
 		entryType != string(recorddeletion.LedgerEntryAttemptNotCommitted) ||
-		!deletionStoreDigestEqual(witnessDigest, replayRequest.WitnessProofDigest) || !receiptIsNull ||
+		!deletionStoreDigestEqual(witnessDigest, witnessProof) || !receiptIsNull ||
 		activeFenceCount != 0 || rootCount != 1 || revisionCount != 1 || deliveryCount != 1 ||
 		coreReceiptCount != 0 || auditCount != 1 || cursorSequence != int64(entry.Sequence) ||
 		!deletionStoreDigestEqual(cursorHash, entry.EntryHash) {
@@ -815,37 +675,16 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedCreatesSyntheticTe
 
 func TestPostgresIntegrationRecordDeletionRecoveryReceiptFailureRollsBackContentProjectionAndCursor(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-recovery-rollback", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgrecoveryrollback",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Recovery rollback record"),
-		"record-recovery-rollback-create",
-	))
-	if err != nil {
-		t.Fatalf("CommitRevision() error = %v", err)
-	}
+	legacy, created := newRecordsPostgresLegacyDeletionFixture(t, ctx,
+		"rec_pgrecoveryrollback", "Recovery rollback record", "record-recovery-rollback-create")
+	fixture := legacy.platform
 
-	cursor := recorddeletion.RecoveryReplayCursor{
-		Sequence:  50,
-		EntryHash: testStoreRecordPlatformDigest(0xc1),
-	}
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
+	ledger := newRecordsPostgresRecoveryLedger(t, ctx, legacy)
+	cursor := ledger.prior(t, ctx, deploymentID)
 	seedRecordsPostgresRecoveryCursor(t, ctx, fixture, cursor)
-	entry, fingerprintBytes := recordsPostgresRecoveryLedgerEntry(
-		t,
-		created,
-		"rpo_pgrecoveryrollback",
-		recordplatform.DeploymentID("dp-1111111111111111111111111111111111111111111111111111111111111111"),
-		cursor.Sequence+1,
-		recorddeletion.LedgerEntryDeleteCommit,
-		0,
-	)
+	entry, _ := ledger.record(t, ctx, recordsPostgresRecoveryRequest(
+		t, created, "rpo_pgrecoveryrollback", deploymentID, recorddeletion.LedgerEntryDeleteCommit, 0))
 	const failureConstraint = "record_core_purge_receipts_recovery_failure_test"
 	if _, err := fixture.db.Exec(ctx, `alter table public.record_core_purge_receipts add constraint `+failureConstraint+` check (false) not valid`); err != nil {
 		t.Fatalf("add recovery receipt failure constraint: %v", err)
@@ -854,13 +693,10 @@ func TestPostgresIntegrationRecordDeletionRecoveryReceiptFailureRollsBackContent
 		_, _ = fixture.db.Exec(context.Background(), `alter table public.record_core_purge_receipts drop constraint if exists `+failureConstraint)
 	})
 
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	adapter, err := recorddeletion.NewRecoveryAdapter(repository)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
-	if _, err := adapter.Replay(ctx, recordsPostgresRecoveryReplayRequest(entry, cursor, fingerprintBytes)); err == nil {
-		t.Fatal("Replay(delete commit with receipt failure) error = nil")
+	_, err := ledger.adapter.Replay(ctx, ledger.replayRequest(cursor, entry))
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != failureConstraint {
+		t.Fatalf("Replay(delete commit with receipt failure) error = %v, want violation of %s", err, failureConstraint)
 	}
 
 	var (
@@ -911,15 +747,165 @@ func TestPostgresIntegrationRecordDeletionRecoveryReceiptFailureRollsBackContent
 	}
 }
 
-func recordsPostgresRecoveryLedgerEntry(
+// Recovery replays V1 history, so its target and optional deletion history
+// must exist before C81. This seeds backup content, not replay authority;
+// the real ledger verifier and held fence still authorize every replay.
+func newRecordsPostgresLegacyDeletionFixture(
+	t *testing.T, ctx context.Context, recordID, title, key string,
+	history ...func(context.Context, *pgx.Conn, records.RevisionCommitResult, recordplatform.DeploymentID) error,
+) (ImportAttachmentGCFixture, records.RevisionCommitResult) {
+	t.Helper()
+	input := recordsPostgresCompleteRevisionInput(t, title)
+	command := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordCreate,
+		recordID, "", 0, 0, input, key)
+	prepared, err := prepareRecordRevision(command)
+	if err != nil {
+		t.Fatalf("prepare predecessor record: %v", err)
+	}
+	created := records.RevisionCommitResult{
+		RecordID: recordID, RevisionID: prepared.revisionID, RevisionNo: 1,
+		LockVersion: 1, AuthorizationEpoch: 1, Lifecycle: records.LifecycleActive, Created: true,
+	}
+	legacy := newImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false,
+		func(ctx context.Context, conn *pgx.Conn, deploymentID recordplatform.DeploymentID) error {
+			var beforeC81 bool
+			if err := conn.QueryRow(ctx, `select to_regclass('public.record_deletion_gates') is null`).Scan(&beforeC81); err != nil || !beforeC81 {
+				return fmt.Errorf("predecessor record must be seeded before C81: before=%t: %v", beforeC81, err)
+			}
+			if _, err := conn.Exec(ctx, `insert into public.records (record_id) values ($1)`, recordID); err != nil {
+				return fmt.Errorf("seed predecessor root: %w", err)
+			}
+			if err := conn.QueryRow(ctx, `
+				insert into public.record_revisions (
+					revision_id, record_id, revision_no, title, body_markdown,
+					markdown_dialect_version, record_type, impact_level, visibility_scope,
+					visibility_digest, owner_id, author_id, canonical_hash
+				) values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+				returning created_at`, prepared.revisionID, recordID, input.Title(), input.BodyMarkdown(),
+				int64(input.MarkdownDialectVersion()), string(input.RecordType()), string(input.ImpactLevel()),
+				prepared.visibilityJSON, prepared.visibilityHash[:], input.OwnerID(), input.AuthorID(),
+				prepared.canonicalHash[:]).Scan(&created.CommittedAt); err != nil {
+				return fmt.Errorf("seed predecessor revision: %w", err)
+			}
+			for ordinal, subject := range prepared.subjects {
+				if _, err := conn.Exec(ctx, `
+					insert into public.record_revision_subjects (
+						revision_id, ordinal, registry_version, subject_kind, relation_role,
+						source_id, is_primary, identity_snapshot, capture_authorization, capture_authorization_digest
+					) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, prepared.revisionID, int64(ordinal),
+					int64(subject.subject.RegistryVersion), string(subject.subject.Kind), string(subject.subject.Role),
+					subject.subject.SourceID, subject.subject.Primary, subject.identityJSON, subject.authorizationJSON,
+					subject.subject.CaptureAuthorization.Digest[:]); err != nil {
+					return fmt.Errorf("seed predecessor subject: %w", err)
+				}
+			}
+			for ordinal, tag := range prepared.tags {
+				if _, err := conn.Exec(ctx, `insert into public.record_revision_tags (revision_id, ordinal, tag_value) values ($1,$2,$3)`,
+					prepared.revisionID, int64(ordinal), tag); err != nil {
+					return fmt.Errorf("seed predecessor tag: %w", err)
+				}
+			}
+			for ordinal, participant := range prepared.participants {
+				if _, err := conn.Exec(ctx, `insert into public.record_revision_participants (revision_id, ordinal, participant_id, identity_snapshot) values ($1,$2,$3,$4)`,
+					prepared.revisionID, int64(ordinal), participant.participant.ParticipantID, participant.identityJSON); err != nil {
+					return fmt.Errorf("seed predecessor participant: %w", err)
+				}
+			}
+			if _, err := conn.Exec(ctx, `
+				update public.records set current_revision_id=$2, current_title=$3, current_record_type=$4,
+					current_impact_level=$5, current_visibility_scope=$6, current_visibility_digest=$7,
+					current_owner_id=$8, lock_version=1, authorization_epoch=1 where record_id=$1`,
+				recordID, prepared.revisionID, input.Title(), string(input.RecordType()), string(input.ImpactLevel()),
+				prepared.visibilityJSON, prepared.visibilityHash[:], input.OwnerID()); err != nil {
+				return fmt.Errorf("seed predecessor current projection: %w", err)
+			}
+			if _, err := conn.Exec(ctx, `
+				insert into public.record_domain_activities (activity_id, project_id, record_id, revision_id,
+					event_kind, source_event_id, source_version, actor_id, authorization_epoch, record_lock_version, event_at)
+				values ($1, 'default', $2, $3, 'record_created', $3, 1, $4, 1, 1, transaction_timestamp())`,
+				prepared.activityID, recordID, prepared.revisionID, input.AuthorID()); err != nil {
+				return fmt.Errorf("seed predecessor activity: %w", err)
+			}
+			if _, err := conn.Exec(ctx, `insert into public.content_delivery_epochs (project_id, object_kind, object_id, delivery_epoch) values ('default','record',$1,0)`, recordID); err != nil {
+				return fmt.Errorf("seed predecessor delivery epoch: %w", err)
+			}
+			for _, seed := range history {
+				if err := seed(ctx, conn, created, deploymentID); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	return legacy, created
+}
+
+// Seed the pre-C81 backup state that replay consumes. This never creates a
+// verified entry or a recovery fence, and cannot authorize replay by itself.
+func seedRecordsPostgresLegacyDeletionHistory(
+	ctx context.Context, conn *pgx.Conn, created records.RevisionCommitResult,
+	request recorddeletion.LedgerAppendRequest, reservationID string, fenced bool,
+) error {
+	fingerprint, err := request.RequestFingerprint.PersistedBytes()
+	if err != nil {
+		return err
+	}
+	state, owner, generation := "previewed", "", int64(0)
+	if fenced {
+		state, owner, generation = "fenced", "recovery_outcome_owner", 1
+	}
+	if _, err := conn.Exec(ctx, `
+		insert into public.deletion_reservations (
+			reservation_id, project_id, object_kind, object_id,
+			deletion_token_commitment, request_fingerprint, state, fence_epoch,
+			owner_id, owner_generation, owner_expires_at, expires_at,
+			actor_scope_digest, preview_binding_digest, preview_current_revision_id,
+			preview_lock_version, preview_authorization_epoch, preview_content_delivery_epoch,
+			preview_dependency_graph_digest, preview_backup_inventory_digest,
+			preview_processor_inventory_digest, adapter_readiness_digest, adapter_preview_digest,
+			preview_witness_sequence, preview_witness_entry_hash
+		) values ($1,'default','record',$2,$3,$4,$5,$6,$7,$6,
+			case when $6::bigint > 0 then transaction_timestamp()+interval '5 minutes' else null end,
+			transaction_timestamp()+interval '5 minutes',
+			decode(repeat('71',32),'hex'),decode(repeat('75',32),'hex'),$8,$9,$10,0,
+			decode(repeat('73',32),'hex'),decode(repeat('74',32),'hex'),
+			decode(repeat('76',32),'hex'),decode(repeat('78',32),'hex'),decode(repeat('79',32),'hex'),
+			7,decode(repeat('77',32),'hex'))`,
+		reservationID, created.RecordID, request.TokenCommitment[:], fingerprint[:], state,
+		generation, owner, created.RevisionID, int64(created.LockVersion), int64(created.AuthorizationEpoch)); err != nil {
+		return fmt.Errorf("seed predecessor preview: %w", err)
+	}
+	if !fenced {
+		return nil
+	}
+	if _, err := conn.Exec(ctx, `
+		insert into public.record_purge_operations (
+			operation_id, reservation_id, project_id, operation_state, deployment_id,
+			actor_id, reason_code, deletion_contract_version, owner_id, owner_generation, owner_expires_at
+		) values ($1,$2,'default','provisional_fenced',$3,$4,$5,1,$6,1,transaction_timestamp()+interval '5 minutes')`,
+		request.OperationID, reservationID, string(request.DeploymentID), request.ActorID, string(request.ReasonCode), owner); err != nil {
+		return fmt.Errorf("seed predecessor operation: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `
+		insert into public.deletion_fence_leases
+			(project_id, object_kind, object_id, owner_id, owner_generation, expires_at)
+		values ('default','record',$1,$2,1,transaction_timestamp()+interval '5 minutes')`, created.RecordID, owner); err != nil {
+		return fmt.Errorf("seed predecessor fence: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `update public.content_delivery_epochs set delivery_epoch=1
+		where project_id='default' and object_kind='record' and object_id=$1`, created.RecordID); err != nil {
+		return fmt.Errorf("seed predecessor fenced delivery epoch: %w", err)
+	}
+	return nil
+}
+
+func recordsPostgresRecoveryRequest(
 	t *testing.T,
 	record records.RevisionCommitResult,
 	operationID string,
 	deploymentID recordplatform.DeploymentID,
-	sequence uint64,
 	entryType recorddeletion.LedgerEntryType,
 	releaseEpoch uint64,
-) (recorddeletion.DeletionLedgerEntry, [32]byte) {
+) recorddeletion.LedgerAppendRequest {
 	t.Helper()
 	preview, _ := recordsPostgresDeletionPreviewCommand(t, record, deploymentID)
 	fingerprintBytes, err := preview.RequestFingerprint.PersistedBytes()
@@ -945,29 +931,10 @@ func recordsPostgresRecoveryLedgerEntry(
 	if entryType == recorddeletion.LedgerEntryAttemptNotCommitted {
 		request = request.AttemptNotCommitted(releaseEpoch)
 	}
-	entry := recorddeletion.DeletionLedgerEntry{
-		Request:   request,
-		Sequence:  sequence,
-		EntryHash: testStoreRecordPlatformDigest(byte(sequence)),
+	if err := request.Validate(); err != nil {
+		t.Fatalf("recovery ledger request invalid: %v", err)
 	}
-	if err := entry.Validate(); err != nil {
-		t.Fatalf("recovery ledger entry invalid: %v", err)
-	}
-	return entry, fingerprintBytes
-}
-
-func recordsPostgresRecoveryReplayRequest(
-	entry recorddeletion.DeletionLedgerEntry,
-	cursor recorddeletion.RecoveryReplayCursor,
-	fingerprintBytes [32]byte,
-) recorddeletion.RecoveryReplayRequest {
-	return recorddeletion.RecoveryReplayRequest{
-		Cursor:                  cursor,
-		Entry:                   entry,
-		PreviousHash:            cursor.EntryHash,
-		WitnessProofDigest:      testStoreRecordPlatformDigest(0xd1),
-		RequestFingerprintBytes: fingerprintBytes,
-	}
+	return request
 }
 
 func seedRecordsPostgresRecoveryCursor(

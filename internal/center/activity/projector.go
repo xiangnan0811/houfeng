@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"houfeng/internal/center/ids"
 	"houfeng/internal/center/records"
 )
 
@@ -55,13 +56,13 @@ type PublishOutcome struct {
 // this interface rather than the store type so the ordering guarantee stays
 // testable without a database, and so this package keeps no dependency on store.
 type Publisher interface {
-	PublishBatch(ctx context.Context, generation uint64, candidates []CandidateEvent) (PublishOutcome, error)
+	PublishBatch(ctx context.Context, lease SourceLease, candidates []CandidateEvent) (PublishOutcome, error)
 }
 
 // CheckpointStore persists each source's position.
 type CheckpointStore interface {
 	LoadCheckpoint(ctx context.Context, generation uint64, kind SourceKind) (SourceCheckpoint, error)
-	SaveCheckpoint(ctx context.Context, generation uint64, checkpoint SourceCheckpoint) error
+	SaveCheckpoint(ctx context.Context, lease SourceLease, checkpoint SourceCheckpoint) error
 }
 
 // ProjectorOptions configures one projector.
@@ -203,9 +204,33 @@ func (projector *Projector) ProjectOnce(ctx context.Context, generation uint64) 
 	if generation == 0 {
 		return PassReport{}, ErrInactiveGeneration
 	}
+	leases, ok := projector.checkpoints.(SourceLeases)
+	if !ok {
+		return PassReport{}, errors.New("project activity: checkpoint store cannot claim source leases")
+	}
+	ownerID, err := ids.New("activity")
+	if err != nil {
+		return PassReport{}, fmt.Errorf("project activity: create lease owner: %w", err)
+	}
 	report := PassReport{Sources: make([]SourceOutcome, 0, len(projector.adapters))}
 	for _, adapter := range projector.adapters {
-		report.Sources = append(report.Sources, projector.projectSource(ctx, generation, adapter))
+		lease, acquired, err := leases.AcquireSourceLease(ctx, generation, adapter.Kind(), ownerID, DefaultSourceLeaseTTL)
+		if err != nil {
+			report.Sources = append(report.Sources, SourceOutcome{Kind: adapter.Kind(), Err: err})
+			continue
+		}
+		if !acquired {
+			report.Sources = append(report.Sources, SourceOutcome{Kind: adapter.Kind(), Err: ErrSourceLeaseLost})
+			continue
+		}
+		outcome := projector.projectSource(ctx, lease, adapter)
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		releaseErr := leases.ReleaseSourceLease(releaseCtx, lease)
+		cancel()
+		if releaseErr != nil {
+			outcome.Err = errors.Join(outcome.Err, fmt.Errorf("release activity source lease: %w", releaseErr))
+		}
+		report.Sources = append(report.Sources, outcome)
 	}
 	return report, nil
 }
@@ -225,28 +250,27 @@ func (projector *Projector) SourceKinds() []SourceKind {
 // not own.
 func (projector *Projector) ProjectSource(
 	ctx context.Context,
-	generation uint64,
-	kind SourceKind,
+	lease SourceLease,
 ) (SourceOutcome, error) {
 	if ctx == nil {
 		return SourceOutcome{}, errors.New("project activity source: nil context")
 	}
-	if generation == 0 {
-		return SourceOutcome{}, ErrInactiveGeneration
+	if err := lease.Validate(); err != nil {
+		return SourceOutcome{}, err
 	}
 	for _, adapter := range projector.adapters {
-		if adapter.Kind() == kind {
-			return projector.projectSource(ctx, generation, adapter), nil
+		if adapter.Kind() == lease.Kind {
+			return projector.projectSource(ctx, lease, adapter), nil
 		}
 	}
-	return SourceOutcome{}, fmt.Errorf("project activity source: no adapter for %q", kind)
+	return SourceOutcome{}, fmt.Errorf("project activity source: no adapter for %q", lease.Kind)
 }
 
-func (projector *Projector) projectSource(ctx context.Context, generation uint64, adapter SourceAdapter) SourceOutcome {
+func (projector *Projector) projectSource(ctx context.Context, lease SourceLease, adapter SourceAdapter) SourceOutcome {
 	kind := adapter.Kind()
 	outcome := SourceOutcome{Kind: kind}
 
-	checkpoint, err := projector.checkpoints.LoadCheckpoint(ctx, generation, kind)
+	checkpoint, err := projector.checkpoints.LoadCheckpoint(ctx, lease.Generation, kind)
 	if err != nil {
 		outcome.Err = fmt.Errorf("load checkpoint: %w", err)
 		return outcome
@@ -262,30 +286,30 @@ func (projector *Projector) projectSource(ctx context.Context, generation uint64
 
 	head, err := adapter.IncrementalHead(ctx)
 	if err != nil {
-		return projector.recordFailure(ctx, generation, checkpoint, outcome, fmt.Errorf("read head: %w", err))
+		return projector.recordFailure(ctx, lease, checkpoint, outcome, fmt.Errorf("read head: %w", err))
 	}
 	if err := checkpoint.ValidateHead(head); err != nil {
-		return projector.recordFailure(ctx, generation, checkpoint, outcome, err)
+		return projector.recordFailure(ctx, lease, checkpoint, outcome, err)
 	}
 
 	// Read forward first so the checkpoint keeps moving even when the trailing
 	// window is busy.
-	frontier, err := projector.drain(ctx, generation, adapter, checkpoint.FrontierWindow(head))
+	frontier, err := projector.drain(ctx, lease, adapter, checkpoint.FrontierWindow(head))
 	outcome.Scanned += frontier.scanned
 	outcome.Inserted += frontier.inserted
 	outcome.AlreadyPresent += frontier.alreadyPresent
 	if err != nil {
-		return projector.recordFailure(ctx, generation, checkpoint, outcome, err)
+		return projector.recordFailure(ctx, lease, checkpoint, outcome, err)
 	}
 
 	trailingComplete := true
 	if window, ok := checkpoint.TrailingWindow(projector.overlap); ok {
-		trailing, err := projector.drain(ctx, generation, adapter, window)
+		trailing, err := projector.drain(ctx, lease, adapter, window)
 		outcome.Scanned += trailing.scanned
 		outcome.Inserted += trailing.inserted
 		outcome.AlreadyPresent += trailing.alreadyPresent
 		if err != nil {
-			return projector.recordFailure(ctx, generation, checkpoint, outcome, err)
+			return projector.recordFailure(ctx, lease, checkpoint, outcome, err)
 		}
 		trailingComplete = trailing.complete
 		outcome.Stalled = outcome.Stalled || trailing.stalled
@@ -306,7 +330,7 @@ func (projector *Projector) projectSource(ctx context.Context, generation uint64
 	// watermark, because an export reads it as a completeness precondition.
 	next.CaughtUp = frontier.complete && trailingComplete
 
-	if err := projector.checkpoints.SaveCheckpoint(ctx, generation, next); err != nil {
+	if err := projector.checkpoints.SaveCheckpoint(ctx, lease, next); err != nil {
 		outcome.Err = fmt.Errorf("save checkpoint: %w", err)
 		return outcome
 	}
@@ -319,7 +343,7 @@ func (projector *Projector) projectSource(ctx context.Context, generation uint64
 // window is free; skipping one is not.
 func (projector *Projector) recordFailure(
 	ctx context.Context,
-	generation uint64,
+	lease SourceLease,
 	checkpoint SourceCheckpoint,
 	outcome SourceOutcome,
 	cause error,
@@ -332,7 +356,7 @@ func (projector *Projector) recordFailure(
 	failed.CaughtUp = false
 	failed.Attempt = checkpoint.Attempt + 1
 	failed.LastErrorCode = failureCode(cause)
-	if err := projector.checkpoints.SaveCheckpoint(ctx, generation, failed); err != nil {
+	if err := projector.checkpoints.SaveCheckpoint(ctx, lease, failed); err != nil {
 		outcome.Err = errors.Join(cause, fmt.Errorf("save checkpoint: %w", err))
 	}
 	return outcome
@@ -393,7 +417,7 @@ type drainResult struct {
 // so a full page at one instant cannot permanently stall the source.
 func (projector *Projector) drain(
 	ctx context.Context,
-	generation uint64,
+	lease SourceLease,
 	adapter SourceAdapter,
 	window ScanWindow,
 ) (drainResult, error) {
@@ -421,7 +445,7 @@ func (projector *Projector) drain(
 			return result, err
 		}
 
-		outcome, err := projector.publisher.PublishBatch(ctx, generation, candidates)
+		outcome, err := projector.publisher.PublishBatch(ctx, lease, candidates)
 		if err != nil {
 			return result, fmt.Errorf("publish %s: %w", adapter.Kind(), err)
 		}

@@ -15,12 +15,12 @@ var ErrInvalidDeletionAdapter = errors.New("invalid record search deletion adapt
 // travels with it so the store cannot be asked to purge under another adapter's
 // ownership claim.
 type DeletionCommand struct {
-	Operation     recorddeletion.DeletionOperation
+	recorddeletion.PurgeTarget
 	SurfaceDigest [sha256.Size]byte
 }
 
 func (command DeletionCommand) Validate() error {
-	if (recorddeletion.PurgeTarget{Operation: command.Operation}).Validate() != nil ||
+	if command.PurgeTarget.Validate() != nil ||
 		command.SurfaceDigest != recorddeletion.RecordSearchSurfaceDigest() {
 		return ErrInvalidDeletionAdapter
 	}
@@ -104,7 +104,7 @@ func (adapter *DeletionAdapter) PurgeDeletion(
 		return recorddeletion.AdapterPurgeReceipt{}, ErrInvalidDeletionAdapter
 	}
 	command := DeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordSearchSurfaceDigest(),
+		PurgeTarget: target, SurfaceDigest: recorddeletion.RecordSearchSurfaceDigest(),
 	}
 	if err := command.Validate(); err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
@@ -131,7 +131,7 @@ func (adapter *DeletionAdapter) VerifyDeletion(
 		return err
 	}
 	command := DeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordSearchSurfaceDigest(),
+		PurgeTarget: target, SurfaceDigest: recorddeletion.RecordSearchSurfaceDigest(),
 	}
 	return adapter.store.VerifyRecordSearchPurge(ctx, command, receipt)
 }

@@ -46,6 +46,8 @@ type ImportedAvailableAttachment struct {
 	LogicalSizeBytes int64
 	Object           ObjectVersion
 	BackendKind      BackendKind
+	NamespaceID      string
+	ObligationID     string
 	CreatedBy        string
 	GCObservation    ImportBlobGCObservation `json:"-"`
 }

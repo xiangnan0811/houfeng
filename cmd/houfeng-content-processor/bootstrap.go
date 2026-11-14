@@ -19,6 +19,8 @@ import (
 
 	"houfeng/internal/center/attachments"
 	centerconfig "houfeng/internal/center/config"
+	"houfeng/internal/center/ids"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/store"
 )
 
@@ -33,7 +35,15 @@ const (
 )
 
 type contentProcessorConfig struct {
-	DatabaseURL string
+	DatabaseURL               string
+	RecordDeploymentID        string
+	RecordInstanceID          string
+	RecordInstanceKind        string
+	RecordInstanceCapability  string
+	SourceWitnessDatabaseURL  string
+	SourceWitnessIdentityFile string
+	BirthReader               centerconfig.BirthReaderConfig
+	BirthLaunchFile           string
 
 	BlobBackend attachments.BackendKind
 	BlobRoot    string
@@ -143,6 +153,7 @@ type processorReconciler interface {
 
 type processorReconcilerGroup struct {
 	reconcilers []processorReconciler
+	next        int
 }
 
 func newProcessorReconcilerGroup(reconcilers ...processorReconciler) (*processorReconcilerGroup, error) {
@@ -163,8 +174,10 @@ func (group *processorReconcilerGroup) RunOnce(ctx context.Context) (bool, error
 	if ctx == nil || group == nil || len(group.reconcilers) == 0 {
 		return false, errors.New("invalid content processor reconciler group")
 	}
-	for _, reconciler := range group.reconcilers {
-		claimed, err := reconciler.RunOnce(ctx)
+	for checked := 0; checked < len(group.reconcilers); checked++ {
+		index := group.next
+		group.next = (index + 1) % len(group.reconcilers)
+		claimed, err := group.reconcilers[index].RunOnce(ctx)
 		if err != nil || claimed {
 			return claimed, err
 		}
@@ -174,15 +187,19 @@ func (group *processorReconcilerGroup) RunOnce(ctx context.Context) (bool, error
 
 type processorBootstrapDeps struct {
 	openPostgres             func(context.Context, string) (processorPostgresDB, error)
-	newAttachmentRepository  func(*pgxpool.Pool) attachments.ProcessorRepository
-	newBlobStore             func(contentProcessorConfig) (attachments.BlobStore, error)
+	loadRuntimeLaunch        func(string, string) (recordbirth.LaunchBinding, [32]byte, error)
+	verifyRuntimeLaunch      func(context.Context, *pgxpool.Pool, *recordbirth.PostgresAuthority, recordbirth.LaunchBinding) error
+	newAttachmentRepository  func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error)
+	newBlobStore             func(context.Context, contentProcessorConfig, attachments.LocalNamespaceRepository) (attachments.BlobStore, error)
+	newBlobWriter            func(attachments.BlobStore, attachments.BackendKind, attachments.ManagedWriteRepository) (attachments.BlobWriter, error)
 	newScanner               func(contentProcessorConfig) (attachments.ProcessorScanner, error)
 	newPreviewProcessor      func(contentProcessorConfig) (*attachments.PreviewProcessor, error)
 	newWorkspace             func(contentProcessorConfig, attachments.ProcessorRepository, *attachments.PreviewProcessor) (processorWorkspace, error)
 	newWorkspaceReconciler   func(attachments.ProcessorRepository, contentProcessorConfig) (processorReconciler, error)
-	newPublicationReconciler func(attachments.ProcessorRepository, attachments.BlobStore, contentProcessorConfig) (processorReconciler, error)
+	newPublicationReconciler func(attachments.ProcessorRepository, attachments.BlobStore, *attachments.LocalCleanupCoordinator, contentProcessorConfig) (processorReconciler, error)
+	newLocalGCReconciler     func(attachments.ProcessorRepository, attachments.BlobStore, *attachments.LocalCleanupCoordinator) (processorReconciler, error)
 	newReconciler            func(attachments.ProcessorRepository, attachments.TemporaryObjectStore, contentProcessorConfig) (processorReconciler, error)
-	newWorker                func(attachments.ProcessorRepository, attachments.BlobStore, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error)
+	newWorker                func(attachments.ProcessorRepository, attachments.BlobStore, attachments.BlobWriter, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error)
 	now                      func() time.Time
 	sleep                    func(context.Context, time.Duration) error
 	logger                   *slog.Logger
@@ -199,13 +216,22 @@ func (dependencies processorBootstrapDeps) withDefaults() processorBootstrapDeps
 			return pgxProcessorPostgresDB{pool: pool}, nil
 		}
 	}
+	if dependencies.loadRuntimeLaunch == nil {
+		dependencies.loadRuntimeLaunch = recordbirth.LoadRuntimeLaunchBinding
+	}
+	if dependencies.verifyRuntimeLaunch == nil {
+		dependencies.verifyRuntimeLaunch = recordbirth.VerifyRuntimeLaunch
+	}
 	if dependencies.newAttachmentRepository == nil {
-		dependencies.newAttachmentRepository = func(pool *pgxpool.Pool) attachments.ProcessorRepository {
-			return store.NewPostgresAttachmentRepository(pool)
-		}
+		dependencies.newAttachmentRepository = newProcessorAttachmentRepository
 	}
 	if dependencies.newBlobStore == nil {
 		dependencies.newBlobStore = newProcessorBlobStore
+	}
+	if dependencies.newBlobWriter == nil {
+		dependencies.newBlobWriter = func(blob attachments.BlobStore, backend attachments.BackendKind, repository attachments.ManagedWriteRepository) (attachments.BlobWriter, error) {
+			return attachments.NewManagedBlobWriter(blob, backend, repository)
+		}
 	}
 	if dependencies.newScanner == nil {
 		dependencies.newScanner = newProcessorScanner
@@ -262,6 +288,7 @@ func (dependencies processorBootstrapDeps) withDefaults() processorBootstrapDeps
 		dependencies.newPublicationReconciler = func(
 			repository attachments.ProcessorRepository,
 			blob attachments.BlobStore,
+			localCleanup *attachments.LocalCleanupCoordinator,
 			config contentProcessorConfig,
 		) (processorReconciler, error) {
 			cleanupRepository, ok := repository.(attachments.BlobPublicationCleanupRepository)
@@ -277,6 +304,7 @@ func (dependencies processorBootstrapDeps) withDefaults() processorBootstrapDeps
 				resolver,
 				blob,
 				attachments.BlobPublicationReconcilerConfig{
+					LocalCleanup:       localCleanup,
 					ProjectID:          "default",
 					BackendKind:        config.BlobBackend,
 					OwnerLeaseDuration: attachments.DefaultBlobPublicationCleanupLeaseDuration,
@@ -286,6 +314,25 @@ func (dependencies processorBootstrapDeps) withDefaults() processorBootstrapDeps
 					},
 				},
 			)
+		}
+	}
+	if dependencies.newLocalGCReconciler == nil {
+		dependencies.newLocalGCReconciler = func(repository attachments.ProcessorRepository, blob attachments.BlobStore, cleanup *attachments.LocalCleanupCoordinator) (processorReconciler, error) {
+			gcRepository, ok := repository.(attachments.BlobGCRepository)
+			if !ok || nilProcessorDependency(gcRepository) {
+				return nil, errors.New("attachment repository does not support ordinary Blob GC")
+			}
+			deleter, ok := blob.(attachments.BlobGCDeleter)
+			if !ok || nilProcessorDependency(deleter) {
+				return nil, errors.New("Blob store does not support ordinary Blob GC")
+			}
+			owner, err := ids.New("bgcw")
+			if err != nil {
+				return nil, err
+			}
+			return attachments.NewBlobGCWorker(gcRepository, deleter, attachments.BlobGCWorkerOptions{
+				BackendKind: attachments.BackendKindLocal, LocalCleanup: cleanup, OwnerID: owner,
+			})
 		}
 	}
 	if dependencies.newReconciler == nil {
@@ -314,11 +361,13 @@ func (dependencies processorBootstrapDeps) withDefaults() processorBootstrapDeps
 		dependencies.newWorker = func(
 			repository attachments.ProcessorRepository,
 			blob attachments.BlobStore,
+			writer attachments.BlobWriter,
 			workspace processorWorkspace,
 			config contentProcessorConfig,
 			scanner attachments.ProcessorScanner,
 		) (processorWorker, error) {
 			return attachments.NewProcessorWorker(repository, blob, workspace, attachments.ProcessorWorkerConfig{
+				Writer:  writer,
 				OwnerID: config.ProcessorOwnerID, OwnerLeaseDuration: config.OwnerLeaseDuration,
 				Limits: config.Limits, AdmissionLimits: attachments.DefaultAdmissionLimits(config.Limits),
 				PreviewBackendKind: config.BlobBackend, Scan: scanner,
@@ -349,6 +398,36 @@ type contentProcessorRuntime struct {
 	logger     *slog.Logger
 }
 
+func openProcessorBirthReader(ctx context.Context, config contentProcessorConfig, app *pgxpool.Pool) (*recordbirth.PostgresAuthority, *pgxpool.Pool, error) {
+	invalid := errors.New("invalid processor birth reader configuration")
+	reader := config.BirthReader
+	if ctx == nil || app == nil || reader.Connection == nil || reader.Connection.ConnConfig == nil ||
+		reader.IdentityFile == "" || reader.CredentialFile == "" {
+		return nil, nil, invalid
+	}
+	appConfig := app.Config()
+	name := reader.Connection.ConnConfig.User
+	if appConfig == nil || appConfig.ConnConfig == nil || name == "" || appConfig.ConnConfig.User == "" || name == appConfig.ConnConfig.User {
+		return nil, nil, invalid
+	}
+	if config.SourceWitnessDatabaseURL != "" {
+		source, err := pgxpool.ParseConfig(config.SourceWitnessDatabaseURL)
+		if err != nil || source.ConnConfig == nil || source.ConnConfig.User == "" || source.ConnConfig.User == name {
+			return nil, nil, invalid
+		}
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, reader.Connection.Copy())
+	if err != nil {
+		return nil, nil, invalid
+	}
+	authority, err := recordbirth.NewConfiguredPostgresAuthority(pool, app, reader.IdentityFile)
+	if err != nil {
+		pool.Close()
+		return nil, nil, invalid
+	}
+	return authority, pool, nil
+}
+
 func bootstrapContentProcessor(
 	ctx context.Context,
 	config contentProcessorConfig,
@@ -361,7 +440,18 @@ func bootstrapContentProcessor(
 		return nil, nil, err
 	}
 	dependencies = dependencies.withDefaults()
-	database, err := dependencies.openPostgres(ctx, config.DatabaseURL)
+	launch, digest, err := dependencies.loadRuntimeLaunch(config.BirthLaunchFile, "content-processor")
+	if err != nil {
+		return nil, nil, fmt.Errorf("load processor record birth launch: %w", err)
+	}
+	if launch.ProcessKind != "content-processor" || launch.DeploymentID == "" || launch.DeploymentID != config.RecordDeploymentID {
+		return nil, nil, errors.New("processor record birth launch deployment mismatch")
+	}
+	databaseURL, err := recordbirth.WithRuntimeLaunch(config.DatabaseURL, digest)
+	if err != nil {
+		return nil, nil, fmt.Errorf("bind processor record birth launch to APP connection: %w", err)
+	}
+	database, err := dependencies.openPostgres(ctx, databaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open content processor postgres: %w", err)
 	}
@@ -374,17 +464,80 @@ func bootstrapContentProcessor(
 			database.Close()
 		}
 	}()
+	var reader *recordbirth.PostgresAuthority
+	var closeBirthReader func()
+	if launch.BirthInstalled {
+		var readerPool *pgxpool.Pool
+		reader, readerPool, err = openProcessorBirthReader(ctx, config, database.Pool())
+		if err != nil {
+			return nil, nil, fmt.Errorf("open processor birth continuity reader: %w", err)
+		}
+		closeBirthReader = readerPool.Close
+		defer func() {
+			if closeDatabase {
+				closeBirthReader()
+			}
+		}()
+	}
+	if err := dependencies.verifyRuntimeLaunch(ctx, database.Pool(), reader, launch); err != nil {
+		return nil, nil, fmt.Errorf("verify processor record birth launch: %w", err)
+	}
+	gate, err := processorRecordAdmissionGate(config)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create processor record admission gate: %w", err)
+	}
+	var continuityReader recordbirth.ContinuityReader
+	if reader != nil {
+		continuityReader = reader
+	}
+	birth, err := recordbirth.NewCoordinator(store.NewPostgresRecordBirthRepository(database.Pool(), gate, nil), continuityReader, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create processor birth continuity: %w", err)
+	}
 
-	repository := dependencies.newAttachmentRepository(database.Pool())
+	repository, closeAuthority, err := dependencies.newAttachmentRepository(ctx, config, database.Pool())
+	if err != nil {
+		return nil, nil, fmt.Errorf("create content processor repository: %w", err)
+	}
+	if closeAuthority == nil {
+		return nil, nil, errors.New("create content processor repository returned nil cleanup")
+	}
+	defer func() {
+		if closeDatabase {
+			closeAuthority()
+		}
+	}()
 	if nilProcessorDependency(repository) {
 		return nil, nil, errors.New("create content processor repository")
 	}
-	blob, err := dependencies.newBlobStore(config)
+	localRepository := store.NewPostgresLocalBlobRepository(database.Pool(), nil, birth)
+	blob, err := dependencies.newBlobStore(ctx, config, localRepository)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create content processor Blob store: %w", err)
 	}
 	if nilProcessorDependency(blob) {
 		return nil, nil, errors.New("create content processor Blob store returned nil")
+	}
+	closeBlob := func() {
+		if local, ok := blob.(*attachments.LocalBlobStore); ok {
+			_ = local.Close()
+		}
+	}
+	defer func() {
+		if closeDatabase {
+			closeBlob()
+		}
+	}()
+	writer, err := dependencies.newBlobWriter(blob, config.BlobBackend, localRepository)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create content processor managed writer: %w", err)
+	}
+	var localCleanup *attachments.LocalCleanupCoordinator
+	if local, ok := blob.(*attachments.LocalBlobStore); ok {
+		localCleanup, err = attachments.NewLocalCleanupCoordinator(local, localRepository)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create local Blob cleanup coordinator: %w", err)
+		}
 	}
 	scanner, err := dependencies.newScanner(config)
 	if err != nil {
@@ -412,7 +565,7 @@ func bootstrapContentProcessor(
 	if nilProcessorDependency(workspaceReconciler) {
 		return nil, nil, errors.New("create processor workspace reconciler returned nil")
 	}
-	publicationReconciler, err := dependencies.newPublicationReconciler(repository, blob, config)
+	publicationReconciler, err := dependencies.newPublicationReconciler(repository, blob, localCleanup, config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create Blob publication reconciler: %w", err)
 	}
@@ -433,11 +586,21 @@ func bootstrapContentProcessor(
 			return nil, nil, errors.New("create temporary object reconciler returned nil")
 		}
 	}
-	reconciler, err := newProcessorReconcilerGroup(workspaceReconciler, publicationReconciler, temporaryReconciler)
+	var localGC processorReconciler
+	if config.BlobBackend == attachments.BackendKindLocal {
+		localGC, err = dependencies.newLocalGCReconciler(repository, blob, localCleanup)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create ordinary local Blob GC: %w", err)
+		}
+		if nilProcessorDependency(localGC) {
+			return nil, nil, errors.New("create ordinary local Blob GC returned nil")
+		}
+	}
+	reconciler, err := newProcessorReconcilerGroup(workspaceReconciler, publicationReconciler, temporaryReconciler, localGC)
 	if err != nil {
 		return nil, nil, err
 	}
-	worker, err := dependencies.newWorker(repository, blob, workspace, config, scanner)
+	worker, err := dependencies.newWorker(repository, blob, writer, workspace, config, scanner)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create content processor worker: %w", err)
 	}
@@ -451,7 +614,14 @@ func bootstrapContentProcessor(
 	}
 	var closeOnce sync.Once
 	cleanup := func() {
-		closeOnce.Do(database.Close)
+		closeOnce.Do(func() {
+			closeBlob()
+			closeAuthority()
+			if closeBirthReader != nil {
+				closeBirthReader()
+			}
+			database.Close()
+		})
 	}
 	closeDatabase = false
 	return runtime, cleanup, nil
@@ -549,10 +719,10 @@ func (runtime *contentProcessorRuntime) runContinuousReconciliation(ctx context.
 	}
 }
 
-func newProcessorBlobStore(config contentProcessorConfig) (attachments.BlobStore, error) {
+func newProcessorBlobStore(ctx context.Context, config contentProcessorConfig, repository attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
 	switch config.BlobBackend {
 	case attachments.BackendKindLocal:
-		return attachments.NewLocalBlobStore(config.BlobRoot)
+		return attachments.NewLocalBlobStore(ctx, config.BlobRoot, repository)
 	case attachments.BackendKindS3:
 		client, err := minio.New(config.S3Endpoint, &minio.Options{
 			Creds:  credentials.NewStaticV4(config.S3AccessKey, config.S3SecretKey, ""),
@@ -592,37 +762,66 @@ func loadContentProcessorConfig() (contentProcessorConfig, error) {
 	if err != nil {
 		return contentProcessorConfig{}, err
 	}
+	birthReader, err := centerconfig.LoadBirthReaderConfig(centerconfig.RecordPlatformModeRuntimeAdmission)
+	if err != nil {
+		return contentProcessorConfig{}, err
+	}
+	launchFile := centerconfig.RecordBirthProcessorLaunchPath
+	if configured, present := os.LookupEnv("HOUFENG_RECORD_BIRTH_LAUNCH_FILE"); present {
+		if configured == "" || configured != strings.TrimSpace(configured) || !filepath.IsAbs(configured) || filepath.Clean(configured) != configured || strings.ContainsRune(configured, '\x00') {
+			return contentProcessorConfig{}, errors.New("invalid processor birth launch file")
+		}
+		launchFile = configured
+	}
 	workspaceRoot, err := requiredProcessorEnv("HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT")
 	if err != nil {
 		return contentProcessorConfig{}, err
 	}
 	config := contentProcessorConfig{
-		DatabaseURL:              databaseURL,
-		BlobBackend:              attachmentConfig.BlobBackend,
-		BlobRoot:                 attachmentConfig.BlobRoot,
-		S3Endpoint:               attachmentConfig.S3Endpoint,
-		S3AccessKey:              attachmentConfig.S3AccessKey,
-		S3SecretKey:              attachmentConfig.S3SecretKey,
-		S3Bucket:                 attachmentConfig.S3Bucket,
-		S3Secure:                 attachmentConfig.S3Secure,
-		WorkspaceRoot:            workspaceRoot,
-		PDFInfoBinary:            processorOptionalEnv("HOUFENG_PDFINFO_BINARY", "/usr/bin/pdfinfo"),
-		PDFToPPMBinary:           processorOptionalEnv("HOUFENG_PDFTOPPM_BINARY", "/usr/bin/pdftoppm"),
-		ProcessorOwnerID:         processorOptionalEnv("HOUFENG_CONTENT_PROCESSOR_OWNER_ID", defaultProcessorOwnerID),
-		OwnerLeaseDuration:       defaultProcessorOwnerLeaseDuration,
-		WorkspaceCleanupTimeout:  defaultProcessorWorkspaceCleanup,
-		ReconciliationMaxItems:   defaultProcessorReconciliationItems,
-		ReconciliationMaxRuntime: defaultProcessorReconciliationWindow,
-		ReconciliationRetryDelay: defaultProcessorReconciliationRetry,
-		ClamAVNetwork:            attachmentConfig.ClamAVNetwork,
-		ClamAVAddress:            attachmentConfig.ClamAVAddress,
-		ClamAVDialTimeout:        attachmentConfig.ClamAVDialTimeout,
-		ClamAVOperationTimeout:   attachmentConfig.ClamAVOperationTimeout,
-		ClamAVChunkSize:          attachmentConfig.ClamAVChunkSize,
-		ClamAVResponseLimit:      attachmentConfig.ClamAVResponseLimit,
-		ProcessorMaxAttempts:     attachmentConfig.ProcessorMaxAttempts,
-		ProcessorJobTTL:          defaultProcessorJobTTL,
-		Limits:                   attachmentConfig.Limits,
+		DatabaseURL:               databaseURL,
+		RecordDeploymentID:        strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DEPLOYMENT_ID")),
+		RecordInstanceID:          strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_ID")),
+		RecordInstanceKind:        strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_KIND")),
+		RecordInstanceCapability:  strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_CAPABILITY")),
+		SourceWitnessDatabaseURL:  strings.TrimSpace(os.Getenv("HOUFENG_DELETION_WITNESS_DATABASE_URL")),
+		SourceWitnessIdentityFile: strings.TrimSpace(os.Getenv("HOUFENG_SOURCE_WITNESS_IDENTITY_FILE")),
+		BirthReader:               birthReader,
+		BirthLaunchFile:           launchFile,
+		BlobBackend:               attachmentConfig.BlobBackend,
+		BlobRoot:                  attachmentConfig.BlobRoot,
+		S3Endpoint:                attachmentConfig.S3Endpoint,
+		S3AccessKey:               attachmentConfig.S3AccessKey,
+		S3SecretKey:               attachmentConfig.S3SecretKey,
+		S3Bucket:                  attachmentConfig.S3Bucket,
+		S3Secure:                  attachmentConfig.S3Secure,
+		WorkspaceRoot:             workspaceRoot,
+		PDFInfoBinary:             processorOptionalEnv("HOUFENG_PDFINFO_BINARY", "/usr/bin/pdfinfo"),
+		PDFToPPMBinary:            processorOptionalEnv("HOUFENG_PDFTOPPM_BINARY", "/usr/bin/pdftoppm"),
+		ProcessorOwnerID:          processorOptionalEnv("HOUFENG_CONTENT_PROCESSOR_OWNER_ID", defaultProcessorOwnerID),
+		OwnerLeaseDuration:        defaultProcessorOwnerLeaseDuration,
+		WorkspaceCleanupTimeout:   defaultProcessorWorkspaceCleanup,
+		ReconciliationMaxItems:    defaultProcessorReconciliationItems,
+		ReconciliationMaxRuntime:  defaultProcessorReconciliationWindow,
+		ReconciliationRetryDelay:  defaultProcessorReconciliationRetry,
+		ClamAVNetwork:             attachmentConfig.ClamAVNetwork,
+		ClamAVAddress:             attachmentConfig.ClamAVAddress,
+		ClamAVDialTimeout:         attachmentConfig.ClamAVDialTimeout,
+		ClamAVOperationTimeout:    attachmentConfig.ClamAVOperationTimeout,
+		ClamAVChunkSize:           attachmentConfig.ClamAVChunkSize,
+		ClamAVResponseLimit:       attachmentConfig.ClamAVResponseLimit,
+		ProcessorMaxAttempts:      attachmentConfig.ProcessorMaxAttempts,
+		ProcessorJobTTL:           defaultProcessorJobTTL,
+		Limits:                    attachmentConfig.Limits,
+	}
+	if strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DEPLOYMENT_ID_FILE")) != "" {
+		if config.RecordDeploymentID, err = processorSecretEnvOrFile("HOUFENG_RECORD_DEPLOYMENT_ID"); err != nil {
+			return contentProcessorConfig{}, err
+		}
+	}
+	if strings.TrimSpace(os.Getenv("HOUFENG_DELETION_WITNESS_DATABASE_URL_FILE")) != "" {
+		if config.SourceWitnessDatabaseURL, err = processorSecretEnvOrFile("HOUFENG_DELETION_WITNESS_DATABASE_URL"); err != nil {
+			return contentProcessorConfig{}, err
+		}
 	}
 	if config.OwnerLeaseDuration, err = processorDurationEnv("HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION", config.OwnerLeaseDuration); err != nil {
 		return contentProcessorConfig{}, err

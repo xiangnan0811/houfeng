@@ -13,11 +13,13 @@ var ErrInvalidDeletionAdapter = errors.New("invalid collaboration deletion adapt
 
 type DeletionCommand struct {
 	Operation     recorddeletion.DeletionOperation
+	OwnerClaim    recorddeletion.OperationOwnerClaim
 	SurfaceDigest [sha256.Size]byte
 }
 
 func (command DeletionCommand) Validate() error {
-	if (recorddeletion.PurgeTarget{Operation: command.Operation}).Validate() != nil ||
+	if command.Operation.ContractVersion != recorddeletion.DeletionContractV2 ||
+		(recorddeletion.PurgeTarget{Operation: command.Operation, OwnerClaim: command.OwnerClaim}).Validate() != nil ||
 		command.SurfaceDigest != recorddeletion.RecordCollaborationSurfaceDigest() {
 		return ErrInvalidDeletionAdapter
 	}
@@ -50,6 +52,8 @@ func NewDeletionAdapter(store DeletionStore) (*DeletionAdapter, error) {
 	return &DeletionAdapter{store: store, descriptor: descriptor}, nil
 }
 
+// The start surface represents retained delivery obligations: purge hands
+// those obligations off and does not count their rows as removed content.
 func (adapter *DeletionAdapter) Descriptor() recorddeletion.AdapterDescriptor {
 	if adapter == nil {
 		return recorddeletion.AdapterDescriptor{}
@@ -92,11 +96,11 @@ func (adapter *DeletionAdapter) PurgeDeletion(
 	ctx context.Context,
 	target recorddeletion.PurgeTarget,
 ) (recorddeletion.AdapterPurgeReceipt, error) {
-	if ctx == nil || adapter == nil || nilActionDependency(adapter.store) || target.Validate() != nil {
+	if ctx == nil || adapter == nil || nilActionDependency(adapter.store) || target.Validate() != nil || target.Operation.ContractVersion != recorddeletion.DeletionContractV2 {
 		return recorddeletion.AdapterPurgeReceipt{}, ErrInvalidDeletionAdapter
 	}
 	command := DeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordCollaborationSurfaceDigest(),
+		Operation: target.Operation, OwnerClaim: target.OwnerClaim, SurfaceDigest: recorddeletion.RecordCollaborationSurfaceDigest(),
 	}
 	if err := command.Validate(); err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
@@ -116,14 +120,14 @@ func (adapter *DeletionAdapter) VerifyDeletion(
 	target recorddeletion.PurgeTarget,
 	receipt recorddeletion.AdapterPurgeReceipt,
 ) error {
-	if ctx == nil || adapter == nil || nilActionDependency(adapter.store) || target.Validate() != nil {
+	if ctx == nil || adapter == nil || nilActionDependency(adapter.store) || target.Validate() != nil || target.Operation.ContractVersion != recorddeletion.DeletionContractV2 {
 		return ErrInvalidDeletionAdapter
 	}
 	if err := recorddeletion.ValidateAdapterPurgeReceipt(receipt, target, adapter.descriptor); err != nil {
 		return err
 	}
 	command := DeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordCollaborationSurfaceDigest(),
+		Operation: target.Operation, OwnerClaim: target.OwnerClaim, SurfaceDigest: recorddeletion.RecordCollaborationSurfaceDigest(),
 	}
 	return adapter.store.VerifyRecordCollaborationPurge(ctx, command, receipt)
 }

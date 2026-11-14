@@ -18,25 +18,16 @@ import (
 
 func TestPostgresIntegrationRecordReadRoundTripsCurrentAndHistoricalRevisions(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-read-round-trip", 2)
-	repository := newRecordsPostgresRepository(t, runtimePool)
-	recordID := "rec_readroundtrip"
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate})
 
 	firstInput := recordsPostgresCompleteRevisionInput(t, "Readable revision one")
-	first, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		recordID,
-		"",
-		0,
-		0,
-		firstInput,
-		"record-read-create",
-	))
+	first, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, firstInput, "record-read-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision(first) error = %v", err)
 	}
+	recordID := first.RecordID
 
 	secondInput := recordsPostgresCompleteRevisionInput(t, "Readable revision two")
 	second, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
@@ -117,24 +108,15 @@ func TestPostgresIntegrationRecordReadRoundTripsCurrentAndHistoricalRevisions(t 
 
 func TestPostgresIntegrationRecordReadRoundTripsOrderedEvidenceSnapshotIDs(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-read-evidence", 2)
-	repository := newRecordsPostgresRepository(t, runtimePool, recordReadEvidenceParticipant{})
-	recordID := "rec_readevidence"
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, recordReadEvidenceParticipant{})
 
-	first, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		recordID,
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Evidence revision base"),
-		"record-read-evidence-create",
-	))
+	first, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Evidence revision base"), "record-read-evidence-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision(first) error = %v", err)
 	}
+	recordID := first.RecordID
 
 	var databaseNow time.Time
 	if err := fixture.db.QueryRow(ctx, `select transaction_timestamp()`).Scan(&databaseNow); err != nil {
@@ -227,6 +209,29 @@ type recordReadEvidenceParticipant struct{}
 
 func (recordReadEvidenceParticipant) Name() string { return "evidence" }
 
+func (recordReadEvidenceParticipant) MutationResources(ctx context.Context, tx pgx.Tx, command records.RevisionCommitCommand) (records.RevisionMutationResources, error) {
+	var resources records.RevisionMutationResources
+	revisionID, err := command.RevisionID()
+	if err != nil {
+		return resources, err
+	}
+	for ordinal, snapshotID := range command.EvidencePreparation.SnapshotIDs() {
+		snapshot, err := readRevisionMutationSnapshot(ctx, tx, snapshotID)
+		if err != nil {
+			return resources, err
+		}
+		if snapshot.RecordID != command.RecordID {
+			return resources, records.ErrInvalidRevisionMutationResources
+		}
+		resources.Snapshots = append(resources.Snapshots, snapshot)
+		resources.Payloads = append(resources.Payloads, records.RevisionMutationPayload{PayloadDigest: snapshot.PayloadDigest})
+		resources.Records = append(resources.Records, records.RevisionMutationRecord{ProjectID: "default", RecordID: snapshot.RecordID})
+		resources.Sources = append(resources.Sources, records.RevisionMutationSource{ProjectID: "default", SourceKind: snapshot.SourceKind, SourceID: snapshot.SourceID})
+		resources.NewRevisionEffects = append(resources.NewRevisionEffects, records.RevisionMutationNewRevisionEffect{ProjectID: "default", RecordID: command.RecordID, RevisionID: revisionID, Kind: records.RevisionMutationNewEvidenceReference, Ordinal: int64(ordinal), SnapshotID: snapshotID})
+	}
+	return records.CombineRevisionMutationResources(resources)
+}
+
 func (recordReadEvidenceParticipant) ApplyRevision(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -263,24 +268,15 @@ func (source recordReadExistingSnapshotSource) ReauthorizeExistingSnapshot(
 
 func TestPostgresIntegrationRecordReadFenceBlocksRevisionAndHistoryContent(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-read-fence", 2)
-	repository := newRecordsPostgresRepository(t, runtimePool)
-	recordID := "rec_readfenced"
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate})
 
-	created, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		recordID,
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Fenced record"),
-		"record-read-fence-create",
-	))
+	created, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Fenced record"), "record-read-fence-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
+	recordID := created.RecordID
 
 	if _, err := runtimePool.Exec(ctx, `
 		insert into public.deletion_reservations (
@@ -323,7 +319,7 @@ func TestPostgresIntegrationRecordReadFenceBlocksRevisionAndHistoryContent(t *te
 	authorizations := newPostgresCurrentRecordAuthorizationSource(
 		runtimePool,
 		resolver,
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	if _, err := authorizations.ResolveCurrentRecordAuthorization(
 		ctx,

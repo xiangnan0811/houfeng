@@ -19,7 +19,7 @@ var ErrDevelopmentDatabaseRebuildRequired = errors.New(
 
 type appACLCurrentConvergenceDependencies struct {
 	readDatabaseName        func(context.Context, pgx.Tx) (string, error)
-	resolveRoles            func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error)
+	resolveRoles            func(context.Context, pgx.Tx, string, string, string) (platformmigrate.AppRoleSetV2, error)
 	rejectMisplaced         func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
 	rejectLegacy            func(context.Context, pgx.Tx, migrationSourceSnapshot, appACLEffectiveCatalogContract, string) error
 	readPhaseState          func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error)
@@ -46,7 +46,7 @@ type appACLCurrentConvergenceDependencies struct {
 func defaultAppACLCurrentConvergenceDependencies() appACLCurrentConvergenceDependencies {
 	return appACLCurrentConvergenceDependencies{
 		readDatabaseName:  readAppACLConvergenceDatabaseName,
-		resolveRoles:      resolveAppACLConvergenceRoles,
+		resolveRoles:      resolveAppACLCurrentConvergenceRoles,
 		rejectMisplaced:   rejectMisplacedAppACLManagedObjectForContractInTx,
 		rejectLegacy:      rejectNonPublicAppACLLegacyLedgerForContractInTx,
 		readPhaseState:    readAppACLConvergencePhaseStateInTx,
@@ -73,11 +73,34 @@ func defaultAppACLCurrentConvergenceDependencies() appACLCurrentConvergenceDepen
 	}
 }
 
+func resolveAppACLCurrentConvergenceRoles(
+	ctx context.Context,
+	tx pgx.Tx,
+	runtimeRole, adminRole, deletionWorkerRole string,
+) (platformmigrate.AppRoleSetV2, error) {
+	var sessionUser, currentUser string
+	if err := tx.QueryRow(ctx, `select session_user, current_user`).Scan(&sessionUser, &currentUser); err != nil {
+		return platformmigrate.AppRoleSetV2{}, fmt.Errorf("read current app ACL convergence identities: %w", err)
+	}
+	if sessionUser != currentUser {
+		return platformmigrate.AppRoleSetV2{}, fmt.Errorf("current app ACL convergence requires direct migrator login")
+	}
+	roles := platformmigrate.AppRoleSetV2{
+		CenterRuntime: runtimeRole, PlatformAdmin: adminRole,
+		DeletionWorker: deletionWorkerRole, Migrator: sessionUser,
+	}
+	if err := platformmigrate.ProvisionRolesV2InTx(ctx, tx, roles); err != nil {
+		return platformmigrate.AppRoleSetV2{}, fmt.Errorf("preflight current app ACL convergence roles: %w", err)
+	}
+	return roles, nil
+}
+
 func ConvergeAppACLCurrent(
 	ctx context.Context,
 	db *pgxpool.Pool,
 	runtimeRole string,
 	adminRole string,
+	deletionWorkerRole string,
 ) (AppACLManifestPersistedV1, error) {
 	if db == nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("current app ACL convergence has no PostgreSQL pool")
@@ -89,6 +112,7 @@ func ConvergeAppACLCurrent(
 		},
 		runtimeRole,
 		adminRole,
+		deletionWorkerRole,
 		migrations.FS,
 		appACLCurrentMigrationFragments,
 		defaultAppACLCurrentConvergenceDependencies(),
@@ -100,6 +124,7 @@ func convergeAppACLCurrentWithDependencies(
 	begin appACLConvergenceBeginTx,
 	runtimeRole string,
 	adminRole string,
+	deletionWorkerRole string,
 	fsys fs.FS,
 	fragments []AppACLCurrentMigrationFragment,
 	dependencies appACLCurrentConvergenceDependencies,
@@ -135,7 +160,7 @@ func convergeAppACLCurrentWithDependencies(
 			_ = tx.Rollback(ctx)
 		}()
 
-		manifest, err := convergeAppACLCurrentInTx(ctx, tx, runtimeRole, adminRole, source, transitions, dependencies)
+		manifest, err := convergeAppACLCurrentInTx(ctx, tx, runtimeRole, adminRole, deletionWorkerRole, source, transitions, dependencies)
 		if err != nil {
 			return err
 		}
@@ -156,6 +181,7 @@ func convergeAppACLCurrentInTx(
 	tx pgx.Tx,
 	runtimeRole string,
 	adminRole string,
+	deletionWorkerRole string,
 	source appACLCurrentSourceContract,
 	transitions []appACLCurrentTransition,
 	dependencies appACLCurrentConvergenceDependencies,
@@ -173,7 +199,7 @@ func convergeAppACLCurrentInTx(
 		return AppACLManifestPersistedV1{}, fmt.Errorf("lock current app ACL convergence: %w", err)
 	}
 
-	roles, err := dependencies.resolveRoles(ctx, tx, runtimeRole, adminRole)
+	roles, err := dependencies.resolveRoles(ctx, tx, runtimeRole, adminRole, deletionWorkerRole)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
@@ -184,12 +210,13 @@ func convergeAppACLCurrentInTx(
 	bindings := []AppACLRoleBinding{
 		{Subject: AppACLSubjectCenterRuntime, CatalogRole: roles.CenterRuntime},
 		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: roles.PlatformAdmin},
+		{Subject: AppACLSubjectRecordDeletionWorker, CatalogRole: roles.DeletionWorker},
 	}
 	contract, err := compileAppACLCurrentCatalogContract(source, databaseName, bindings, roles.Migrator)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("compile current app ACL catalog contract: %w", err)
 	}
-	compiledPrivileges, err := CanonicalPrivilegeSetBodyV1(contract.RoleBindings, contract.Privileges)
+	compiledPrivileges, err := canonicalPrivilegeSetBodyForBindings(contract.RoleBindings, contract.Privileges)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("compile current app ACL privileges: %w", err)
 	}

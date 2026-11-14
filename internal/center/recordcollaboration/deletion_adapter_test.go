@@ -26,9 +26,12 @@ func TestDeletionAdapterDelegatesClosedCollaborationContract(t *testing.T) {
 	}
 	operation := collaborationDeletionTestOperation()
 	verifiedAt := time.Date(2026, time.August, 17, 17, 30, 0, 0, time.UTC)
+	claim := recorddeletion.OperationOwnerClaim{OperationID: operation.OperationID, Owner: recordplatform.OwnerLease{
+		OwnerID: "collaboration_worker", Generation: 4, ExpiresAt: verifiedAt.Add(time.Hour),
+	}}
 	store := &collaborationDeletionStoreStub{health: health, preview: preview}
 	store.purge = func(command DeletionCommand) (recorddeletion.AdapterPurgeReceipt, error) {
-		if command.Operation != operation || command.SurfaceDigest != recorddeletion.RecordCollaborationSurfaceDigest() {
+		if command.Operation != operation || command.OwnerClaim != claim || command.SurfaceDigest != recorddeletion.RecordCollaborationSurfaceDigest() {
 			t.Fatalf("collaboration purge command = %#v", command)
 		}
 		return recorddeletion.AdapterPurgeReceipt{
@@ -56,13 +59,27 @@ func TestDeletionAdapterDelegatesClosedCollaborationContract(t *testing.T) {
 	if got, err := adapter.PreviewDeletion(context.Background(), collaborationDeletionTestPreviewTarget()); err != nil || !reflect.DeepEqual(got, preview) {
 		t.Fatalf("PreviewDeletion() = %#v, %v", got, err)
 	}
-	target := recorddeletion.PurgeTarget{Operation: operation}
+	target := recorddeletion.PurgeTarget{Operation: operation, OwnerClaim: claim}
 	receipt, err := adapter.PurgeDeletion(context.Background(), target)
 	if err != nil {
 		t.Fatalf("PurgeDeletion() error = %v", err)
 	}
 	if err := adapter.VerifyDeletion(context.Background(), target, receipt); err != nil {
 		t.Fatalf("VerifyDeletion() error = %v", err)
+	}
+	legacy := collaborationDeletionTestOperation()
+	legacy.ContractVersion = recorddeletion.DeletionContractV1
+	legacy.LedgerSequence = 11
+	legacy.LedgerEntryHash = collaborationDeletionTestDigest("legacy ledger")
+	legacyTarget := recorddeletion.PurgeTarget{Operation: legacy, OwnerClaim: claim}
+	if err := legacyTarget.Validate(); err != nil {
+		t.Fatalf("legacy target must otherwise be valid: %v", err)
+	}
+	if _, err := adapter.PurgeDeletion(context.Background(), legacyTarget); !errors.Is(err, ErrInvalidDeletionAdapter) {
+		t.Fatalf("PurgeDeletion(legacy surface) error = %v", err)
+	}
+	if err := adapter.VerifyDeletion(context.Background(), legacyTarget, receipt); !errors.Is(err, ErrInvalidDeletionAdapter) {
+		t.Fatalf("VerifyDeletion(legacy surface) error = %v", err)
 	}
 	if store.healthCalls != 1 || store.previewCalls != 1 || store.purgeCalls != 1 || store.verifyCalls != 1 {
 		t.Fatalf("store calls health=%d preview=%d purge=%d verify=%d", store.healthCalls, store.previewCalls, store.purgeCalls, store.verifyCalls)
@@ -119,12 +136,10 @@ func (store *collaborationDeletionStoreStub) VerifyRecordCollaborationPurge(cont
 }
 
 func collaborationDeletionTestOperation() recorddeletion.DeletionOperation {
-	return recorddeletion.DeletionOperation{
-		OperationID: "rpo_collaboration01", ReservationID: "drs_collaboration01",
+	return recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV2, OperationID: "rpo_collaboration01", ReservationID: "drs_collaboration01",
 		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_collaboration01"},
 		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging,
-		FenceEpoch: 7, LedgerSequence: 11, LedgerEntryHash: collaborationDeletionTestDigest("ledger"),
-	}
+		FenceEpoch: 7}
 }
 
 func collaborationDeletionTestPreviewTarget() recorddeletion.PreviewTarget {

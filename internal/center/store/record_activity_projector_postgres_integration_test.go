@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/incidents"
 )
 
 // sliceSourceAdapter stands in for one real source. It behaves the way a SQL
@@ -55,14 +56,24 @@ func (adapter *sliceSourceAdapter) ScanAfter(
 	return matched, nil
 }
 
+// Only the head is fixed; ScanAfter still reads the real source transactionally.
+type fixedHeadActivitySource struct {
+	activity.SourceAdapter
+	head time.Time
+}
+
+func (source fixedHeadActivitySource) IncrementalHead(context.Context) (activity.SourceHead, error) {
+	return activity.NewIncrementalSourceHead(source.Kind(), source.head, 0), nil
+}
+
 func newProjectorAgainstPostgres(
 	t *testing.T,
 	ctx context.Context,
+	repository *ActivityProjectionRepository,
 	adapter activity.SourceAdapter,
 	batchSize int,
 ) (*activity.Projector, *ActivityProjectionRepository) {
 	t.Helper()
-	repository := newActivityCheckpointRepository(t, ctx)
 	projector, err := activity.NewProjector(activity.ProjectorOptions{
 		Namespace:          activityTestNamespace(),
 		Adapters:           []activity.SourceAdapter{adapter},
@@ -146,16 +157,17 @@ func projectOnceAgainstPostgres(
 func TestPostgresIntegrationProjectorPublishesAGapFreePrefixAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	head := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	repository := newActivityCheckpointRepository(t, ctx)
 	adapter := &sliceSourceAdapter{
-		kind: activity.SourceKindRecordDomain,
+		kind: activity.SourceKindAssetHistory,
 		head: head,
 		rows: []activity.CandidateEvent{
-			newActivityCandidate(t, "rac_p1", head.Add(-30*time.Minute)),
-			newActivityCandidate(t, "rac_p2", head.Add(-30*time.Minute)),
-			newActivityCandidate(t, "rac_p3", head.Add(-30*time.Minute)),
+			newActivityCandidate(t, repository.pool, "rac_p1", head.Add(-30*time.Minute)),
+			newActivityCandidate(t, repository.pool, "rac_p2", head.Add(-30*time.Minute)),
+			newActivityCandidate(t, repository.pool, "rac_p3", head.Add(-30*time.Minute)),
 		},
 	}
-	projector, repository := newProjectorAgainstPostgres(t, ctx, adapter, 2)
+	projector, _ := newProjectorAgainstPostgres(t, ctx, repository, adapter, 2)
 
 	first := projectOnceAgainstPostgres(t, ctx, projector, adapter.kind)
 	if first.Inserted != 3 {
@@ -199,27 +211,58 @@ func TestPostgresIntegrationProjectorPublishesAGapFreePrefixAndIsIdempotent(t *t
 func TestPostgresIntegrationProjectorPicksUpALateCommitInItsTruePosition(t *testing.T) {
 	ctx := context.Background()
 	head := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-	adapter := &sliceSourceAdapter{
-		kind: activity.SourceKindRecordDomain,
-		head: head,
-		rows: []activity.CandidateEvent{
-			newActivityCandidate(t, "rac_e1", head.Add(-30*time.Minute)),
-			newActivityCandidate(t, "rac_e2", head.Add(-10*time.Minute)),
-		},
+	repository := newActivityCheckpointRepository(t, ctx)
+	base := head.Add(-30 * time.Minute)
+	seedMonitoringEventFixture(t, ctx, repository.pool, base)
+	if _, err := repository.pool.Exec(ctx, `delete from public.state_change_events where event_id='evt_mon_correction'`); err != nil {
+		t.Fatalf("prepare uncommitted correction: %v", err)
 	}
-	projector, repository := newProjectorAgainstPostgres(t, ctx, adapter, 10)
+	lateTx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin late source transaction: %v", err)
+	}
+	defer func() { _ = lateTx.Rollback(ctx) }()
+	if _, err := lateTx.Exec(ctx, `
+		insert into public.state_change_events
+		  (event_id, object_type, object_id, event_type, severity, summary, payload, created_at)
+		values ('evt_mon_correction', 'monitoring_instance', $1, 'event_corrected', '告警',
+		  '更正先前事件', jsonb_build_object(
+		    'event_at', $2::text, 'is_backfilled', true, 'provenance', 'manual_correction',
+		    'producer_version', $4::text, 'rule_version', $5::text,
+		    'prior_state', 'normal', 'resulting_state', 'alert', 'correction_of_event_id', 'evt_mon_incident'), $3)`,
+		monitoringEventFixtureInstanceID, base.Add(30*time.Second).Format(time.RFC3339Nano), base.Add(2*time.Minute),
+		incidents.MonitoringEventProducerVersion, incidents.MonitoringEventIncidentRuleVersion); err != nil {
+		t.Fatalf("write uncommitted correction: %v", err)
+	}
+	source, err := NewMonitoringEventActivitySource(repository.pool, activityTestNamespace())
+	if err != nil {
+		t.Fatalf("new monitoring activity source: %v", err)
+	}
+	adapter := fixedHeadActivitySource{SourceAdapter: source, head: head}
+	projector, _ := newProjectorAgainstPostgres(t, ctx, repository, adapter, 10)
 
-	if outcome := projectOnceAgainstPostgres(t, ctx, projector, adapter.kind); outcome.Inserted != 2 {
+	if outcome := projectOnceAgainstPostgres(t, ctx, projector, adapter.Kind()); outcome.Inserted != 2 {
 		t.Fatalf("first pass inserted %d rows, want 2", outcome.Inserted)
 	}
 
-	// Only visible now, and recorded below the position the pass already reached.
-	late := newActivityCandidate(t, "rac_late", head.Add(-20*time.Minute))
-	late.Backfilled = true
-	late.CanonicalHash = late.ComputeCanonicalHash()
-	adapter.rows = append(adapter.rows, late)
-
-	second := projectOnceAgainstPostgres(t, ctx, projector, adapter.kind)
+	// The source row commits below the checkpoint reached by the first pass.
+	if err := lateTx.Commit(ctx); err != nil {
+		t.Fatalf("commit late correction: %v", err)
+	}
+	candidates, err := source.ScanAfter(ctx, activity.ScanWindow{Through: head}, 50)
+	if err != nil {
+		t.Fatalf("scan committed correction: %v", err)
+	}
+	var late activity.CandidateEvent
+	for _, candidate := range candidates {
+		if candidate.Source.EventID == "evt_mon_correction" {
+			late = candidate
+		}
+	}
+	if late.Source.EventID == "" || !late.Backfilled {
+		t.Fatalf("missing producer-marked correction: %+v", late)
+	}
+	second := projectOnceAgainstPostgres(t, ctx, projector, adapter.Kind())
 	if second.Inserted != 1 {
 		t.Fatalf("second pass inserted %d rows, want the late row", second.Inserted)
 	}
@@ -260,16 +303,13 @@ func TestPostgresIntegrationProjectorPicksUpALateCommitInItsTruePosition(t *test
 func TestPostgresIntegrationProjectorDrainsABacklogAcrossPasses(t *testing.T) {
 	ctx := context.Background()
 	head := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	repository := newActivityCheckpointRepository(t, ctx)
 	rows := make([]activity.CandidateEvent, 0, 7)
 	for index := 0; index < 7; index++ {
-		rows = append(rows, newActivityCandidate(
-			t,
-			"rac_b"+string(rune('a'+index)),
-			head.Add(-time.Duration(70-index*10)*time.Minute),
-		))
+		rows = append(rows, newActivityCandidate(t, repository.pool, "rac_b"+string(rune('a'+index)), head.Add(-time.Duration(70-index*10)*time.Minute)))
 	}
-	adapter := &sliceSourceAdapter{kind: activity.SourceKindRecordDomain, head: head, rows: rows}
-	projector, repository := newProjectorAgainstPostgres(t, ctx, adapter, 3)
+	adapter := &sliceSourceAdapter{kind: activity.SourceKindAssetHistory, head: head, rows: rows}
+	projector, _ := newProjectorAgainstPostgres(t, ctx, repository, adapter, 3)
 
 	outcome := projectOnceAgainstPostgres(t, ctx, projector, adapter.kind)
 	if outcome.Inserted != 7 {

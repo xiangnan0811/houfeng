@@ -15,6 +15,7 @@ import (
 
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -77,10 +78,7 @@ func (participant *collaborationRevisionParticipant) ApplyRevision(
 	if err != nil {
 		return err
 	}
-	if err := assertRecordMutationFence(ctx, tx, committed.Result.RecordID); err != nil {
-		return fmt.Errorf("recheck collaboration record deletion fence: %w", err)
-	}
-	binding, err := loadCollaborationRecordFenceBinding(ctx, tx, committed.Result.RecordID)
+	binding, err := readAcquiredCollaborationRecordFenceBinding(ctx, tx, committed.Result.RecordID)
 	if err != nil {
 		return err
 	}
@@ -121,7 +119,7 @@ func validateCollaborationRevisionCommitted(committed records.RevisionCommitted)
 	if committed.Result.RevisionNo == 0 || committed.Result.LockVersion == 0 ||
 		committed.Result.AuthorizationEpoch == 0 || !committed.Result.Created ||
 		committed.Result.CommittedAt.IsZero() || committed.OutboxTTL.Microseconds() <= 0 ||
-		!validCollaborationRevisionIdentity(committed.Result.RecordID, "rec_") ||
+		!recordidentity.IsValid(committed.Result.RecordID) ||
 		!validCollaborationRevisionIdentity(committed.Result.RevisionID, "rrv_") {
 		return recordcollaboration.ErrRevisionParticipationUnavailable
 	}
@@ -213,31 +211,19 @@ func loadPreviousCollaborationRevisionFacts(
 	return facts, nil
 }
 
-func loadCollaborationRecordFenceBinding(
-	ctx context.Context,
-	tx pgx.Tx,
-	recordID string,
-) (recordcollaboration.RecordFenceBinding, error) {
+// The shared coordinator already acquired this exact epoch at rank 30.
+func readAcquiredCollaborationRecordFenceBinding(ctx context.Context, tx pgx.Tx, recordID string) (recordcollaboration.RecordFenceBinding, error) {
 	var epoch int64
 	if err := tx.QueryRow(ctx, `
-		select delivery_epoch
-		from public.content_delivery_epochs
-		where project_id = $1 and object_kind = 'record' and object_id = $2
-		for update`, recordplatform.ProjectIDDefault, recordID).Scan(&epoch); err != nil {
-		return recordcollaboration.RecordFenceBinding{}, fmt.Errorf("read collaboration record fence: %w", err)
+		select delivery_epoch from public.content_delivery_epochs
+		where project_id = $1 and object_kind = 'record' and object_id = $2`,
+		recordplatform.ProjectIDDefault, recordID).Scan(&epoch); err != nil {
+		return recordcollaboration.RecordFenceBinding{}, fmt.Errorf("read acquired collaboration record fence: %w", err)
 	}
 	if epoch < 0 {
 		return recordcollaboration.RecordFenceBinding{}, recordcollaboration.ErrInvalidRecordFenceBinding
 	}
-	binding, err := recordcollaboration.NewRecordFenceBinding(
-		recordplatform.ProjectIDDefault,
-		recordID,
-		recordplatform.ContentEpoch(epoch),
-	)
-	if err != nil {
-		return recordcollaboration.RecordFenceBinding{}, err
-	}
-	return binding, nil
+	return recordcollaboration.NewRecordFenceBinding(recordplatform.ProjectIDDefault, recordID, recordplatform.ContentEpoch(epoch))
 }
 
 type collaborationFollowerSources struct {

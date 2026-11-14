@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,6 +19,8 @@ import (
 
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/records"
 )
 
 type attachmentTx interface {
@@ -26,11 +31,14 @@ type attachmentTx interface {
 }
 
 type PostgresAttachmentRepository struct {
-	beginTx                      func(context.Context, pgx.TxOptions) (attachmentTx, error)
-	newBlobGCDeletionID          func() (string, error)
-	newBlobPublicationID         func() (string, error)
-	attachmentDeletionBlobMu     sync.RWMutex
-	attachmentDeletionBlobStores map[attachments.BackendKind]attachments.BlobGCDeleter
+	beginTx                        func(context.Context, pgx.TxOptions) (attachmentTx, error)
+	members                        CollaborationMembershipReader
+	authorization                  currentRecordAuthorizationPrefetcher
+	newBlobGCDeletionID            func() (string, error)
+	newBlobPublicationID           func() (string, error)
+	attachmentDeletionBlobMu       sync.RWMutex
+	attachmentDeletionBlobStores   map[attachments.BackendKind]attachments.BlobGCDeleter
+	attachmentDeletionLocalCleanup *attachments.LocalCleanupCoordinator
 }
 
 func NewPostgresAttachmentRepository(pool *pgxpool.Pool) *PostgresAttachmentRepository {
@@ -46,6 +54,102 @@ func NewPostgresAttachmentRepository(pool *pgxpool.Pool) *PostgresAttachmentRepo
 		},
 		attachmentDeletionBlobStores: make(map[attachments.BackendKind]attachments.BlobGCDeleter),
 	}
+}
+
+// ConfigureRecordMutationAuthorization supplies the live membership and W2
+// prefetch path for record-producing operations. Cleanup retains its own
+// authority and does not use this configuration as a substitute.
+func (repository *PostgresAttachmentRepository) ConfigureRecordMutationAuthorization(
+	members CollaborationMembershipReader,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+) error {
+	if repository == nil || nilRecordSubjectDependency(members) || authorization == nil {
+		return ErrRecordSubjectUnavailable
+	}
+	repository.members = members
+	repository.authorization = authorization
+	return nil
+}
+
+// attachmentWriterRoute describes only the persisted routes used to discover
+// namespace admissions. It is not a lock or authorization declaration.
+type attachmentWriterRoute struct {
+	attachmentIDs  []string
+	draftIDs       []string
+	uploadIDs      []string
+	obligationIDs  []string
+	namespaces     []string
+	heldNamespaces *[]string
+}
+
+func lockAttachmentWriterPrefix(ctx context.Context, transaction attachmentTx, route attachmentWriterRoute) error {
+	tx, ok := transaction.(pgx.Tx)
+	if !ok || nilRecordEvidenceParticipantTx(tx) {
+		return attachments.ErrAttachmentConflict
+	}
+	if _, err := tx.Exec(ctx, `select public.source_application_admit()`); err != nil {
+		return fmt.Errorf("admit attachment writer: %w", err)
+	}
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	namespaces, err := discoverAttachmentWriterNamespaces(ctx, tx, route)
+	if err != nil {
+		return err
+	}
+	if err := lockLocalBlobNamespaces(ctx, tx, namespaces); err != nil {
+		return err
+	}
+	if route.heldNamespaces != nil {
+		*route.heldNamespaces = append([]string(nil), namespaces...)
+	}
+	return lockComparisonDecisionForWriter(ctx, tx)
+}
+
+func discoverAttachmentWriterNamespaces(ctx context.Context, tx pgx.Tx, route attachmentWriterRoute) ([]string, error) {
+	if len(route.uploadIDs) != 0 {
+		rows, err := tx.Query(ctx, `select attachment_id from public.attachment_uploads where upload_id=any($1::text[])`, route.uploadIDs)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var attachmentID string
+			if err := rows.Scan(&attachmentID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			route.attachmentIDs = append(route.attachmentIDs, attachmentID)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	if len(route.obligationIDs) != 0 {
+		rows, err := tx.Query(ctx, `select namespace_id::text from public.record_write_obligations where obligation_id=any($1::text[]) and namespace_id is not null`, route.obligationIDs)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var namespace string
+			if err := rows.Scan(&namespace); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			route.namespaces = append(route.namespaces, namespace)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	explicit := route.namespaces[:0]
+	for _, namespace := range route.namespaces {
+		if namespace != "" {
+			explicit = append(explicit, namespace)
+		}
+	}
+	return revisionBatchNamespaces(ctx, tx, route.attachmentIDs, route.draftIDs, explicit, "")
 }
 
 // GetAttachmentForDownload reads only the immutable attachment route and the
@@ -280,27 +384,15 @@ func (repository *PostgresAttachmentRepository) ReserveUpload(
 		return attachments.UploadReservationResult{}, attachments.ErrInvalidAttachmentCommand
 	}
 
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginAttachmentDraftWriter(ctx, command.ProjectID, command.DraftID, "", command.AuthorID, recordauth.CapabilityAttachmentCreate)
 	if err != nil {
 		return attachments.UploadReservationResult{}, fmt.Errorf("begin attachment upload reservation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	route, err := loadAttachmentDraftRoute(ctx, tx, command)
+	route, err := lockAttachmentDraftOwner(ctx, tx, command)
 	if err != nil {
 		return attachments.UploadReservationResult{}, err
-	}
-	if route.recordID != nil {
-		if err := lockAttachmentRecordOwner(ctx, tx, command.ProjectID, *route.recordID); err != nil {
-			return attachments.UploadReservationResult{}, err
-		}
-	}
-	lockedRoute, err := lockAttachmentDraftOwner(ctx, tx, command)
-	if err != nil {
-		return attachments.UploadReservationResult{}, err
-	}
-	if lockedRoute.projectID != route.projectID || !equalOptionalAttachmentRecordID(lockedRoute.recordID, route.recordID) {
-		return attachments.UploadReservationResult{}, attachments.ErrAttachmentConflict
 	}
 
 	usage, quotaVersion, err := lockAttachmentQuotaAccount(ctx, tx, command.ProjectID)
@@ -316,8 +408,14 @@ func (repository *PostgresAttachmentRepository) ReserveUpload(
 		return attachments.UploadReservationResult{}, err
 	}
 	if replay {
-		_ = tx.Rollback(ctx)
-		return repository.readUploadReservationReplay(ctx, command)
+		result, err := readUploadReservationReplay(ctx, tx, command)
+		if err != nil {
+			return attachments.UploadReservationResult{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return attachments.UploadReservationResult{}, fmt.Errorf("commit attachment reservation replay: %w", err)
+		}
+		return result, nil
 	}
 	decision, err := attachments.EvaluateUploadReservationQuota(
 		usage,
@@ -332,23 +430,21 @@ func (repository *PostgresAttachmentRepository) ReserveUpload(
 		return attachments.UploadReservationResult{}, attachments.ErrQuotaOverflow
 	}
 
-	if _, err := tx.Exec(ctx, `
-		insert into public.record_attachments (
-			attachment_id, project_id, draft_id, origin_draft_id,
-			attachment_state, display_name, media_type, logical_size_bytes, created_by
-		) values ($1, $2, $3, $3, $4, $5, $6, $7, $8)`,
-		command.AttachmentID,
-		command.ProjectID,
-		command.DraftID,
-		attachments.UploadStateCreated,
-		command.DisplayName,
-		command.MediaType,
-		command.DeclaredSizeBytes,
-		command.AuthorID,
-	); err != nil {
+	encoded, err := json.Marshal(struct {
+		AttachmentID string `json:"attachment_id"`
+		ProjectID    string `json:"project_id"`
+		DraftID      string `json:"draft_id"`
+		AuthorID     string `json:"author_id"`
+		DisplayName  string `json:"display_name"`
+		MediaType    string `json:"media_type"`
+		Size         int64  `json:"size"`
+	}{command.AttachmentID, command.ProjectID, command.DraftID, command.AuthorID, command.DisplayName, command.MediaType, command.DeclaredSizeBytes})
+	if err != nil {
+		return attachments.UploadReservationResult{}, err
+	}
+	if _, err := tx.Exec(ctx, `select public.record_attachment_reserve($1)`, encoded); err != nil {
 		if isAttachmentConstraintConflict(err) {
-			_ = tx.Rollback(ctx)
-			return repository.readUploadReservationReplay(ctx, command)
+			return attachments.UploadReservationResult{}, attachments.ErrAttachmentConflict
 		}
 		return attachments.UploadReservationResult{}, mapAttachmentWriteError("insert logical attachment", err)
 	}
@@ -369,8 +465,7 @@ func (repository *PostgresAttachmentRepository) ReserveUpload(
 		command.ExpiresAt.UTC(),
 	); err != nil {
 		if isAttachmentConstraintConflict(err) {
-			_ = tx.Rollback(ctx)
-			return repository.readUploadReservationReplay(ctx, command)
+			return attachments.UploadReservationResult{}, attachments.ErrAttachmentConflict
 		}
 		return attachments.UploadReservationResult{}, mapAttachmentWriteError("insert attachment upload reservation", err)
 	}
@@ -465,7 +560,7 @@ func (repository *PostgresAttachmentRepository) PrepareUpload(
 	if ctx == nil || repository == nil || repository.beginTx == nil || command.Validate() != nil {
 		return attachments.UploadPreparation{}, attachments.ErrInvalidAttachmentCommand
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginAttachmentDraftWriter(ctx, command.ProjectID, "", command.UploadID, command.AuthorID, recordauth.CapabilityAttachmentUpdate)
 	if err != nil {
 		return attachments.UploadPreparation{}, fmt.Errorf("begin attachment upload preparation: %w", err)
 	}
@@ -556,14 +651,13 @@ func (repository *PostgresAttachmentRepository) RecordTemporaryObjectVersion(
 	if ctx == nil || repository == nil || repository.beginTx == nil || command.Validate() != nil {
 		return attachments.UploadPreparation{}, attachments.ErrInvalidAttachmentCommand
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	identity := attachments.UploadMutationCommand{ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID}
+	tx, route, recordID, err := repository.beginAttachmentUploadOutcome(ctx, identity)
 	if err != nil {
 		return attachments.UploadPreparation{}, fmt.Errorf("begin attachment temporary version record: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	upload, err := lockAttachmentUpload(ctx, tx, attachments.UploadMutationCommand{
-		ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID,
-	})
+	upload, err := lockAttachmentUploadRow(ctx, tx, identity, route, recordID)
 	if err != nil {
 		return attachments.UploadPreparation{}, err
 	}
@@ -709,11 +803,16 @@ func (repository *PostgresAttachmentRepository) RecordUploadedContent(
 	if ctx == nil || repository == nil || repository.beginTx == nil || command.Validate() != nil {
 		return attachments.UploadedContent{}, attachments.ErrInvalidAttachmentCommand
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginAttachmentDraftWriter(ctx, command.ProjectID, "", command.UploadID, command.AuthorID, recordauth.CapabilityAttachmentUpdate)
 	if err != nil {
 		return attachments.UploadedContent{}, fmt.Errorf("begin attachment uploaded content record: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := consumeBlobPublicationForUploadPart(
+		ctx, tx, command.UploadID, command.Object, command.PublicationIntent,
+	); err != nil {
+		return attachments.UploadedContent{}, err
+	}
 	upload, err := lockAttachmentUpload(ctx, tx, attachments.UploadMutationCommand{
 		ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID,
 	})
@@ -735,11 +834,6 @@ func (repository *PostgresAttachmentRepository) RecordUploadedContent(
 		!attachmentUploadTemporaryKeyMatches(preparation, command.TemporaryObjectKey) {
 		return attachments.UploadedContent{}, attachments.ErrAttachmentConflict
 	}
-	if err := consumeBlobPublicationForUploadPart(
-		ctx, tx, upload.uploadID, command.Object, command.PublicationIntent,
-	); err != nil {
-		return attachments.UploadedContent{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return attachments.UploadedContent{}, fmt.Errorf("commit attachment uploaded content record: %w", err)
 	}
@@ -758,6 +852,9 @@ func (repository *PostgresAttachmentRepository) GetUploadedContent(
 		return attachments.UploadedContent{}, fmt.Errorf("begin attachment uploaded content read: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAttachmentWriterPrefix(ctx, tx, attachmentWriterRoute{}); err != nil {
+		return attachments.UploadedContent{}, err
+	}
 	upload, err := lockAttachmentUpload(ctx, tx, command)
 	if err != nil {
 		return attachments.UploadedContent{}, err
@@ -777,7 +874,7 @@ func (repository *PostgresAttachmentRepository) GetUploadedContent(
 	if err := tx.Commit(ctx); err != nil {
 		return attachments.UploadedContent{}, fmt.Errorf("commit attachment uploaded content read: %w", err)
 	}
-	return newAttachmentUploadedContent(preparation, object), nil
+	return newAttachmentUploadedContent(preparation, object.Version), nil
 }
 
 func (repository *PostgresAttachmentRepository) GetUploadCompletionPreparation(
@@ -792,6 +889,9 @@ func (repository *PostgresAttachmentRepository) GetUploadCompletionPreparation(
 		return attachments.UploadCompletionPreparation{}, fmt.Errorf("begin attachment upload completion preparation read: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAttachmentWriterPrefix(ctx, tx, attachmentWriterRoute{}); err != nil {
+		return attachments.UploadCompletionPreparation{}, err
+	}
 	upload, err := lockAttachmentUpload(ctx, tx, command)
 	if err != nil {
 		return attachments.UploadCompletionPreparation{}, err
@@ -808,11 +908,33 @@ func (repository *PostgresAttachmentRepository) GetUploadCompletionPreparation(
 	if err != nil {
 		return attachments.UploadCompletionPreparation{}, err
 	}
+	var publicationIntent attachments.BlobPublicationIntent
+	if !hasObject && preparation.TransportKind == attachments.TransportKindS3 && upload.state == attachments.UploadStateUploading {
+		published, readErr := scanBlobPublicationIntent(tx.QueryRow(ctx, `
+			select publication_id,project_id,owner_kind,owner_id,owner_generation,
+			       blob_key,sha256_digest,size_bytes,backend_kind,
+			       coalesce(namespace_id::text,''),coalesce(obligation_id,''),
+			       coalesce(object_version,''),publication_state,publish_expires_at
+			from public.blob_publication_intents
+			where project_id=$1 and owner_kind='upload' and owner_id=$2
+			  and owner_generation=1 and publication_state='published'`, command.ProjectID, command.UploadID))
+		if readErr != nil && !errors.Is(readErr, pgx.ErrNoRows) {
+			return attachments.UploadCompletionPreparation{}, fmt.Errorf("read published direct upload: %w", readErr)
+		}
+		if readErr == nil {
+			publishedObject, valid := published.Object()
+			if !valid || published.ObligationID == "" || published.Target.BackendKind != attachments.BackendKindS3 || !published.PublishExpiresAt.Equal(preparation.ExpiresAt) {
+				return attachments.UploadCompletionPreparation{}, attachments.ErrAttachmentConflict
+			}
+			object.Version = attachments.ObjectVersion{Key: publishedObject.Key, VersionID: publishedObject.ObjectVersion, SHA256: publishedObject.SHA256, SizeBytes: publishedObject.SizeBytes}
+			hasObject, publicationIntent = true, published
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return attachments.UploadCompletionPreparation{}, fmt.Errorf("commit attachment upload completion preparation read: %w", err)
 	}
 	return attachments.UploadCompletionPreparation{
-		UploadPreparation: preparation, Object: object, HasObject: hasObject,
+		UploadPreparation: preparation, Object: object.Version, HasObject: hasObject, PublicationIntent: publicationIntent,
 	}, nil
 }
 
@@ -823,11 +945,16 @@ func (repository *PostgresAttachmentRepository) CompleteUploadAndEnqueue(
 	if ctx == nil || repository == nil || repository.beginTx == nil || command.Validate() != nil {
 		return attachments.UploadMutationResult{}, attachments.ErrInvalidAttachmentCommand
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginAttachmentDraftWriter(ctx, command.ProjectID, "", command.UploadID, command.AuthorID, recordauth.CapabilityAttachmentUpdate)
 	if err != nil {
 		return attachments.UploadMutationResult{}, fmt.Errorf("begin attachment upload completion and enqueue: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if command.PublicationIntent != (attachments.BlobPublicationIntent{}) {
+		if err := consumeBlobPublicationForUploadPart(ctx, tx, command.UploadID, command.Object, command.PublicationIntent); err != nil {
+			return attachments.UploadMutationResult{}, err
+		}
+	}
 	upload, err := lockAttachmentUpload(ctx, tx, attachments.UploadMutationCommand{
 		ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID,
 	})
@@ -848,7 +975,7 @@ func (repository *PostgresAttachmentRepository) CompleteUploadAndEnqueue(
 		return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
 	}
 	if upload.state == attachments.UploadStateQuarantined || upload.state == attachments.UploadStateAvailable {
-		if !hasObject || object != command.Object || !attachmentUploadCompletionAndPartMatches(upload, command) {
+		if !hasObject || object.Version != command.Object || !attachmentUploadCompletionAndPartMatches(upload, command) {
 			return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
 		}
 		if err := verifyAttachmentProcessorJobReplay(ctx, tx, upload, command); err != nil {
@@ -866,7 +993,7 @@ func (repository *PostgresAttachmentRepository) CompleteUploadAndEnqueue(
 		preparation.TemporaryObjectVersion == "") {
 		return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
 	}
-	if hasObject && object != command.Object {
+	if hasObject && object.Version != command.Object {
 		return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
 	}
 	expired, err := attachmentUploadExpired(ctx, tx, upload.uploadID)
@@ -879,13 +1006,7 @@ func (repository *PostgresAttachmentRepository) CompleteUploadAndEnqueue(
 	if command.ActualSizeBytes != upload.declaredSizeBytes || command.ActualSHA256 != command.Object.SHA256 {
 		return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
 	}
-	if command.PublicationIntent != (attachments.BlobPublicationIntent{}) {
-		if err := consumeBlobPublicationForUploadPart(
-			ctx, tx, upload.uploadID, command.Object, command.PublicationIntent,
-		); err != nil {
-			return attachments.UploadMutationResult{}, err
-		}
-	} else if !hasObject {
+	if command.PublicationIntent == (attachments.BlobPublicationIntent{}) && !hasObject {
 		return attachments.UploadMutationResult{}, attachments.ErrInvalidAttachmentCommand
 	}
 	updated, err := tx.Exec(ctx, `
@@ -937,6 +1058,9 @@ func (repository *PostgresAttachmentRepository) CompleteUploadContent(
 		return attachments.UploadMutationResult{}, fmt.Errorf("begin attachment upload completion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAttachmentWriterPrefix(ctx, tx, attachmentWriterRoute{}); err != nil {
+		return attachments.UploadMutationResult{}, err
+	}
 
 	base := attachments.UploadMutationCommand{ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID}
 	upload, err := lockAttachmentUpload(ctx, tx, base)
@@ -974,25 +1098,131 @@ func (repository *PostgresAttachmentRepository) ClaimProcessorJob(
 	if ctx == nil || repository == nil || repository.beginTx == nil || input.Validate() != nil {
 		return nil, attachments.ErrInvalidProcessorCommand
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	excluded := make([]string, 0)
+	serializationFailures := 0
+	missingAuthorization := false
+	for {
+		candidate, err := repository.discoverProcessorClaimCandidate(ctx, excluded)
+		if err != nil {
+			return nil, err
+		}
+		if candidate == nil {
+			if missingAuthorization {
+				return nil, ErrRecordSubjectUnavailable
+			}
+			return nil, nil
+		}
+		var authorization currentRecordAuthorizationTransactionResolver
+		if candidate.recordID != "" {
+			if nilRecordSubjectDependency(repository.authorization) {
+				missingAuthorization = true
+				excluded = append(excluded, candidate.jobID)
+				continue
+			}
+			authorization, err = repository.authorization.prepareCurrentAuthorization(ctx, []string{candidate.recordID})
+			if err != nil {
+				return nil, err
+			}
+		}
+		claim, skipped, err := repository.claimDiscoveredProcessorJob(ctx, input, *candidate, authorization)
+		if err != nil {
+			var postgresError *pgconn.PgError
+			if errors.As(err, &postgresError) && postgresError.Code == "40001" && serializationFailures < 2 {
+				serializationFailures++
+				continue
+			}
+			return nil, err
+		}
+		if !skipped {
+			return claim, nil
+		}
+		excluded = append(excluded, candidate.jobID)
+	}
+}
+
+func (repository *PostgresAttachmentRepository) claimDiscoveredProcessorJob(
+	ctx context.Context, input attachments.ProcessorClaimInput, candidate processorClaimCandidate,
+	authorization currentRecordAuthorizationTransactionResolver,
+) (*attachments.ProcessorClaim, bool, error) {
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return nil, fmt.Errorf("begin attachment processor claim: %w", err)
+		return nil, false, fmt.Errorf("begin attachment processor claim: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
+	var namespaces []string
+	if err := lockAttachmentWriterPrefix(ctx, tx, attachmentWriterRoute{
+		attachmentIDs: []string{candidate.attachmentID}, uploadIDs: []string{candidate.uploadID},
+		namespaces: []string{candidate.source.NamespaceID}, heldNamespaces: &namespaces,
+	}); err != nil {
+		return nil, false, err
+	}
+	pgTx := tx.(pgx.Tx)
+	observed, err := discoverProcessorClaimResources(ctx, pgTx, candidate, "", false)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := acquireRecordMutationResourceRange(ctx, pgTx, observed, 10, 72); err != nil {
+		return nil, false, err
+	}
+	var lockedID string
+	err = pgTx.QueryRow(ctx, `select processor_job_id from public.attachment_processor_jobs where processor_job_id=$1 for update skip locked`, candidate.jobID).Scan(&lockedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, true, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err := acquireRecordMutationResourceRange(ctx, pgTx, observed, 73, 75); err != nil {
+		return nil, false, err
+	}
+	currentCandidate, err := readProcessorClaimCandidate(ctx, tx, candidate.jobID, []string{}, true)
+	if err != nil || currentCandidate == nil || !reflect.DeepEqual(candidate, *currentCandidate) {
+		return nil, false, &pgconn.PgError{Code: "40001", Message: "processor candidate route or owner changed; restart transaction"}
+	}
+	current, err := discoverProcessorClaimResources(ctx, pgTx, candidate, "", false)
+	if err != nil || !reflect.DeepEqual(observed.resources, current.resources) {
+		return nil, false, &pgconn.PgError{Code: "40001", Message: "processor candidate resources changed; restart transaction"}
+	}
+	currentNamespaces, err := revisionBatchNamespaces(ctx, pgTx, []string{candidate.attachmentID}, nil, nil, "")
+	if err != nil {
+		return nil, false, err
+	}
+	if !slices.Equal(namespaces, currentNamespaces) {
+		return nil, false, &pgconn.PgError{Code: "40001", Message: "processor namespace changed; restart transaction"}
+	}
+	members := repository.members
+	if nilRecordSubjectDependency(members) {
+		members = NewPostgresCollaborationMembershipReader()
+	}
+	actor, err := members.ReadMemberActor(ctx, pgTx, recordauth.ProjectID(candidate.projectID), candidate.authorID)
+	if err != nil {
+		return nil, false, recordauth.ErrDenied
+	}
+	if candidate.recordID != "" {
+		if nilRecordSubjectDependency(authorization) {
+			return nil, false, ErrRecordSubjectUnavailable
+		}
+		currentAuthorization, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, pgTx, actor, candidate.recordID)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := records.AuthorizeRecordResource(actor, recordauth.CapabilityAttachmentUpdate, currentAuthorization.Evidence); err != nil {
+			return nil, false, err
+		}
+	}
 	row := tx.QueryRow(ctx, `
 		with candidate as (
 			select job.processor_job_id
 			from public.attachment_processor_jobs as job
-			where (
+			where job.processor_job_id=$3 and (
 				job.processor_state = 'queued'
 				or (job.processor_state = 'retry_wait'
-					and job.retry_at <= transaction_timestamp())
+					and job.retry_at <= clock_timestamp())
 				or (job.processor_state = 'claimed'
-					and job.lease_expires_at <= transaction_timestamp())
+					and job.lease_expires_at <= clock_timestamp())
 			)
 			  and attempt < max_attempts
-			  and job.expires_at > transaction_timestamp()
+			  and job.expires_at > clock_timestamp()
 			  and exists (
 				select 1
 				from public.attachment_uploads as upload
@@ -1015,7 +1245,7 @@ func (repository *PostgresAttachmentRepository) ClaimProcessorJob(
 			    owner_id = $1,
 			    owner_generation = job.owner_generation + 1,
 			    lease_expires_at = least(
-					transaction_timestamp() + ($2 * interval '1 microsecond'),
+					clock_timestamp() + ($2 * interval '1 microsecond'),
 					job.expires_at
 				),
 			    retry_at = null,
@@ -1036,7 +1266,8 @@ func (repository *PostgresAttachmentRepository) ClaimProcessorJob(
 		       part.sha256_digest, part.object_version,
 		       part.size_bytes, upload.transport_kind, claimed.processor_profile,
 		       claimed.attempt, claimed.max_attempts, claimed.owner_id,
-		       claimed.owner_generation, claimed.lease_expires_at, claimed.expires_at
+		       claimed.owner_generation, claimed.lease_expires_at, claimed.expires_at,
+		       upload.origin_draft_id, coalesce(part.namespace_id::text, '')
 		from claimed
 		join public.attachment_uploads as upload on upload.upload_id = claimed.upload_id
 		join public.record_attachments as attachment
@@ -1046,21 +1277,19 @@ func (repository *PostgresAttachmentRepository) ClaimProcessorJob(
 		  on part.upload_id = claimed.upload_id and part.part_number = 1`,
 		input.OwnerID,
 		input.OwnerLeaseDuration.Microseconds(),
+		candidate.jobID,
 	)
 	claim, err := scanAttachmentProcessorClaim(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("commit empty attachment processor claim: %w", err)
-		}
-		return nil, nil
+		return nil, false, &pgconn.PgError{Code: "40001", Message: "processor eligibility changed; restart transaction"}
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit attachment processor claim: %w", err)
+		return nil, false, fmt.Errorf("commit attachment processor claim: %w", err)
 	}
-	return &claim, nil
+	return &claim, false, nil
 }
 
 func (repository *PostgresAttachmentRepository) RenewProcessorClaim(
@@ -1837,22 +2066,113 @@ func (repository *PostgresAttachmentRepository) CompleteProcessorJob(
 	if err := attachments.ValidateProcessorResultForCompletion(input.Result, input.Limits); err != nil {
 		return attachments.ProcessorCompletionResult{}, err
 	}
+	if input.Result.HasPreview && input.PreviewPublicationIntent == (attachments.BlobPublicationIntent{}) {
+		return attachments.ProcessorCompletionResult{}, attachments.ErrInvalidProcessorCommand
+	}
 	resultDigest, err := input.Result.Digest()
 	if err != nil {
 		return attachments.ProcessorCompletionResult{}, attachments.ErrInvalidProcessorCommand
 	}
 	input.RetryAt = input.RetryAt.UTC().Truncate(time.Microsecond)
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	for attempt := 0; ; attempt++ {
+		candidate, err := repository.discoverProcessorCompletionCandidate(ctx, input.Claim.ProcessorJobID)
+		if err != nil {
+			return attachments.ProcessorCompletionResult{}, err
+		}
+		if candidate == nil {
+			return attachments.ProcessorCompletionResult{}, attachments.ErrProcessorClaimLost
+		}
+		var authorization currentRecordAuthorizationTransactionResolver
+		if candidate.recordID != "" {
+			if nilRecordSubjectDependency(repository.authorization) {
+				return attachments.ProcessorCompletionResult{}, ErrRecordSubjectUnavailable
+			}
+			authorization, err = repository.authorization.prepareCurrentAuthorization(ctx, []string{candidate.recordID})
+			if err != nil {
+				return attachments.ProcessorCompletionResult{}, err
+			}
+		}
+		result, err := repository.completeDiscoveredProcessorJob(ctx, input, resultDigest, *candidate, authorization)
+		var postgresError *pgconn.PgError
+		if errors.As(err, &postgresError) && postgresError.Code == "40001" && attempt < 2 {
+			continue
+		}
+		return result, err
+	}
+}
+
+func (repository *PostgresAttachmentRepository) completeDiscoveredProcessorJob(
+	ctx context.Context, input attachments.ProcessorCompletionInput, resultDigest [sha256.Size]byte,
+	candidate processorClaimCandidate, authorization currentRecordAuthorizationTransactionResolver,
+) (attachments.ProcessorCompletionResult, error) {
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return attachments.ProcessorCompletionResult{}, fmt.Errorf("begin attachment processor completion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var namespaces []string
+	route := attachmentWriterRoute{
+		attachmentIDs: []string{input.Claim.AttachmentID}, uploadIDs: []string{input.Claim.UploadID},
+		obligationIDs:  []string{candidate.sourceObligationID, input.PreviewPublicationIntent.ObligationID},
+		namespaces:     []string{input.Claim.Source.NamespaceID, input.PreviewPublicationIntent.NamespaceID},
+		heldNamespaces: &namespaces,
+	}
+	if err := lockAttachmentWriterPrefix(ctx, tx, route); err != nil {
+		return attachments.ProcessorCompletionResult{}, err
+	}
 
 	preflight, err := preflightAttachmentProcessorCompletion(ctx, tx, input.Claim)
 	if err != nil {
 		return attachments.ProcessorCompletionResult{}, err
 	}
 	if err := validateAttachmentProcessorJobIdentity(preflight, input.Claim); err != nil {
+		return attachments.ProcessorCompletionResult{}, err
+	}
+	pgTx := tx.(pgx.Tx)
+	observed, err := discoverProcessorClaimResources(ctx, pgTx, candidate, input.PreviewPublicationIntent.PublicationID, true)
+	if err != nil {
+		return attachments.ProcessorCompletionResult{}, err
+	}
+	if err := acquireRecordMutationResources(ctx, pgTx, observed); err != nil {
+		return attachments.ProcessorCompletionResult{}, err
+	}
+	currentCandidate, err := readProcessorClaimCandidate(ctx, tx, candidate.jobID, nil, false)
+	if err != nil || currentCandidate == nil || !reflect.DeepEqual(candidate, *currentCandidate) {
+		return attachments.ProcessorCompletionResult{}, &pgconn.PgError{Code: "40001", Message: "processor completion route or owner changed; restart transaction"}
+	}
+	current, err := discoverProcessorClaimResources(ctx, pgTx, candidate, input.PreviewPublicationIntent.PublicationID, true)
+	if err != nil || !reflect.DeepEqual(observed.resources, current.resources) {
+		return attachments.ProcessorCompletionResult{}, &pgconn.PgError{Code: "40001", Message: "processor completion resources changed; restart transaction"}
+	}
+	currentNamespaces, err := discoverAttachmentWriterNamespaces(ctx, pgTx, route)
+	if err != nil {
+		return attachments.ProcessorCompletionResult{}, err
+	}
+	if !slices.Equal(namespaces, currentNamespaces) {
+		return attachments.ProcessorCompletionResult{}, &pgconn.PgError{Code: "40001", Message: "processor completion namespace changed; restart transaction"}
+	}
+	members := repository.members
+	if nilRecordSubjectDependency(members) {
+		members = NewPostgresCollaborationMembershipReader()
+	}
+	actor, err := members.ReadMemberActor(ctx, pgTx, recordauth.ProjectID(candidate.projectID), candidate.authorID)
+	if err != nil {
+		return attachments.ProcessorCompletionResult{}, recordauth.ErrDenied
+	}
+	if candidate.recordID != "" {
+		if nilRecordSubjectDependency(authorization) {
+			return attachments.ProcessorCompletionResult{}, ErrRecordSubjectUnavailable
+		}
+		currentAuthorization, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, pgTx, actor, candidate.recordID)
+		if err != nil {
+			return attachments.ProcessorCompletionResult{}, err
+		}
+		if err := records.AuthorizeRecordResource(actor, recordauth.CapabilityAttachmentUpdate, currentAuthorization.Evidence); err != nil {
+			return attachments.ProcessorCompletionResult{}, err
+		}
+	}
+	sourceObligation, err := validateProcessorCompletionObligations(candidate, input, current.resources)
+	if err != nil {
 		return attachments.ProcessorCompletionResult{}, err
 	}
 	if preflight.state != attachments.ProcessorStateClaimed {
@@ -1870,13 +2190,19 @@ func (repository *PostgresAttachmentRepository) CompleteProcessorJob(
 		}
 		return result, nil
 	}
-	if input.Result.HasPreview &&
-		input.PreviewPublicationIntent == (attachments.BlobPublicationIntent{}) {
-		return attachments.ProcessorCompletionResult{}, attachments.ErrInvalidProcessorCommand
-	}
 	if retryableAttachmentProcessorResult(input.Result.Code) &&
 		!input.RetryAt.After(preflight.databaseNow) {
 		return attachments.ProcessorCompletionResult{}, attachments.ErrInvalidProcessorCommand
+	}
+	var publicationCommand []byte
+	if input.Result.Code == attachments.ProcessorResultCodeClean {
+		publicationCommand, err = marshalProcessorPublicationCommand(input, candidate, sourceObligation)
+		if err != nil {
+			return attachments.ProcessorCompletionResult{}, err
+		}
+		if _, err := tx.Exec(ctx, `select public.record_processor_publication_lock($1)`, publicationCommand); err != nil {
+			return attachments.ProcessorCompletionResult{}, mapBlobPublicationWriteError("lock processor publication", err)
+		}
 	}
 
 	usage, quotaVersion, err := lockAttachmentQuotaAccount(ctx, tx, input.Claim.ProjectID)
@@ -1898,7 +2224,7 @@ func (repository *PostgresAttachmentRepository) CompleteProcessorJob(
 		return attachments.ProcessorCompletionResult{}, err
 	}
 	result, err := commitAttachmentProcessorResult(
-		ctx, tx, input, resultDigest, job, upload, usage, quotaVersion,
+		ctx, tx, input, resultDigest, job, upload, usage, quotaVersion, publicationCommand,
 	)
 	if err != nil {
 		return attachments.ProcessorCompletionResult{}, err
@@ -1921,6 +2247,9 @@ func (repository *PostgresAttachmentRepository) ExpireBoundedProcessorJob(
 		return nil, fmt.Errorf("begin bounded attachment processor expiry: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `select public.source_application_admit()`); err != nil {
+		return nil, fmt.Errorf("admit processor expiry: %w", err)
+	}
 
 	usage, quotaVersion, quotaExists, err := lockExistingAttachmentProcessorQuotaAccount(
 		ctx, tx, input.ProjectID,
@@ -1967,9 +2296,9 @@ func (repository *PostgresAttachmentRepository) ExpireBoundedProcessorJob(
 	if err != nil {
 		return nil, err
 	}
-	if lockedPart.Key != upload.source.Key || lockedPart.SHA256 != upload.source.SHA256 ||
-		lockedPart.VersionID != upload.source.ObjectVersion ||
-		lockedPart.SizeBytes != upload.source.SizeBytes {
+	if lockedPart.Version.Key != upload.source.Key || lockedPart.Version.SHA256 != upload.source.SHA256 ||
+		lockedPart.Version.VersionID != upload.source.ObjectVersion ||
+		lockedPart.Version.SizeBytes != upload.source.SizeBytes || lockedPart.NamespaceID != upload.source.NamespaceID {
 		return nil, attachments.ErrAttachmentConflict
 	}
 	if err := validateAttachmentProcessorUploadForBoundedExpiry(
@@ -2034,6 +2363,9 @@ func (repository *PostgresAttachmentRepository) ExpireAbandonedUpload(
 		return nil, fmt.Errorf("begin abandoned attachment upload expiry: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `select public.source_application_admit()`); err != nil {
+		return nil, fmt.Errorf("admit upload expiry: %w", err)
+	}
 
 	usage, quotaVersion, quotaExists, err := lockExistingAttachmentProcessorQuotaAccount(
 		ctx, tx, input.ProjectID,
@@ -2084,107 +2416,6 @@ func (repository *PostgresAttachmentRepository) ExpireAbandonedUpload(
 	return &result, nil
 }
 
-func (repository *PostgresAttachmentRepository) AdmitUpload(
-	ctx context.Context,
-	command attachments.AdmitUploadCommand,
-) (attachments.UploadMutationResult, error) {
-	if ctx == nil || repository == nil || repository.beginTx == nil || command.Validate() != nil {
-		return attachments.UploadMutationResult{}, attachments.ErrInvalidAttachmentCommand
-	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return attachments.UploadMutationResult{}, fmt.Errorf("begin attachment upload admission: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	base := attachments.UploadMutationCommand{ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID}
-	route, recordID, err := lockAttachmentUploadOwners(ctx, tx, base)
-	if err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	usage, quotaVersion, err := lockAttachmentQuotaAccount(ctx, tx, command.ProjectID)
-	if err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	upload, err := lockAttachmentUploadRow(ctx, tx, base, route, recordID)
-	if err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	if upload.state == attachments.UploadStateAvailable {
-		if !attachmentUploadBlobMatches(upload, command.Blob) {
-			return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
-		}
-		if err := verifyAdmittedAttachmentReplay(ctx, tx, upload, command.Blob); err != nil {
-			return attachments.UploadMutationResult{}, err
-		}
-		quota, err := buildAttachmentQuotaSnapshot(ctx, tx, upload, usage, command.Limits)
-		if err != nil {
-			return attachments.UploadMutationResult{}, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return attachments.UploadMutationResult{}, fmt.Errorf("commit attachment upload admission replay: %w", err)
-		}
-		result := newAttachmentUploadMutationResult(upload, attachments.UploadStateAvailable)
-		result.Quota = quota
-		return result, nil
-	}
-	if err := attachments.ValidateUploadStateTransition(upload.state, attachments.UploadStateAvailable); err != nil ||
-		!attachmentUploadBlobMatches(upload, command.Blob) {
-		return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
-	}
-	if quotaVersion == math.MaxInt64 {
-		return attachments.UploadMutationResult{}, attachments.ErrQuotaOverflow
-	}
-	blobInserted, err := ensureAttachmentBlob(ctx, tx, command.Blob)
-	if err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	physicalDelta := int64(0)
-	if blobInserted {
-		physicalDelta = command.Blob.SizeBytes
-	}
-	nextUsage, err := usage.SolidifyReservation(upload.reservedSizeBytes, command.Blob.SizeBytes, physicalDelta)
-	if err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	updated, err := tx.Exec(ctx, `
-		update public.record_attachments
-		set attachment_state = $4, logical_size_bytes = $5,
-		    blob_key = $6, blob_object_version = $7, updated_at = now()
-		where project_id = $1 and attachment_id = $2 and draft_id = $3 and attachment_state = $8`,
-		command.ProjectID,
-		upload.attachmentID,
-		upload.originDraftID,
-		attachments.UploadStateAvailable,
-		command.Blob.SizeBytes,
-		command.Blob.Key,
-		command.Blob.ObjectVersion,
-		upload.state,
-	)
-	if err != nil {
-		return attachments.UploadMutationResult{}, mapAttachmentWriteError("admit logical attachment", err)
-	}
-	if updated.RowsAffected() != 1 {
-		return attachments.UploadMutationResult{}, attachments.ErrAttachmentConflict
-	}
-	if err := updateAttachmentUploadStateOnly(ctx, tx, upload, attachments.UploadStateAvailable); err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	if err := updateAttachmentQuotaAccount(ctx, tx, command.ProjectID, quotaVersion, nextUsage); err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	quota, err := buildAttachmentQuotaSnapshot(ctx, tx, upload, nextUsage, command.Limits)
-	if err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return attachments.UploadMutationResult{}, fmt.Errorf("commit attachment upload admission: %w", err)
-	}
-	result := newAttachmentUploadMutationResult(upload, attachments.UploadStateAvailable)
-	result.Quota = quota
-	return result, nil
-}
-
 func (repository *PostgresAttachmentRepository) FailUpload(
 	ctx context.Context,
 	command attachments.FailUploadCommand,
@@ -2192,17 +2423,12 @@ func (repository *PostgresAttachmentRepository) FailUpload(
 	if ctx == nil || repository == nil || repository.beginTx == nil || command.Validate() != nil {
 		return attachments.UploadMutationResult{}, attachments.ErrInvalidAttachmentCommand
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	base := attachments.UploadMutationCommand{ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID}
+	tx, route, recordID, err := repository.beginAttachmentUploadOutcome(ctx, base)
 	if err != nil {
 		return attachments.UploadMutationResult{}, fmt.Errorf("begin attachment upload failure: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	base := attachments.UploadMutationCommand{ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID}
-	route, recordID, err := lockAttachmentUploadOwners(ctx, tx, base)
-	if err != nil {
-		return attachments.UploadMutationResult{}, err
-	}
 	usage, quotaVersion, err := lockAttachmentQuotaAccount(ctx, tx, command.ProjectID)
 	if err != nil {
 		return attachments.UploadMutationResult{}, err
@@ -2258,27 +2484,78 @@ func (repository *PostgresAttachmentRepository) CopyAttachment(
 	if ctx == nil || repository == nil || repository.beginTx == nil || command.Validate() != nil {
 		return attachments.CopyAttachmentResult{}, attachments.ErrInvalidAttachmentCommand
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	if nilRecordSubjectDependency(repository.members) || nilRecordSubjectDependency(repository.authorization) {
+		return attachments.CopyAttachmentResult{}, ErrRecordSubjectUnavailable
+	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.SourceRecordID, command.TargetRecordID})
+	if err != nil {
+		return attachments.CopyAttachmentResult{}, err
+	}
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return attachments.CopyAttachmentResult{}, fmt.Errorf("begin attachment copy: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	firstRecordID, secondRecordID := command.SourceRecordID, command.TargetRecordID
-	if secondRecordID < firstRecordID {
-		firstRecordID, secondRecordID = secondRecordID, firstRecordID
+	var namespaces []string
+	if err := lockAttachmentWriterPrefix(ctx, tx, attachmentWriterRoute{attachmentIDs: []string{command.SourceAttachmentID}, heldNamespaces: &namespaces}); err != nil {
+		return attachments.CopyAttachmentResult{}, err
 	}
-	for _, recordID := range []string{firstRecordID, secondRecordID} {
-		if err := lockAttachmentRecordOwner(ctx, tx, command.ProjectID, recordID); err != nil {
+	pgTx := tx.(pgx.Tx)
+	observed, err := discoverAttachmentCopyResources(ctx, pgTx, command)
+	if err != nil {
+		return attachments.CopyAttachmentResult{}, err
+	}
+	if err := acquireRecordMutationResources(ctx, pgTx, observed.resources); err != nil {
+		return attachments.CopyAttachmentResult{}, err
+	}
+	current, err := discoverAttachmentCopyResources(ctx, pgTx, command)
+	if err != nil || !reflect.DeepEqual(observed, current) {
+		return attachments.CopyAttachmentResult{}, &pgconn.PgError{Code: "40001", Message: "attachment copy route changed; restart transaction"}
+	}
+	currentNamespaces, err := revisionBatchNamespaces(ctx, pgTx, []string{command.SourceAttachmentID}, nil, nil, "")
+	if err != nil {
+		return attachments.CopyAttachmentResult{}, err
+	}
+	if !slices.Equal(namespaces, currentNamespaces) {
+		return attachments.CopyAttachmentResult{}, &pgconn.PgError{Code: "40001", Message: "attachment copy namespace changed; restart transaction"}
+	}
+	actor, err := repository.members.ReadMemberActor(ctx, pgTx, recordauth.ProjectID(command.ProjectID), command.ActorID)
+	if err != nil || actor.UserID != command.ActorID || actor.ProjectID != recordauth.ProjectID(command.ProjectID) {
+		return attachments.CopyAttachmentResult{}, recordauth.ErrDenied
+	}
+	for _, check := range []struct {
+		recordID   string
+		capability recordauth.Capability
+	}{
+		{command.SourceRecordID, recordauth.CapabilityAttachmentRead},
+		{command.TargetRecordID, recordauth.CapabilityAttachmentCreate},
+	} {
+		currentAuthorization, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, pgTx, actor, check.recordID)
+		if err != nil {
+			return attachments.CopyAttachmentResult{}, err
+		}
+		if err := records.AuthorizeRecordResource(actor, check.capability, currentAuthorization.Evidence); err != nil {
 			return attachments.CopyAttachmentResult{}, err
 		}
 	}
 
-	usage, quotaVersion, err := lockAttachmentQuotaAccount(ctx, tx, command.ProjectID)
+	encoded, err := json.Marshal(struct {
+		ProjectID          string `json:"project_id"`
+		SourceRecordID     string `json:"source_record_id"`
+		TargetRecordID     string `json:"target_record_id"`
+		SourceAttachmentID string `json:"source_attachment_id"`
+		TargetAttachmentID string `json:"target_attachment_id"`
+		ActorID            string `json:"actor_id"`
+	}{command.ProjectID, command.SourceRecordID, command.TargetRecordID, command.SourceAttachmentID, command.TargetAttachmentID, command.ActorID})
 	if err != nil {
 		return attachments.CopyAttachmentResult{}, err
 	}
-	source, err := lockCopyAttachmentSource(ctx, tx, command)
+	var logicalBytes int64
+	if err := tx.QueryRow(ctx, `select logical_size_bytes from public.record_attachment_copy_source($1)`, encoded).Scan(&logicalBytes); err != nil {
+		return attachments.CopyAttachmentResult{}, mapAttachmentWriteError("lock attachment copy source", err)
+	}
+
+	usage, quotaVersion, err := lockAttachmentQuotaAccount(ctx, tx, command.ProjectID)
 	if err != nil {
 		return attachments.CopyAttachmentResult{}, err
 	}
@@ -2289,12 +2566,12 @@ func (repository *PostgresAttachmentRepository) CopyAttachment(
 		return attachments.CopyAttachmentResult{}, err
 	}
 	decision, err := attachments.EvaluateUploadReservationQuota(
-		usage, effectiveRecordBytes, source.logicalBytes, command.Limits,
+		usage, effectiveRecordBytes, logicalBytes, command.Limits,
 	)
 	if err != nil {
 		return attachments.CopyAttachmentResult{}, err
 	}
-	nextUsage, err := usage.SolidifyReservation(0, source.logicalBytes, 0)
+	nextUsage, err := usage.SolidifyReservation(0, logicalBytes, 0)
 	if err != nil {
 		return attachments.CopyAttachmentResult{}, err
 	}
@@ -2302,24 +2579,7 @@ func (repository *PostgresAttachmentRepository) CopyAttachment(
 		return attachments.CopyAttachmentResult{}, attachments.ErrQuotaOverflow
 	}
 
-	if _, err := tx.Exec(ctx, `
-		insert into public.record_attachments (
-			attachment_id, project_id, record_id, copied_from_attachment_id,
-			attachment_state, display_name, media_type, logical_size_bytes,
-			blob_key, blob_object_version, created_by
-		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		command.TargetAttachmentID,
-		command.ProjectID,
-		command.TargetRecordID,
-		command.SourceAttachmentID,
-		attachments.UploadStateAvailable,
-		source.displayName,
-		source.mediaType,
-		source.logicalBytes,
-		source.blobKey,
-		source.blobVersion,
-		command.ActorID,
-	); err != nil {
+	if _, err := tx.Exec(ctx, `select public.record_attachment_copy_publish($1)`, encoded); err != nil {
 		return attachments.CopyAttachmentResult{}, mapAttachmentWriteError("insert copied logical attachment", err)
 	}
 	if err := updateAttachmentQuotaAccount(ctx, tx, command.ProjectID, quotaVersion, nextUsage); err != nil {
@@ -2337,6 +2597,67 @@ func (repository *PostgresAttachmentRepository) CopyAttachment(
 			ProjectWarning:       decision.ProjectWarning,
 		},
 	}, nil
+}
+
+type attachmentCopyObservation struct {
+	resources recordMutationResources
+	source    lockedCopyAttachmentSource
+}
+
+func discoverAttachmentCopyResources(ctx context.Context, tx pgx.Tx, command attachments.CopyAttachmentCommand) (attachmentCopyObservation, error) {
+	var observed attachmentCopyObservation
+	resources := records.RevisionMutationResources{
+		Records: []records.RevisionMutationRecord{
+			{ProjectID: command.ProjectID, RecordID: command.SourceRecordID},
+			{ProjectID: command.ProjectID, RecordID: command.TargetRecordID},
+		},
+		Projects:   []records.RevisionMutationProject{{ProjectID: command.ProjectID, Kind: records.RevisionMutationAttachmentQuota}},
+		BlobTables: []records.RevisionMutationBlobTable{records.RevisionMutationBlobMetadataTable, records.RevisionMutationUploadPartsTable},
+	}
+	var user records.RevisionMutationUser
+	if err := tx.QueryRow(ctx, `select user_id,role,disabled_at is not null from public.users where user_id=$1`, command.ActorID).Scan(&user.UserID, &user.Role, &user.Disabled); err != nil {
+		return observed, err
+	}
+	resources.Users = append(resources.Users, user)
+	groups, err := newPostgresRecordAuthorizationRepository(tx).ListActorGroupIDs(ctx, recordauth.ProjectID(command.ProjectID), command.ActorID)
+	if err != nil {
+		return observed, err
+	}
+	for _, groupID := range groups {
+		resources.Groups = append(resources.Groups, records.RevisionMutationGroup{ProjectID: command.ProjectID, GroupID: groupID})
+		resources.Memberships = append(resources.Memberships, records.RevisionMutationMembership{GroupID: groupID, UserID: command.ActorID})
+	}
+	var attachment records.RevisionMutationAttachment
+	err = tx.QueryRow(ctx, `select project_id,attachment_id,coalesce(record_id,''),coalesce(draft_id,''),attachment_state,logical_size_bytes,
+		display_name,media_type,coalesce(blob_key,''),coalesce(blob_object_version,'') from public.record_attachments
+		where project_id=$1 and record_id=$2 and attachment_id=$3 and attachment_state='available'`, command.ProjectID, command.SourceRecordID, command.SourceAttachmentID).Scan(
+		&attachment.ProjectID, &attachment.AttachmentID, &attachment.RecordID, &attachment.DraftID, &attachment.State, &attachment.LogicalSizeBytes,
+		&observed.source.displayName, &observed.source.mediaType, &observed.source.blobKey, &observed.source.blobVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return observed, attachments.ErrAttachmentOwnerNotFound
+	}
+	if err != nil {
+		return observed, err
+	}
+	observed.source.logicalBytes = attachment.LogicalSizeBytes
+	resources.Attachments = append(resources.Attachments, attachment)
+	var blob attachments.BlobObject
+	var digest []byte
+	err = tx.QueryRow(ctx, `select blob_key,object_version,sha256_digest,size_bytes,backend_kind,coalesce(namespace_id::text,'')
+		from public.blob_objects where blob_key=$1 and object_version=$2`, observed.source.blobKey, observed.source.blobVersion).Scan(
+		&blob.Key, &blob.ObjectVersion, &digest, &blob.SizeBytes, &blob.BackendKind, &blob.NamespaceID)
+	if err != nil || len(digest) != sha256.Size {
+		return observed, attachments.ErrAttachmentConflict
+	}
+	copy(blob.SHA256[:], digest)
+	resources.Blobs = append(resources.Blobs, blob)
+	for _, recordID := range []string{command.SourceRecordID, command.TargetRecordID} {
+		if err := appendEvidenceCurrentRecordResources(ctx, tx, &resources, records.RevisionMutationRecord{ProjectID: command.ProjectID, RecordID: recordID}); err != nil {
+			return observed, err
+		}
+	}
+	observed.resources, err = normalizeRecordMutationDeclarations(resources)
+	return observed, err
 }
 
 func lockCopyAttachmentSource(
@@ -2392,30 +2713,19 @@ func (repository *PostgresAttachmentRepository) CreateBlobGCPin(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	inserted, err := tx.Exec(ctx, `
-		insert into public.blob_gc_pins (
-			pin_id, pin_owner_kind, pin_owner_id, blob_key,
-			blob_object_version, expires_at
-		) values ($1, $2, $3, $4, $5, $6)
-		on conflict (pin_id) do nothing`,
-		command.PinID,
-		command.OwnerKind,
-		command.OwnerID,
-		command.BlobKey,
-		command.BlobObjectVersion,
-		command.ExpiresAt.UTC(),
-	)
+	encoded, err := json.Marshal(struct {
+		PinID     string                         `json:"pin_id"`
+		OwnerKind attachments.BlobGCPinOwnerKind `json:"owner_kind"`
+		OwnerID   string                         `json:"owner_id"`
+		Key       string                         `json:"key"`
+		Version   string                         `json:"version"`
+		ExpiresAt time.Time                      `json:"expires_at"`
+	}{command.PinID, command.OwnerKind, command.OwnerID, command.BlobKey, command.BlobObjectVersion, command.ExpiresAt.UTC().Truncate(time.Microsecond)})
 	if err != nil {
-		return attachments.BlobProtection{}, mapAttachmentWriteError("create Blob GC pin", err)
+		return attachments.BlobProtection{}, err
 	}
-	switch inserted.RowsAffected() {
-	case 0:
-		if err := verifyBlobGCPinReplay(ctx, tx, command); err != nil {
-			return attachments.BlobProtection{}, err
-		}
-	case 1:
-	default:
-		return attachments.BlobProtection{}, attachments.ErrAttachmentConflict
+	if _, err := tx.Exec(ctx, `select public.record_blob_pin_create($1)`, encoded); err != nil {
+		return attachments.BlobProtection{}, mapAttachmentWriteError("create Blob GC pin", err)
 	}
 	protection, err := readBlobProtection(ctx, tx, command.BlobKey, command.BlobObjectVersion)
 	if err != nil {
@@ -2440,33 +2750,18 @@ func (repository *PostgresAttachmentRepository) ReleaseBlobGCPin(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	deleted, err := tx.Exec(ctx, `
-		delete from public.blob_gc_pins
-		where pin_id = $1 and pin_owner_kind = $2 and pin_owner_id = $3
-		  and blob_key = $4 and blob_object_version = $5`,
-		command.PinID,
-		command.OwnerKind,
-		command.OwnerID,
-		command.BlobKey,
-		command.BlobObjectVersion,
-	)
+	encoded, err := json.Marshal(struct {
+		PinID     string                         `json:"pin_id"`
+		OwnerKind attachments.BlobGCPinOwnerKind `json:"owner_kind"`
+		OwnerID   string                         `json:"owner_id"`
+		Key       string                         `json:"key"`
+		Version   string                         `json:"version"`
+	}{command.PinID, command.OwnerKind, command.OwnerID, command.BlobKey, command.BlobObjectVersion})
 	if err != nil {
-		return attachments.BlobProtection{}, fmt.Errorf("release Blob GC pin: %w", err)
+		return attachments.BlobProtection{}, err
 	}
-	if deleted.RowsAffected() > 1 {
-		return attachments.BlobProtection{}, attachments.ErrAttachmentConflict
-	}
-	if deleted.RowsAffected() == 0 {
-		var pinIDExists bool
-		if err := tx.QueryRow(ctx, `
-			select exists(select 1 from public.blob_gc_pins where pin_id = $1)`,
-			command.PinID,
-		).Scan(&pinIDExists); err != nil {
-			return attachments.BlobProtection{}, fmt.Errorf("check Blob GC pin release replay: %w", err)
-		}
-		if pinIDExists {
-			return attachments.BlobProtection{}, attachments.ErrAttachmentConflict
-		}
+	if _, err := tx.Exec(ctx, `select public.record_blob_pin_release($1)`, encoded); err != nil {
+		return attachments.BlobProtection{}, mapAttachmentWriteError("release Blob GC pin", err)
 	}
 	protection, err := readBlobProtection(ctx, tx, command.BlobKey, command.BlobObjectVersion)
 	if err != nil {
@@ -2587,22 +2882,18 @@ func readBlobProtection(
 	return protection, nil
 }
 
-func (repository *PostgresAttachmentRepository) readUploadReservationReplay(
+func readUploadReservationReplay(
 	ctx context.Context,
+	tx attachmentTx,
 	command attachments.ReserveUploadCommand,
 ) (attachments.UploadReservationResult, error) {
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return attachments.UploadReservationResult{}, fmt.Errorf("begin attachment reservation replay: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	var projectID, uploadID, attachmentID, originDraftID, authorID string
 	var state, attachmentState attachments.UploadState
 	var transport attachments.TransportKind
 	var declaredSize, logicalSize int64
 	var expiresAt time.Time
 	var displayName, mediaType, draftID, createdBy string
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		select upload.project_id, upload.upload_id, upload.attachment_id,
 		       upload.origin_draft_id, upload.author_id, upload.upload_state,
 		       upload.transport_kind, upload.declared_size_bytes, upload.expires_at,
@@ -2654,9 +2945,6 @@ func (repository *PostgresAttachmentRepository) readUploadReservationReplay(
 	warning, err := usage.ProjectWarning(command.Limits)
 	if err != nil {
 		return attachments.UploadReservationResult{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return attachments.UploadReservationResult{}, fmt.Errorf("commit attachment reservation replay: %w", err)
 	}
 	return attachments.UploadReservationResult{
 		UploadID: uploadID, AttachmentID: attachmentID, State: state,
@@ -2771,72 +3059,17 @@ func attachmentUploadReservationExists(ctx context.Context, tx attachmentTx, upl
 	return exists, nil
 }
 
-func ensureAttachmentUploadPart(
-	ctx context.Context,
-	tx attachmentTx,
-	uploadID string,
-	object attachments.ObjectVersion,
-) error {
-	if _, err := tx.Exec(ctx, `lock table public.attachment_upload_parts in row exclusive mode`); err != nil {
-		return fmt.Errorf("lock attachment upload parts for publication: %w", err)
-	}
-	activeDeletion, err := activeBlobGCDeletionExists(ctx, tx, object.Key, object.VersionID)
-	if err != nil {
-		return err
-	}
-	if activeDeletion {
-		return attachments.ErrBlobGCProtected
-	}
-	inserted, err := tx.Exec(ctx, `
-		insert into public.attachment_upload_parts (
-			upload_id, part_number, size_bytes, sha256_digest, object_version
-		)
-		select $1, 1, $2, $3, $4
-		where not exists (
-			select 1 from public.blob_gc_deletions as deletion
-			where deletion.blob_key = $5 and deletion.object_version = $4
-			  and deletion.deletion_state <> 'completed'
-		)
-		on conflict (upload_id, part_number) do nothing`,
-		uploadID, object.SizeBytes, object.SHA256[:], object.VersionID, object.Key,
-	)
-	if err != nil {
-		return mapAttachmentWriteError("record attachment upload final identity", err)
-	}
-	if inserted.RowsAffected() == 1 {
-		return nil
-	}
-	if inserted.RowsAffected() != 0 {
-		return attachments.ErrAttachmentConflict
-	}
-	activeDeletion, err = activeBlobGCDeletionExists(ctx, tx, object.Key, object.VersionID)
-	if err != nil {
-		return err
-	}
-	if activeDeletion {
-		return attachments.ErrBlobGCProtected
-	}
-	existing, err := readAttachmentUploadPart(ctx, tx, uploadID)
-	if err != nil {
-		return err
-	}
-	if existing != object {
-		return attachments.ErrAttachmentConflict
-	}
-	return nil
-}
-
 func readAttachmentUploadPart(
 	ctx context.Context,
 	tx attachmentTx,
 	uploadID string,
-) (attachments.ObjectVersion, error) {
+) (attachments.WrittenBlob, error) {
 	object, found, err := readOptionalAttachmentUploadPart(ctx, tx, uploadID)
 	if err != nil {
-		return attachments.ObjectVersion{}, err
+		return attachments.WrittenBlob{}, err
 	}
 	if !found {
-		return attachments.ObjectVersion{}, attachments.ErrAttachmentConflict
+		return attachments.WrittenBlob{}, attachments.ErrAttachmentConflict
 	}
 	return object, nil
 }
@@ -2845,10 +3078,10 @@ func lockAttachmentUploadPart(
 	ctx context.Context,
 	tx attachmentTx,
 	uploadID string,
-) (attachments.ObjectVersion, error) {
+) (attachments.WrittenBlob, error) {
 	if _, err := tx.Exec(ctx, `
 		lock table public.attachment_upload_parts in share mode`); err != nil {
-		return attachments.ObjectVersion{}, fmt.Errorf("lock attachment upload parts for bounded expiry: %w", err)
+		return attachments.WrittenBlob{}, fmt.Errorf("lock attachment upload parts for bounded expiry: %w", err)
 	}
 	return readAttachmentUploadPart(ctx, tx, uploadID)
 }
@@ -2857,30 +3090,32 @@ func readOptionalAttachmentUploadPart(
 	ctx context.Context,
 	tx attachmentTx,
 	uploadID string,
-) (attachments.ObjectVersion, bool, error) {
-	var object attachments.ObjectVersion
+) (attachments.WrittenBlob, bool, error) {
+	var written attachments.WrittenBlob
+	object := &written.Version
 	var digest []byte
 	err := tx.QueryRow(ctx, `
-		select size_bytes, sha256_digest, object_version
+		select size_bytes, sha256_digest, object_version, coalesce(namespace_id::text, ''), coalesce(obligation_id, '')
 		from public.attachment_upload_parts
 		where upload_id = $1 and part_number = 1`, uploadID).Scan(
 		&object.SizeBytes, &digest, &object.VersionID,
+		&written.NamespaceID, &written.ObligationID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return attachments.ObjectVersion{}, false, nil
+		return attachments.WrittenBlob{}, false, nil
 	}
 	if err != nil {
-		return attachments.ObjectVersion{}, false, fmt.Errorf("read attachment upload final identity: %w", err)
+		return attachments.WrittenBlob{}, false, fmt.Errorf("read attachment upload final identity: %w", err)
 	}
 	if len(digest) != len(object.SHA256) {
-		return attachments.ObjectVersion{}, false, attachments.ErrAttachmentConflict
+		return attachments.WrittenBlob{}, false, attachments.ErrAttachmentConflict
 	}
 	copy(object.SHA256[:], digest)
 	object.Key = fmt.Sprintf("sha256/%x", object.SHA256)
 	if object.Validate() != nil {
-		return attachments.ObjectVersion{}, false, attachments.ErrAttachmentConflict
+		return attachments.WrittenBlob{}, false, attachments.ErrAttachmentConflict
 	}
-	return object, true, nil
+	return written, true, nil
 }
 
 func newAttachmentUploadedContent(
@@ -3015,12 +3250,17 @@ func lockAttachmentDraftOwner(
 	command attachments.ReserveUploadCommand,
 ) (attachmentDraftRoute, error) {
 	var route attachmentDraftRoute
-	err := tx.QueryRow(ctx, `
-		select project_id, record_id
-		from public.record_drafts
-		where draft_id = $1 and author_id = $2
-		for update`, command.DraftID, command.AuthorID).Scan(&route.projectID, &route.recordID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	encoded, err := json.Marshal(struct {
+		ProjectID string `json:"project_id"`
+		DraftID   string `json:"draft_id"`
+		AuthorID  string `json:"author_id"`
+	}{command.ProjectID, command.DraftID, command.AuthorID})
+	if err != nil {
+		return attachmentDraftRoute{}, err
+	}
+	err = tx.QueryRow(ctx, `select project_id,record_id from public.record_attachment_draft_lock($1)`, encoded).Scan(&route.projectID, &route.recordID)
+	var postgresError *pgconn.PgError
+	if errors.Is(err, pgx.ErrNoRows) || (errors.As(err, &postgresError) && postgresError.Code == "P0002") {
 		return attachmentDraftRoute{}, attachments.ErrAttachmentOwnerNotFound
 	}
 	if err != nil {
@@ -3118,21 +3358,9 @@ func lockAttachmentUploadOwners(
 		DraftID:   route.originDraftID,
 		AuthorID:  route.authorID,
 	}
-	draftRoute, err := loadAttachmentDraftRoute(ctx, tx, draftCommand)
-	if err != nil {
-		return attachmentUploadRoute{}, nil, err
-	}
-	if draftRoute.recordID != nil {
-		if err := lockAttachmentRecordOwner(ctx, tx, route.projectID, *draftRoute.recordID); err != nil {
-			return attachmentUploadRoute{}, nil, err
-		}
-	}
 	lockedDraft, err := lockAttachmentDraftOwner(ctx, tx, draftCommand)
 	if err != nil {
 		return attachmentUploadRoute{}, nil, err
-	}
-	if lockedDraft.projectID != draftRoute.projectID || !equalOptionalAttachmentRecordID(lockedDraft.recordID, draftRoute.recordID) {
-		return attachmentUploadRoute{}, nil, attachments.ErrAttachmentConflict
 	}
 	return route, lockedDraft.recordID, nil
 }
@@ -3201,44 +3429,6 @@ func attachmentUploadCompletionMatches(
 func attachmentUploadBlobMatches(upload lockedAttachmentUpload, blob attachments.BlobObject) bool {
 	return upload.actualSizeBytes != nil && *upload.actualSizeBytes == blob.SizeBytes &&
 		len(upload.actualSHA256) == len(blob.SHA256) && bytes.Equal(upload.actualSHA256, blob.SHA256[:])
-}
-
-func verifyAdmittedAttachmentReplay(
-	ctx context.Context,
-	tx attachmentTx,
-	upload lockedAttachmentUpload,
-	blob attachments.BlobObject,
-) error {
-	var matches bool
-	if err := tx.QueryRow(ctx, `
-		select exists(
-			select 1
-			from public.record_attachments attachment
-			join public.blob_objects object
-			  on object.blob_key = attachment.blob_key
-			 and object.object_version = attachment.blob_object_version
-			where attachment.project_id = $1 and attachment.attachment_id = $2
-			  and attachment.attachment_state = $3
-			  and attachment.logical_size_bytes = $4
-			  and object.blob_key = $5 and object.object_version = $6
-			  and object.sha256_digest = $7 and object.size_bytes = $4
-			  and object.backend_kind = $8
-		)`,
-		upload.projectID,
-		upload.attachmentID,
-		attachments.UploadStateAvailable,
-		blob.SizeBytes,
-		blob.Key,
-		blob.ObjectVersion,
-		blob.SHA256[:],
-		blob.BackendKind,
-	).Scan(&matches); err != nil {
-		return fmt.Errorf("verify admitted attachment replay: %w", err)
-	}
-	if !matches {
-		return attachments.ErrAttachmentConflict
-	}
-	return nil
 }
 
 func buildAttachmentQuotaSnapshot(
@@ -3337,21 +3527,19 @@ func updateLogicalAttachmentState(
 	upload lockedAttachmentUpload,
 	target attachments.UploadState,
 ) error {
-	updated, err := tx.Exec(ctx, `
-		update public.record_attachments
-		set attachment_state = $4, updated_at = now()
-		where project_id = $1 and attachment_id = $2 and draft_id = $3 and attachment_state = $5`,
-		upload.projectID,
-		upload.attachmentID,
-		upload.originDraftID,
-		target,
-		upload.state,
-	)
+	encoded, err := json.Marshal(struct {
+		ProjectID     string                  `json:"project_id"`
+		UploadID      string                  `json:"upload_id"`
+		AttachmentID  string                  `json:"attachment_id"`
+		DraftID       string                  `json:"draft_id"`
+		PreviousState attachments.UploadState `json:"previous_state"`
+		TargetState   attachments.UploadState `json:"target_state"`
+	}{upload.projectID, upload.uploadID, upload.attachmentID, upload.originDraftID, upload.state, target})
 	if err != nil {
-		return mapAttachmentWriteError("update logical attachment state", err)
+		return err
 	}
-	if updated.RowsAffected() != 1 {
-		return attachments.ErrAttachmentConflict
+	if _, err := tx.Exec(ctx, `select public.record_attachment_state_set($1)`, encoded); err != nil {
+		return mapAttachmentWriteError("update logical attachment state", err)
 	}
 	return nil
 }
@@ -3671,7 +3859,7 @@ func preflightAttachmentProcessorCompletion(
 		       processor_profile, attempt, max_attempts, owner_id,
 		       owner_generation, lease_expires_at, retry_at,
 		       result_code, result_digest, result_owner_id,
-		       result_lease_expires_at, expires_at, transaction_timestamp()
+		       result_lease_expires_at, expires_at, clock_timestamp()
 		from public.attachment_processor_jobs
 		where processor_job_id = $1
 		  and (
@@ -3679,7 +3867,7 @@ func preflightAttachmentProcessorCompletion(
 			  and owner_id = $2
 			  and owner_generation = $3
 			  and lease_expires_at = $4
-			  and lease_expires_at > transaction_timestamp()
+			  and lease_expires_at > clock_timestamp()
 			  and attempt = $5)
 			or processor_state in ('retry_wait', 'succeeded', 'rejected', 'expired')
 		  )`,
@@ -3707,7 +3895,7 @@ func loadAttachmentProcessorJob(
 		       processor_profile, attempt, max_attempts, owner_id,
 		       owner_generation, lease_expires_at, retry_at,
 		       result_code, result_digest, result_owner_id,
-		       result_lease_expires_at, expires_at, transaction_timestamp()
+		       result_lease_expires_at, expires_at, clock_timestamp()
 		from public.attachment_processor_jobs
 		where processor_job_id = $1`
 	if forUpdate {
@@ -3888,6 +4076,7 @@ func commitAttachmentProcessorResult(
 	upload attachmentProcessorUploadSnapshot,
 	usage attachments.QuotaUsage,
 	quotaVersion int64,
+	publicationCommand []byte,
 ) (attachments.ProcessorCompletionResult, error) {
 	processorState, uploadState, err := attachmentProcessorCompletionStates(input, job)
 	if err != nil {
@@ -3901,27 +4090,9 @@ func commitAttachmentProcessorResult(
 		if quotaVersion == math.MaxInt64 {
 			return attachments.ProcessorCompletionResult{}, attachments.ErrQuotaOverflow
 		}
-		physicalDelta := int64(0)
-		sourceInserted, err := ensureAttachmentBlob(ctx, tx, input.Result.Source)
-		if err != nil {
-			return attachments.ProcessorCompletionResult{}, err
-		}
-		if sourceInserted {
-			physicalDelta = input.Result.Source.SizeBytes
-		}
-		if input.Result.HasPreview {
-			previewInserted, err := consumeBlobPublicationForBlobObject(
-				ctx, tx, input.Result.Preview.Blob, input.PreviewPublicationIntent,
-			)
-			if err != nil {
-				return attachments.ProcessorCompletionResult{}, err
-			}
-			if previewInserted {
-				if physicalDelta > math.MaxInt64-input.Result.Preview.Blob.SizeBytes {
-					return attachments.ProcessorCompletionResult{}, attachments.ErrQuotaOverflow
-				}
-				physicalDelta += input.Result.Preview.Blob.SizeBytes
-			}
+		var physicalDelta int64
+		if err := tx.QueryRow(ctx, `select public.record_processor_publication_finish($1)`, publicationCommand).Scan(&physicalDelta); err != nil {
+			return attachments.ProcessorCompletionResult{}, mapBlobPublicationWriteError("finish processor publication", err)
 		}
 		nextUsage, err = usage.SolidifyReservation(
 			upload.upload.reservedSizeBytes,
@@ -3929,9 +4100,6 @@ func commitAttachmentProcessorResult(
 			physicalDelta,
 		)
 		if err != nil {
-			return attachments.ProcessorCompletionResult{}, err
-		}
-		if err := commitCleanAttachmentProcessorUpload(ctx, tx, upload, input.Result); err != nil {
 			return attachments.ProcessorCompletionResult{}, err
 		}
 		updateQuota = true
@@ -4052,11 +4220,12 @@ func verifyAttachmentProcessorBlob(
 	var objectVersion string
 	var sizeBytes int64
 	var backendKind attachments.BackendKind
+	var namespaceID string
 	err := tx.QueryRow(ctx, `
-		select sha256_digest, object_version, size_bytes, backend_kind
+		select sha256_digest, object_version, size_bytes, backend_kind, coalesce(namespace_id::text, '')
 		from public.blob_objects
 		where blob_key = $1`, object.Key).Scan(
-		&digest, &objectVersion, &sizeBytes, &backendKind,
+		&digest, &objectVersion, &sizeBytes, &backendKind, &namespaceID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return attachments.ErrAttachmentConflict
@@ -4066,7 +4235,7 @@ func verifyAttachmentProcessorBlob(
 	}
 	if len(digest) != sha256.Size || !bytes.Equal(digest, object.SHA256[:]) ||
 		objectVersion != object.ObjectVersion || sizeBytes != object.SizeBytes ||
-		backendKind != object.BackendKind {
+		backendKind != object.BackendKind || namespaceID != object.NamespaceID {
 		return attachments.ErrAttachmentConflict
 	}
 	return nil
@@ -4098,54 +4267,6 @@ func readAttachmentProcessorQuotaAccount(
 		return attachments.QuotaUsage{}, attachments.ErrInvalidQuotaUsage
 	}
 	return usage, nil
-}
-
-func commitCleanAttachmentProcessorUpload(
-	ctx context.Context,
-	tx attachmentTx,
-	upload attachmentProcessorUploadSnapshot,
-	result attachments.ProcessorResult,
-) error {
-	var previewBlobKey, previewObjectVersion, previewMediaType any
-	var previewSizeBytes any
-	if result.HasPreview {
-		previewBlobKey = result.Preview.Blob.Key
-		previewObjectVersion = result.Preview.Blob.ObjectVersion
-		previewMediaType = result.Preview.MediaType
-		previewSizeBytes = result.Preview.Blob.SizeBytes
-	}
-	updated, err := tx.Exec(ctx, `
-		update public.record_attachments
-		set attachment_state = $4, blob_key = $5, blob_object_version = $6,
-		    preview_blob_key = $7, preview_blob_object_version = $8,
-		    preview_media_type = $9, preview_size_bytes = $10,
-		    updated_at = transaction_timestamp()
-		where project_id = $1 and attachment_id = $2 and draft_id = $3
-		  and attachment_state = $11
-		  and blob_key is null and blob_object_version is null
-		  and preview_blob_key is null and preview_blob_object_version is null
-		  and preview_media_type is null and preview_size_bytes is null`,
-		upload.upload.projectID,
-		upload.upload.attachmentID,
-		upload.upload.originDraftID,
-		attachments.UploadStateAvailable,
-		result.Source.Key,
-		result.Source.ObjectVersion,
-		previewBlobKey,
-		previewObjectVersion,
-		previewMediaType,
-		previewSizeBytes,
-		attachments.UploadStateQuarantined,
-	)
-	if err != nil {
-		return mapAttachmentWriteError("commit clean attachment processor result", err)
-	}
-	if updated.RowsAffected() != 1 {
-		return attachments.ErrAttachmentConflict
-	}
-	return updateAttachmentUploadStateOnly(
-		ctx, tx, upload.upload, attachments.UploadStateAvailable,
-	)
 }
 
 func updateAttachmentProcessorJobResult(
@@ -4235,11 +4356,13 @@ func loadAttachmentProcessorUpload(
 		       attachment.attachment_state, attachment.record_id, attachment.draft_id,
 		       attachment.blob_key, attachment.blob_object_version,
 		       attachment.preview_blob_key, attachment.preview_blob_object_version,
-		       attachment.preview_media_type, attachment.preview_size_bytes
+		       attachment.preview_media_type, attachment.preview_size_bytes, draft.record_id
 		from public.attachment_uploads as upload
 		join public.record_attachments as attachment
 		  on attachment.project_id = upload.project_id
 		 and attachment.attachment_id = upload.attachment_id
+		left join public.record_drafts as draft
+		  on draft.project_id = attachment.project_id and draft.draft_id = attachment.draft_id
 		where upload.project_id = $1
 		  and upload.upload_id = $2
 		  and upload.attachment_id = $3`
@@ -4277,6 +4400,7 @@ func loadAttachmentProcessorUpload(
 		&snapshot.previewObjectVersion,
 		&snapshot.previewMediaType,
 		&snapshot.previewSizeBytes,
+		&snapshot.upload.recordID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return attachmentProcessorUploadSnapshot{}, attachments.ErrAttachmentConflict
@@ -4291,15 +4415,14 @@ func loadAttachmentProcessorUpload(
 		return attachmentProcessorUploadSnapshot{}, attachments.ErrAttachmentConflict
 	}
 	snapshot.upload.attachmentUploadRoute = route
-	snapshot.upload.recordID = attachmentRecordID
 
 	part, err := readAttachmentUploadPart(ctx, tx, route.uploadID)
 	if err != nil {
 		return attachmentProcessorUploadSnapshot{}, err
 	}
 	snapshot.source = attachments.BlobObject{
-		Key: part.Key, SHA256: part.SHA256, ObjectVersion: part.VersionID,
-		SizeBytes: part.SizeBytes,
+		Key: part.Version.Key, SHA256: part.Version.SHA256, ObjectVersion: part.Version.VersionID,
+		SizeBytes: part.Version.SizeBytes, NamespaceID: part.NamespaceID,
 	}
 	switch transport {
 	case attachments.TransportKindLocal:
@@ -4357,6 +4480,7 @@ func scanAttachmentProcessorClaim(row pgx.Row) (attachments.ProcessorClaim, erro
 		&claim.OwnerGeneration,
 		&claim.LeaseExpiresAt,
 		&claim.ExpiresAt,
+		&claim.DraftID, &claim.Source.NamespaceID,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return attachments.ProcessorClaim{}, pgx.ErrNoRows
@@ -4376,74 +4500,12 @@ func scanAttachmentProcessorClaim(row pgx.Row) (attachments.ProcessorClaim, erro
 	return claim, nil
 }
 
-func ensureAttachmentBlob(ctx context.Context, tx attachmentTx, object attachments.BlobObject) (bool, error) {
-	if _, err := tx.Exec(ctx, `lock table public.blob_objects in row exclusive mode`); err != nil {
-		return false, fmt.Errorf("lock Blob metadata for publication: %w", err)
-	}
-	return ensureAttachmentBlobLocked(ctx, tx, object)
-}
-
-// ensureAttachmentBlobLocked requires the caller to hold the Blob table's
-// publication lock until its transaction commits.
-func ensureAttachmentBlobLocked(ctx context.Context, tx attachmentTx, object attachments.BlobObject) (bool, error) {
-	activeDeletion, err := activeBlobGCDeletionExists(ctx, tx, object.Key, object.ObjectVersion)
-	if err != nil {
-		return false, err
-	}
-	if activeDeletion {
-		return false, attachments.ErrBlobGCProtected
-	}
-	inserted, err := tx.Exec(ctx, `
-		insert into public.blob_objects (
-			blob_key, sha256_digest, object_version, size_bytes, backend_kind
-		)
-		select $1, $2, $3, $4, $5
-		where not exists (
-			select 1 from public.blob_gc_deletions as deletion
-			where deletion.blob_key = $1 and deletion.object_version = $3
-			  and deletion.deletion_state <> 'completed'
-		)
-		on conflict (blob_key) do nothing`,
-		object.Key,
-		object.SHA256[:],
-		object.ObjectVersion,
-		object.SizeBytes,
-		object.BackendKind,
-	)
-	if err != nil {
-		return false, mapAttachmentWriteError("insert attachment Blob metadata", err)
-	}
-	if inserted.RowsAffected() == 1 {
-		return true, nil
-	}
-	if inserted.RowsAffected() != 0 {
-		return false, attachments.ErrAttachmentConflict
-	}
-	activeDeletion, err = activeBlobGCDeletionExists(ctx, tx, object.Key, object.ObjectVersion)
-	if err != nil {
-		return false, err
-	}
-	if activeDeletion {
-		return false, attachments.ErrBlobGCProtected
-	}
-	var digest []byte
-	var objectVersion string
-	var sizeBytes int64
-	var backendKind attachments.BackendKind
-	if err := tx.QueryRow(ctx, `
-		select sha256_digest, object_version, size_bytes, backend_kind
-		from public.blob_objects
-		where blob_key = $1`, object.Key).Scan(&digest, &objectVersion, &sizeBytes, &backendKind); err != nil {
-		return false, fmt.Errorf("read existing attachment Blob metadata: %w", err)
-	}
-	if !bytes.Equal(digest, object.SHA256[:]) || objectVersion != object.ObjectVersion ||
-		sizeBytes != object.SizeBytes || backendKind != object.BackendKind {
-		return false, attachments.ErrAttachmentConflict
-	}
-	return false, nil
-}
-
-func activeBlobGCDeletionExists(
+// activeBlobDeletionExists is read after the caller's Blob/part publication
+// table lock, in a fresh statement. Ordinary publication cleanup and durable GC
+// both fence new references. An expired cleanup lease permits takeover, not
+// publication; only completed cleanup releases that fence. Published intents
+// remain writable so their owning transaction can atomically consume them.
+func activeBlobDeletionExists(
 	ctx context.Context,
 	tx attachmentTx,
 	blobKey string,
@@ -4455,8 +4517,13 @@ func activeBlobGCDeletionExists(
 			select 1 from public.blob_gc_deletions as deletion
 			where deletion.blob_key = $1 and deletion.object_version = $2
 			  and deletion.deletion_state <> 'completed'
+		) or exists(
+			select 1 from public.blob_publication_intents as publication
+			where publication.blob_key = $1
+			  and (publication.object_version is null or publication.object_version = $2)
+			  and publication.publication_state in ('cleanup_claimed', 'retry_wait')
 		)`, blobKey, objectVersion).Scan(&active); err != nil {
-		return false, fmt.Errorf("check active Blob GC deletion fence: %w", err)
+		return false, fmt.Errorf("check active Blob deletion fence: %w", err)
 	}
 	return active, nil
 }
@@ -4509,7 +4576,7 @@ func equalOptionalAttachmentRecordID(left, right *string) bool {
 
 func mapAttachmentWriteError(operation string, err error) error {
 	var postgresError *pgconn.PgError
-	if errors.As(err, &postgresError) && (postgresError.Code == "23503" || postgresError.Code == "23505" || postgresError.Code == "23514") {
+	if errors.As(err, &postgresError) && (postgresError.Code == "23503" || postgresError.Code == "23505" || postgresError.Code == "23514" || postgresError.Code == "55000" || postgresError.Code == "P0002") {
 		return fmt.Errorf("%w: %s", attachments.ErrAttachmentConflict, operation)
 	}
 	return fmt.Errorf("%s: %w", operation, err)

@@ -48,8 +48,12 @@ const ENABLED_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   portability: true,
 }
 
+// Production-format id (usr_ + 24 lowercase hex); the record cleanup consumer
+// rejects any other shape before it connects.
+const E2E_USER_ID = 'usr_0e2e0000000000000000e2e0'
+
 const AUTHENTICATED_USER = {
-  user_id: 'u_e2e',
+  user_id: E2E_USER_ID,
   username: 'e2e-admin',
   role: 'admin',
   display_name: 'E2E Admin',
@@ -296,7 +300,7 @@ const COMMAND_AUDIT_RESPONSE: CommandAuditListResponse & {
     sensitivity: 'sensitive',
     outcome: 'succeeded',
     actor: {
-      user_id: 'u_e2e',
+      user_id: E2E_USER_ID,
       username: 'e2e-admin',
       display_name: 'E2E Admin',
     },
@@ -1471,6 +1475,7 @@ function comparisonEvaluateFixture(
     items: [
       {
         snapshot_id: 'evs_cmpleft',
+        source_record_id: 'rec_cmpleft',
         canonical_hash: '11'.repeat(32),
         kind: 'monitoring.host',
         schema_version: 1,
@@ -1478,6 +1483,7 @@ function comparisonEvaluateFixture(
       },
       {
         snapshot_id: 'evs_cmpright',
+        source_record_id: 'rec_cmpright',
         canonical_hash: '22'.repeat(32),
         kind: 'monitoring.host',
         schema_version: 1,
@@ -1543,6 +1549,7 @@ export function comparisonWorkbenchProfile(options: {
       items: [
         {
           snapshot_id: 'evs_cmpleft',
+          source_record_id: 'rec_cmpleft',
           canonical_hash: '11'.repeat(32),
           kind: 'command.audit',
           schema_version: 1,
@@ -1557,6 +1564,7 @@ export function comparisonWorkbenchProfile(options: {
         },
         {
           snapshot_id: 'evs_cmpright',
+          source_record_id: 'rec_cmpright',
           canonical_hash: '22'.repeat(32),
           kind: 'command.audit',
           schema_version: 1,
@@ -1665,7 +1673,7 @@ export function comparisonWorkbenchProfile(options: {
   }
 
   const saved: RecordMutationResult = {
-    record_id: 'rec_cmpsaved01',
+    record_id: 'rec2_00000000000000000000000000000001',
     revision_id: 'rrv_cmpsaved01',
     revision_no: 1,
     lock_version: 1,
@@ -1720,7 +1728,7 @@ export function comparisonWorkbenchProfile(options: {
         [apiRouteKey('POST', '/api/records')]: {
           status: 200,
           body: saved,
-          expectedBodyKeys: ['record_id', 'draft_id', 'draft_etag', 'comparison_intent'],
+          expectedBodyKeys: ['record_id', 'draft_id', 'draft_etag', 'comparison_intent', 'allocation'],
         },
       }
       : {}),

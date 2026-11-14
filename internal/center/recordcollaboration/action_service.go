@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -92,7 +93,7 @@ type ActionMutationResult struct {
 }
 
 func (result ActionMutationResult) Validate() error {
-	if ValidateActionID(result.ActionID) != nil || !validRecordID(result.RecordID) ||
+	if ValidateActionID(result.ActionID) != nil || !recordidentity.IsValid(result.RecordID) ||
 		result.Version == 0 || result.Version > MaxActionVersion ||
 		!validActionStatus(result.Status) || !validActionMutationKind(result.EventKind) ||
 		result.ChangedAt.IsZero() {
@@ -102,7 +103,7 @@ func (result ActionMutationResult) Validate() error {
 }
 
 func (command ActionCommand) Validate() error {
-	if !validActionMutationKind(command.Kind) || !validRecordID(command.RecordID) ||
+	if !validActionMutationKind(command.Kind) || !recordidentity.IsValid(command.RecordID) ||
 		ValidateActionID(command.ActionID) != nil || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
 		command.RecordLockVersion == 0 || command.AuthorizationEpoch == 0 ||
 		command.Actor.ProjectID != recordauth.ProjectIDDefault || command.Idempotency.Key.ProjectID != recordplatform.ProjectIDDefault ||
@@ -146,7 +147,7 @@ type ActionReadCommand struct {
 }
 
 func (command ActionReadCommand) Validate() error {
-	if !validRecordID(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
+	if !recordidentity.IsValid(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
 		command.RecordLockVersion == 0 || command.AuthorizationEpoch == 0 || command.Limit == 0 || command.Limit > 100 {
 		return ErrInvalidActionRequest
 	}
@@ -196,7 +197,7 @@ func (service *ActionService) ReopenAction(ctx context.Context, request ActionCo
 
 func (service *ActionService) ListActions(ctx context.Context, request ActionListRequest) ([]ActionRecord, error) {
 	if ctx == nil || service == nil || nilActionDependency(service.current) || nilActionDependency(service.store) ||
-		!validRecordID(request.RecordID) || request.Limit == 0 || request.Limit > 100 {
+		!recordidentity.IsValid(request.RecordID) || request.Limit == 0 || request.Limit > 100 {
 		return nil, ErrInvalidActionRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
@@ -256,7 +257,7 @@ func (service *ActionService) commit(
 	outboxTTL time.Duration,
 ) (ActionMutationResult, error) {
 	if ctx == nil || service == nil || nilActionDependency(service.current) || nilActionDependency(service.store) ||
-		!validActionMutationKind(kind) || !validRecordID(recordID) ||
+		!validActionMutationKind(kind) || !recordidentity.IsValid(recordID) ||
 		(kind != ActionMutationCreate && (ValidateActionID(actionID) != nil || !IsIncrementableActionVersion(expectedVersion))) {
 		return ActionMutationResult{}, ErrInvalidActionRequest
 	}

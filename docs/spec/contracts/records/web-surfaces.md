@@ -38,11 +38,29 @@
 
 - `globalRecordSearch.test.ts`：限额、服务端关键词匹配、canonical 末位链接、成功空结果与失败结果区分。
 - `GlobalSearch.test.tsx`：独立来源完成/失败保留、未提交与真实空结果、输入变化/清空/能力变化使迟到结果失效、Enter 不激活旧查询及键盘操作。
-- `recordsTransportArchitectureContract.test.ts` 的 `EXPECTED_EXPORTS` 必须包含 `searchRecords`；fresh build 后 `bundle:check` 证明 entry 不含 records transport。
+- `recordsTransportArchitectureContract.test.ts` 检查 shell 的 eager-import 边界；transport 的请求行为由实际 API 测试覆盖，不以导出名或依赖列表快照代替。fresh build 后 `bundle:check` 检查 entry 不含 records transport。
+
+## 浏览器草稿持久失效
+
+- `draftBuffer.ts` 使用 IndexedDB version 2；正文仍在 `unsynced`，用户 generation、永久 record tombstone、已应用事件身份及每个 user/browser cursor 在 `cleanup`。生产不可退回内存存储；内存实现只供显式注入的测试使用。
+- workspace 打开时捕获用户、真实 record ID（独立新草稿无 record ID）、用户与记录各自的 durable generation，先完成普通缓冲的全库 24 小时过期扫描，再恢复缓冲。未决发布 envelope 不因缓冲 TTL 自动删除，必须先查询原请求结果。所有保存、失败回写、切换与卸载分支传递原 scope，不能在迟到写入时重新申请有效 scope。单条恢复的过期判断与删除也在同一事务内，不可用一次旧读取删除后来写入的新缓冲。
+- 每次写入与 generation/tombstone 检查同属一个事务。cleanup event 的版本为 1，cursor/epoch 是正整数十进制字符串，按 bigint 精确比较；禁止经 JS Number。事件的 operation/record/epoch/cursor 身份不可变，重复应用幂等，cursor 不倒退。
+- 同一个 readwrite 事务写 tombstone、删除该用户该记录的全部缓冲并推进 cursor。只有 `transaction.oncomplete` 才成功；abort/error 不得当成已清理、不得据此 ack。tombstone 跨 reload 和 logout 保留，旧 tab 的 scope 不能复活正文。新建草稿的 subject-prefill key 不是 record 身份，不因其他记录 cleanup 删除。
+- 显式 logout 原子推进该用户 generation 并删除其缓冲，其他用户保持。失败显示可重试的本地清理故障，并在成功前阻止新 login；不会伪称清理成功。401 只结束会话身份，不删除本地草稿、不推进 durable generation。迟到会话刷新不能恢复已退出身份。
+- 启动 reconcile 对已确认无权或不存在的普通记录返回 invalidate：同步关闭本地工作区、先清比较重试元数据，再原子推进该记录 generation 并删缓冲；不捏造 purge event 或永久 tombstone。待创建目标通过 allocation 归属核对，不能因 root 尚不存在就清除未决发布。allocation、连续性或 read fence 无法确定时返回 unavailable，不据此 invalidate。后来重新授权可取得新 scope，但旧 scope 不能回写；真实 cleanup tombstone 不因 reconcile 或重新登录解除。
+- cleanup consumer 串行应用事件，先同步关闭同 tab 工作区并通过 BroadcastChannel 通知其他 tab，sessionStorage 清除成功后才提交 IndexedDB cursor；任何一步失败均不 ack。普通断线只停止同步并显示可重试故障，不删除草稿。401 暂停访问并保留未决发布及比较重试身份，同用户重新登录后按原请求恢复；显式 logout、切换用户或来源失效按各自清理规则处理。
+- 普通新建、证据采集与比较另存取得 allocation 后，立即将目标 record ID 绑定到当前工作区的清理监听；恢复持久请求时同样绑定。cleanup 先于异步绑定到达时，后续绑定也必须拒绝恢复旧内容。目标清理关闭已打开标签页中的标题、正文、材料与重试入口，并使迟到结果失效；不能仅删除持久缓冲而保留内存中的未决请求。
+- `GET /api/records/client-cleanup?browser_id=…&cursor=…` 使用同源 WebSocket；server session 决定 user，周期重验 session、每次发送及 ack 前再次重验，写入有界。`POST /api/records/client-cleanup/reconcile` 接收 `{browser_id,record_ids,allocation_references?}`，其中 allocation reference 为 `{record_id,allocation_id}`，两类合计每批最多 100 项，拒绝重复或矛盾归属。成功响应返回互斥且完整的 `allowed` / `pending` / `invalidate`；pending 只登记 cleanup 元数据，不授予读取记录权限。缺少 allocation 的未决旧版目标不作为普通 record ID 登记，待原请求完成重放后再处理。
+- `browser_id` 是当前 document 内按用户隔离的身份，不从 sessionStorage 继承。新标签页、opener 复制页和 reload 各自生成新身份，启动时先 reconcile 全部本地已知目标，再连接无旧 cursor 的事件流；同 document 内停止/重启复用当前身份与 durable cursor，未知 cursor 协调生成的身份也成为当前身份。比较重试 envelope 仍在各 tab 的 sessionStorage 中，因此不能共用 opener 的 receipt 来代替复制页自己的清理与 ack。
+- WebSocket server frame 为 `{type:"cleanup",event:{version:1,cursor,operation_id,record_id,cleanup_epoch,scopes}}`；client frame 为 `{type:"ack",ack:{cursor,operation_id,record_id,cleanup_epoch}}`。同一连接一次只发送一个未确认事件，四字段必须完整匹配当前事件及持久 target。服务端先重放最早未确认事件，不因客户端声称更大 cursor 而跳过丢失 ack 的事件。未知或不属于该 user/browser 的 cursor 返回 `{type:"reconcile_required"}`；客户端重新协调全部已知本地目标并建立无旧 cursor 的 browser 身份，不静默跳过。
+- 存储协议的实际 IndexedDB 验证不替代服务端事件、target/receipt、在线 consumer 与 comparison 工作台的端到端验收。allocation lookup 本身不证明 APP 回滚后的连续性，unknown recovery 仍须由受信恢复与离线准入关闭；pending 登记 → 真实出生 → V2 签发 → cleanup event 仍需真实整合验收。永久删除 HTTP 保持关闭。
 
 ## 草稿与比较 transport
 
 - `CreateRecordDraftInput` 是关闭联合：新记录草稿只发送 `payload`，已有记录草稿必须同时发送 `record_id` 与 `base_revision_id`；不得在 TypeScript contract 中强迫新草稿伪造空 ID，也不得允许两个 routing fields 只出现一个。
+- 新记录身份由 `POST /api/records/allocations` 分配，浏览器不得随机生成或选择认证域。普通发布和带 evidence 的新建在首次 create HTTP 前，将 allocation、publication key、draft ID/ETag、完整请求及 digest 写入本用户的持久缓冲。丢响应或 reload 先恢复原请求，再考虑自动保存、已消费 draft 或 intent TTL；未知结果不得换 key、换 allocation 或覆盖请求。显式放弃只清理本地重试状态，不宣称服务端请求未提交。已确认发布后再编辑必须使用新的发布身份。
+- 新建工作区先读取本用户的持久 evidence reservation，再允许采集或发布；读取失败保持不可用并提示刷新，不把未知状态当成空预留。reload 恢复未决提示与放弃入口，已绑定结果继续复用；已清理或丢失的绑定不能静默换一次 allocation。预留确认、发布准备及放弃操作串行，进行中阻止重复提交。
+- 采集弹窗中的预留失败只显示一个可操作提示；成功放弃清除该提示和旧采集错误，焦点回到弹窗内的采集或来源控件。关闭弹窗后不再显示已经处理的错误。未决发布重试保留键盘操作位置，放弃后焦点回到发布控件。
 - 已有记录发布新修订时，证据不在草稿 payload 中：`createRecordRevision` 必须按基准修订 `evidence_snapshot_ids` 的原顺序逐项发送 `evidence_items: [{ existing_snapshot_id }]`（无证据时为空数组），否则后端会把新修订证据置空；本次新采集的证据按加入顺序以 `{ capture_intent_id }` 追加在其后。新记录没有采集证据时不发送该字段，有时发送 `record_id`（首次预览时服务端预分配）与非空 `evidence_items: [{ capture_intent_id }]`；比较另存不发送该字段；恢复历史修订由后端重建证据。
 - 已有记录编辑以加载时（或上次发布后）的记录头为编辑基准，用于创建草稿与发布的 `base_revision_id`、锁版本、授权代次和证据；后台重新校验与冲突读取只更新展示，较早发出的记录读取晚到时丢弃。正式发布或已有记录草稿创建遇到修订冲突（`409 record_revision_conflict`，无论是否带 recovery，包括只有锁版本/授权代次推进的情况）时，工作区读取服务端当前头作为待确认头，解决器的服务端内容绑定这同一份快照；读取失败（非撤销）时提示稍后重试，不打开无法确认的解决器。只有用户在解决器中确认后它才成为确认头：下一次保存对同一草稿（ID 不变，附件归属随之保留）发送带 `If-Match` 的 `PATCH { payload, base_revision_id: <确认头> }`，无草稿时以确认头创建；发布按确认头的基准、锁版本、授权代次与证据提交。确认头不被后台刷新替换，头再变由服务端 409 重新打开解决器；关闭冲突或草稿 ETag 冲突不改编辑基准。保存进入冲突或失败后，发布不得再补存一次绕过解决器；任一冲突落地后（包括工作区已卸载、不再显示解决器时）暂停所有服务端保存（含定时器已触发、仍在保存链上排队的自动保存），本地缓冲照常写入；解决、关闭冲突或继续编辑后恢复，并重新排定一次自动保存；草稿 ETag 冲突替换解决器内容时清除待确认头，草稿合并不得顺带确认用户未看到的记录头。
 - Records 草稿 PATCH 原样发送响应中的 `If-Match: <draft-etag>`，不得套用 legacy metadata helper 的额外引号；formal mutation 使用独立 `Idempotency-Key`。permanent-delete execute 的 `DeletionRequestTokenV1` 是唯一 `Idempotency-Key`，JSON body 只能含 `reservation_id`。
@@ -50,6 +68,9 @@
 - 能力门禁先于 URL 解析与取数。缺少 state 是正常空篮；invalid 是损坏链接，unknown_version 是不支持版本，不能混成同一故障。显式传入 items 的比较入口始终 fixed，即使同时有多个 subjects，也不能丢弃历史 record_id/revision_id 改为候选模式。
 - fixed 篮唯一持久状态是 URL；空篮使用无 state URL，parser 不接受空 fixed 数组。支持添加、移除、替换和清空，上限 6 项，超限明确拒绝而非截断。身份键为 `snapshot:<id>` 或 `revision:<record_id>:<revision_id>`，不按主体去重；同一主体可有两份证据或两份修订，重复修订的新证据选择替换该项 snapshot_ids。
 - 删除基准项后选原位置下一项，没有下一项则选最后项，空篮 baseline=0。篮变化使旧评估/保存结果失效并取消或丢弃在途结果；0/1 项不 evaluate，2–6 项才使用 fixed 合同。失败和重试不丢篮。普通传输失败仍继续使用服务端签名意图，并按原有幂等协议重试。另存返回 403、404，或 422 `comparison_intent_invalid` / `comparison_intent_stale` 时，立即清除比较结果、候选和已签名意图，并禁用另存，直到下一次授权评估成功；选择篮保留。另存草稿的主体只来自当前成功的 fixed 评估：按比较项顺序收集 `vps` / `monitoring_instance` / `target`，同一 `kind+id` 只保留第一次，第一项为 primary affected。清空、添加、移除、替换、历史前进/后退或外部写入 URL 之后不得沿用上一次评估的主体；没有当前成功评估时不保留旧主体。工作台不提供主体覆盖编辑。候选模式确认前不另存，其主体只反映当前 URL 的 subjects。仅证据类型或指标的展示切换不打断已开始的另存；篮身份变化仍递增保存代次并取消在途另存。同一 digest 仍复用 `record_id` 与 `Idempotency-Key`。
+- 比较重试 envelope 使用 `houfeng.comparison-save/<encodedUserId>/<digest>`，v2 保存 user、source record IDs、allocation 请求与结果、目标 record ID、幂等 key、draft 身份、完整另存请求及 digest、用户 generation。来源采用已授权响应的 `source_record_id`（以及实际 revision 所属 record），不能猜 `subject.id`。首次发送前持久化，未知结果和 reload 复用原身份；已完成结果的自动恢复只适用于初始视图，离开篮后不得让旧结果重新出现。v1 已提交请求保留原 key 和目标用于完成结果重放，未提交旧域 ID 不创建新 root。401 不等于显式放弃；logout、换用户、source invalidate 或用户明确放弃才按对应规则清理元数据。旧 digest-only 无归属项仅删除元数据，不迁给当前用户，不触碰正文或已保存 B。
+- 比较读取、草稿创建和最终另存之间检查原捕获的来源 scope；切换用户立即清除旧标题、结论与保存状态，迟到结果不得复活。删除 A 的 cleanup 关闭依赖 A 的工作台并删除其 retry envelope，不删除独立 B 内容。存储失败必须停止发布或确认，不能退成仅内存幂等身份。
+- 比较另存的目标 B 被清理时，即使来源仍可读，也必须清除绑定 B 的重试 envelope 并终止该次另存。来源 A 的清理与目标 B 的清理各按实际身份处理，不把清理来源扩展为删除独立 B 的正文。
 
 | 条件 | 预期 |
 | --- | --- |
@@ -65,6 +86,7 @@
 ## 记录工作区版式（`/records/:id`、`/new`、`/:id/edit`、`/:id/revisions/:rid`）
 
 - 页头压缩身份：阅读 / 修订态显示标题、类型 / 业务状态 / 影响级别徽标，以及主体、负责人；阅读态另显示修订号与更新时间，修订态显示该修订的创建时间；不显示草稿同步状态，也不提供指向自身的"阅读"入口。编辑 / 新建态标题固定为"编辑运维记录 / 新建运维记录"，只在页头显示草稿同步状态（`role="status"`）。历史修订加"历史修订 #N"徽标，操作为"当前版本""横向比较"。
+- 未决发布显示被冻结请求的标题、属性与正文，并保持只读；重试沿用原请求，不能在确认结果前编辑请求。待确认的 evidence 引用显示确认中，不误报为失效或允许跳转到尚未确认的记录。
 - 主栏 + 侧栏：≥1200px 为 `minmax(0,1fr) 320px` 双栏；更窄时单栏，顺序固定为正文 → 侧栏卡片（大纲 / 材料 / 关注或属性 / 协作 / 发布）→ 行动与评论。阅读态正文占满主栏，大纲少于 2 个标题时不显示；编辑态大纲有标题即显示。源文回退解析按 CommonMark 跳过围栏代码块（闭合围栏须同字符、不短于开启围栏且其后只有空白）。正文宽表包在具名（"正文表格"）、可聚焦的滚动区域里，任务列表两条渲染路径共用 `record-task-list` 版式，只读勾选框以"已完成 / 未完成"命名。
 - 编辑态把标题与正文放在同一张编辑卡，`编辑 / 分栏 / 预览` 是 `role="toolbar"` 的 pressed 按钮组，分栏两侧等高；记录类型、业务状态、影响级别（下拉：低/中/高/严重，存储值仍为 low/medium/high/critical，既有自定义值保留为选项，页头徽标显示中文）、可见性、主体进入侧栏"属性"，负责人 / 跟进 / 参与人进入"协作"，保存原因与保存影响进入"发布"，材料卡的"管理材料"打开材料抽屉。可见性不再只改种类：切回项目内会清空角色和权限组，详见下文。
 - 导出 / 导入是页头按钮打开的 `导出记录 / 导入记录` 弹窗，面板按需懒加载，不再使用原生 `<details>`；面板不重复标题与说明文字。阅读 / 修订态材料直接列在侧栏（证据带"查看证据"），不打开只读抽屉。

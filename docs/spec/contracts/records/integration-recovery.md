@@ -55,7 +55,7 @@ CLI：
 
 - `scripts/run-records-integration.sh --profile local|s3`
 - `scripts/run-records-recovery.sh --profile local|s3 --all`
-- `scripts/test-record-platform-integration.sh postgres|pg16-catalog -- <command> [args...]`
+- `scripts/test-record-platform-integration.sh postgres|postgres-v2-locks|pg16-catalog -- <command> [args...]`
 - `scripts/test-records-s3-lifecycle.sh`
 - lifecycle helper：`records_runner_prepare_run_id`、`records_runner_verify_volume_ownership`、`records_runner_finish_evidence`、`records_runner_cleanup`
 
@@ -68,22 +68,50 @@ CLI：
 - 恰好 20 个 `CapabilityKind`：9 deletion + 7 recovery + membership/witness + backup/restore。`RequiredCapabilityKinds()` 是闭合清单。
 - 构造允许不完整（空或只有 deletion）。authority 必须成对；backup 与 restore 必须成对。nil / typed-nil / 未知 / 重复 / 版本不兼容 → `ErrInvalidCapabilityRegistry`。
 - `Evaluate`：缺行、不健康、authority 关闭 → `permanent_delete=disabled`。Encode 只允许 `kind` / `family` / `healthy` / `reason` / `version` / `permanent_delete`。禁止 `note`、Health 原文、凭据、URL、内容。
-- 生产 registry 包装已有 deletion（core / attachments / evidence / search / activity / collaboration / portability）和已存在的 recovery（core / attachments / evidence / activity）。不接线 backup/restore 编排对。markdown / comparison deletion 保持 unnamed / `missing`。
+- 生产 registry 包装已有 deletion（core / attachments / evidence / search / activity / collaboration / portability）和已存在的 recovery（core / attachments / activity）。evidence 的 authenticated maintenance recovery 尚未交付，不发布 evidence recovery readiness；不接线 backup/restore 编排对。markdown / comparison deletion 保持 unnamed / `missing`。
 - Manifest format `houfeng-record-backup/v1`。Create 先 stage database 再 objects，最后发布 manifest。未知 `min_reader_version` → `ErrUnknownManifestVersion`；篡改 completion / database digest → `ErrTamperedManifest`。失败 cutpoint 出 cleanup receipt，失败 Create 不发布 manifest。
 - Artifact kind 闭合：`postgres_dump` / `record_attachments` / `record_evidence` / `record_portability` / `manifest`。
 - Restore 顺序：空目标 → 校验 manifest/build/migration/ACL → stage → DB → objects → replay deletions → search rebuild → activity rebuild → APP ACL → verify → readiness。非空目标 → `ErrTargetNotEmpty`。不兼容 digest → `ErrIncompatibleRestore`。缺 artifact → `ErrMissingArtifact`。`PurgedKinds` 非空且目标在 replay 后仍有该 kind（或没有 `ArtifactPresence`）→ `ErrResurrectionBlocked`。重试必须换全新空目标。
+- 对 source-enrolled 部署，上述 restore 顺序不是重新准入的充分证明：独立 W2 与外部 maintenance guard 不属于 APP/attachments/signed authority 恢复单元，必须证明 source reconciliation、APP/W2 当前 generation 与 completed handoff 及 activated enrollment；W2 active 或恢复快照中的 active 均不足以单独放行。条件式 Compose 边界见 [Compose authority](../platform/compose-authority.md)。当前未提供完整 source recovery coordinator/CLI；通用 restore 缺这些真实依赖时继续 fail closed，不得用空 adapter 声称 readiness。
+- 已安装 birth lineage 时，即使恢复后 APP 保留相同 generation/key/binding，仍必须在完整离线 fence 后推进独立 W2 generation 并撤销旧 producer/proof，再做 request/checkpoint/coverage reconciliation。APP request 或 enable 行丢失不能重建 never-installed，也不能令同 key 降域。protected sticky expectation 与当前 launch/ACL manifest 必须匹配；所有新效果在连续性未知时保持关闭。该约束不承诺识别恶意 live rollback、并行 clone 或 APP/W2/control 一起回滚，完整 ceremony 与实际恢复验收仍未闭合。
 - Profile report：`houfeng-record-profile-report/v1`，字段只有 format / profile / commit / config_digest / suites / permanent_delete / missing。
-- `EncodeExternalCopies` 只输出 `scope` / `kind` / `copy_count`。
+- `EncodeExternalCopies` 只输出 `scope` / `kind` / `count_status` / `copy_count`，并按 `SurvivingCopySummary.Validate` 拒绝非闭合 scope/kind 与非法计数：known 必须为正数，unknown 只允许 `record_markdown_client/offline_browser_buffer` 且编码 `copy_count:null`。
 - 相关集成 不加 root migration。`0059` 是后续 portability owner 修复：musl 安全的 `blob_key` CHECK，不改 `0058` 原文。
 - CLI 必须调用 `recordbackup.NewService(` / `recordrestore.NewService(`，禁止 import `houfeng-record-platform-admin`。缺真实依赖时 fail-closed 为 `ErrBackupUnavailable` / `ErrRestoreUnavailable`。
 - 脚本 profile：`--profile local|s3`；Docker、`setsid` 或支持 `--default-signal` 的 `env` 缺失时，在创建 workspace/Docker 资源前 fail-closed。recovery `--all` 不重跑已知 Alpine portability-deletion 种子缺陷。capacity 默认只跑单元；`--profile` 才用 `HOUFENG_ACTIVITY_PERF_SCALE=0.001`（最少 1000 行）。browser 用 Node 22 + `$HOME/.cache/ms-playwright`（若存在）并扫描 `web/dist`。
 - 通用 PostgreSQL fixture 的每个数据目录使用上限 4 GiB 的临时 tmpfs；上限不预分配内存，container 删除后数据随之消失。完整百万行性能门禁不能借用 capacity profile 的缩放来规避空间不足，运行主机须提供足够内存/交换空间。
-- 完整 store/migrate 验证分三类依赖执行，而不是把缺失依赖记作 skip：通用 PostgreSQL lane 排除精确的 `TestPostgresIntegrationAppACLR2` 及九个 S3 store 场景；R2 交由 `postgres-validation.md` 的三个精确镜像 lane；S3 交由 `run-records-integration.sh --profile s3`。九项为原四个 `TestPostgresMinIOIntegration…`、`TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce`、`TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow`，加 `TestPostgresMinIOIntegrationAttachmentBlobGCHistoricalVersionWorkflow`、`TestPostgresMinIOIntegrationAttachmentDeletionPurgesHistoricalExactVersion` 与 `TestPostgresMinIOIntegrationImportAttachmentGCFence`。business-postgres 使用既有显式 anchor 闭集，不替代这些 MinIO 外部依赖。三类全部 RUN/PASS 才能宣称完整门禁通过，任何一类的 skip/fail 都不能豁免。完整包级运行可使用 `go test -timeout=30m`，不改变场景内部的性能预算。
+- `postgres-v2-locks` 是独立 owned 2PC/重启验收模式，固定 `postgres:16-alpine`；仅 APP 使用 runner 独占 named volume 和 `max_prepared_transactions=16`，其它三个实例仍用原 tmpfs。volume 创建、挂载与清理都核三 ownership labels；不更改普通 postgres/PG16 或生产配置。该模式拒绝父环境预填 `HOUFENG_RECORD_PLATFORM_V2_LOCKS`、`HOUFENG_RECORD_PLATFORM_APP_CONTAINER_ID`、`HOUFENG_RECORD_PLATFORM_APP_VOLUME`、`HOUFENG_RECORD_PLATFORM_APP_SYSTEM_IDENTIFIER`，由实际启动结果设置，普通模式在 child 环境显式清除四项。
+- prepared 验收只运行 `TestRecordDeletionV2PreparedLocks`，runner 明确要求该 parent RUN/PASS 且无 skip。测试必须独立核 full container ID、三 labels、host network、loopback/port、真实 data mount、system identifier、实际 prepared 配置及 worker/database/GID；坐标本身不授权 Docker 动作。四个独立 fixture 覆盖 activity/finish 与 COMMIT/ROLLBACK PREPARED，在 expiry 前成功命令并 PREPARE，实际证明 waiter 阻塞，核身份后按 full ID 重启 APP，再用 fresh pool 证明同 GID/锁与原 worker 结算。失败仅清理本 fixture 的 exact GID，不处理未知 prepared；普通 profile 不运行该 parent。
+- 完整 store/migrate 验证分三类依赖执行，而不是把缺失依赖记作 skip：通用 PostgreSQL lane 排除精确的 `TestPostgresIntegrationAppACLR2` 及十个 S3 store 场景；R2 交由 `postgres-validation.md` 的三个精确镜像 lane；S3 交由 `run-records-integration.sh --profile s3`。十项为原四个 `TestPostgresMinIOIntegration…`、`TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce`、`TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow`，加 `TestPostgresMinIOIntegrationAttachmentBlobGCHistoricalVersionWorkflow`、`TestPostgresMinIOIntegrationAttachmentDeletionPurgesHistoricalExactVersion`、`TestPostgresMinIOIntegrationImportAttachmentGCFence` 与 `TestPostgresMinIOIntegrationPublicationCleanupContract`。business-postgres 使用既有显式 anchor 闭集，不替代这些 MinIO 外部依赖。三类全部 RUN/PASS 才能宣称完整门禁通过，任何一类的 skip/fail 都不能豁免。完整包级运行可使用 `go test -timeout=30m`，不改变场景内部的性能预算。
 - S3 profile 保持原 selector，并包含 `attachments` 包及 `S3BlobStore|PostgresIntegrationAttachmentBlobGC|PostgresIntegrationAttachmentDeletion`，覆盖维护 backend、两条真实 GC consumer 和既有 shared/pin/reference/publication-exclusion 回归。报告 `suites` 与 `config_digest` 保留原六个确切 store 测试名、两个历史版本 store 测试、`TestS3BlobStoreDeleteGCVersionExactVersion`、`TestS3BlobStoreDeleteGCVersionFailsClosed` 及 `store.PostgresIntegrationAttachmentBlobGC` / `store.PostgresIntegrationAttachmentDeletion` 组。backend 组需要真实 MinIO，不能混入无外部依赖验收。
 - local selector、config material 和报告 suites 必须登记 `TestPostgresIntegrationImportAttachmentGCFence`；S3 同时登记它和 `TestPostgresMinIOIntegrationImportAttachmentGCFence`，不减少原 mandatory suites。两个顶层用例通过真实 signed authority provisioning、activation receipt、同步 heartbeat、direct constrained runtime 与真实 admission 接上 Application/Apply 和 attachment participant；仅用真实 Blob 的 Put 返回后 barrier，不包装 staging 或替换 importer/gate。固定 authority catalog role 必须由 owned fixture 创建和清理，禁止覆盖既存外来角色。矩阵与原子 quota 要求见 [删除合同](deletion-recovery.md) 与 [观察协议](../platform/delivery-primitives.md#import-的-pre-put-gc-生命周期观察)。
-- S3 成功路径也将 verbose child 运行证据输出到 stderr，stdout 保留 v1 profile JSON，`permanent_delete=disabled` 不变。归档时保留两条 stream，逐项确认原有及新增顶层和各子场景 RUN/PASS、无 skip/fail；报告 JSON 或 detector PASS 本身不是业务验收。固定 `postgres:16-alpine` 与 `minio/minio:RELEASE.2024-12-18T13-15-44Z` 的专用服务结果，不代表完整 PG/catalog、独立 S3 恢复/remap、实际恢复环境或 G1/G2 已通过。非 `go test` 的独立 local smoke 应覆盖 Put→GC completion→旧 Apply 冲突/no refs/planned→fresh Apply 成功/readback/quota 一次，不使用 test-only bridge。
+- 两个 profile 的 selector、共同 config material 与报告 suites 同时登记
+  `TestPostgresIntegrationAttachmentBlobPublicationCrashRestartLocal` 及其
+  `ReferenceFences` 顶层；既有 S3 `MinIO` selector 包含 publication crash 顶层。
+  prepared/unbound shared-object 与 bound noncurrent V1 场景放在各 backend 原
+  crash cutpoint 之后；前者须保留 refs/pins/bytes，后者须一次 RunOnce 后 retry_wait
+  且两版本 bytes 保持，不能为了 fixture 清理伪造 terminal outcome。
+  独立 local 精确子场景保留原始红绿输出，非 go-test 程序用真实受限 repository/
+  backend 证明 retained bytes 保持；local profile exit0/report 不冒充每条 child stream。
+- 两个 profile 同时登记 `TestPostgresIntegrationRevisionMutationDiscovery` 的
+  `DraftAndStaleSets`、`CertifiedCopies`、`CaptureIntentIsNotConsumed` 三个顶层，
+  selector、config material 与报告 suites 一致且不减少旧套件。真实 signed fixture
+  在同一受限只读 transaction 内验证 admission，再发现完整 draft/旧状态/认证来源，
+  不消耗 capture intent、不改变业务行；这只证明资源声明，不证明锁获取或 gate 围栏。
+  comparison 预览的 distinct 保留结果、CAS 与 incomplete 拒绝由既有
+  `TestPostgresIntegrationRecordDeletionClientAndComparison` 覆盖。
+- 本地持久 I/O 验收在 local profile 登记 namespace/guard、obligation、真实跨进程 SIGKILL/recovery、admin、共享 archive 和 revision batch 等精确顶层及关键子场景；共同 config material 与 suites 从同一 mandatory 清单登记，每项必须实际 RUN/PASS。两个 profile 都登记 `TestLocalBlobManagedNamespaceAndGuard`、`TestPostgresIntegrationLocalBlobObligationLifecycle`、processor crash 和三个 `LocalDraftContract` / `LocalDraftCleanupContract` / `LocalPublicationContract` 顶层。S3 另登记 `TestPostgresMinIOIntegrationPublicationCleanupContract`，该测试须归入真实 MinIO lane（现为十个 store 场景），不能在无 MinIO 的通用 PG lane 中以 skip 代替。实际 btrfs 证据要求 `HOUFENG_RECORDS_REQUIRE_BTRFS=1`；真实 UID/生产 binary smoke 另行验收，不用 profile 报告代证。
+- 两个 profile 还必须实际通过 `TestPostgresIntegrationLocalWriteCommitLoss` 的四种 dispatch/return
+  确认丢失与 resolve 可用/不可用场景，以及 `TestPostgresIntegrationLocalMutationAuthority`、
+  `TestPostgresIntegrationLocalPublicationRepeatableRead`。这些真实 PG/local 测试要求两个 profile
+  的 `TMPDIR` 都在 btrfs 上；local profile 另强制匿名临时 inode 打开、身份 fsync、持久登记、
+  链接后的四个进程中断切点。不存在 RUN/PASS 或出现 skip 时拒绝报告成功。
+- 两个 profile 的 required tests 同时登记 `TestPostgresIntegrationRecordDeletionV2TransactionLocks` 和 `TestPostgresIntegrationRecordDeletionV2LocalDispatch`。前者覆盖晚提交、过期新命令、savepoint/终态/creator 保护、最终效果等待和 direct-call isolation；后者以实际 key guard、operation-bound SQL 成功后的提交 barrier、真实文件/共享引用及 fresh-owner 恢复验证 late bound claim、late bind 和未 bound 拒绝。它们不替代独立 prepared/restart 或四 production binary smoke。
+- local 与 S3 都以 verbose、包级串行方式运行 child；成功或失败均将完整 child 证据输出到 stderr，stdout 保留 v1 profile JSON，`permanent_delete=disabled` 不变。归档时保留两条 stream，逐项确认原有及新增顶层和各子场景 RUN/PASS、无 skip/fail；报告 JSON 或 detector PASS 本身不是业务验收。固定 `postgres:16-alpine` 与 `minio/minio:RELEASE.2024-12-18T13-15-44Z` 的专用服务结果，不代表完整 PG/catalog、独立 S3 恢复/remap、实际恢复环境或 G1/G2 已通过。非 `go test` 的独立 local smoke 应覆盖 Put→GC completion→旧 Apply 冲突/no refs/planned→fresh Apply 成功/readback/quota 一次，不使用 test-only bridge。
+- 两个 profile 的 selector、config material 和报告 suites 登记 `TestPostgresIntegrationSourceRetirementAuthority`，包含 W1 legacy source 的精确及 project 级阻断、合法独立 record 路径和其他 source/deployment 对照；这是 source 退休局部验收，不等于 offline fence、恢复 coverage 或完整 credential handoff 通过。
 - 冻结 R1 catalog/convergence fixture 只物化 `0001…0051` 的 52 项历史迁移，运行时校验使用相同冻结源集；当前全量迁移仍由 current 合同验证。不能为了让历史 fixture 接受当前 schema 而放宽未知 managed object 拒绝规则。
 - Runner identity：`HOUFENG_RECORDS_RUN_ID` 只允许 1–80 个 `[A-Za-z0-9_.-]`；默认值来自随机 workspace basename。每个 workspace 另生成唯一 owner id。container 与 volume 必须同时带 `com.houfeng.records.runner`、`com.houfeng.records.run`、`com.houfeng.records.owner`。
+- MinIO runner 在 host network 下同时把 S3 API 与管理 console 限定为 loopback；console 使用 `--console-address 127.0.0.1:0` 分配临时端口，不依赖默认全接口监听。此固定版本日志显示配置端口 0，实际监听端口须以进程 socket 核对，不能把日志中的 0 当可连接端口。
 - Resource ownership：candidate 在 create 前登记；S3 volume 使用 owner 派生的显式 name，create 后且 mount 前核验三 labels。cleanup 再次核验三 labels；container 只按 inspect 返回的 immutable ID 删除。name collision、ownership mismatch/inspect failure均 fail-closed，不删除或挂载外来资源。禁止 prefix cleanup、prune 和历史 residue 清理。
 - Cleanup：三个 runner 共用 `scripts/lib/records-runner-lifecycle.sh`，顺序固定为 containers → volumes → workspace，并尝试完所有项目。body 非零 N 始终返回 N；body 为 0 且任一 cleanup 失败返回非零。`HOUFENG_RECORDS_KEEP_WORKSPACE=1` 仍删除 containers，只保留并打印 exact volume/workspace；required gate 必须 unset。
 - Evidence：stdout/stderr sink 必须全部 wait。skip scan 的 grep 0 → skip failure，1 → clean，2+ → evidence failure；sink/scan 失败不得 false-green，body 原非零码仍优先。

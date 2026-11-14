@@ -16,7 +16,7 @@ func testPostgresIntegrationAppACLCurrentRuntimeUpdateDrift(t *testing.T) {
 			ctx := context.Background()
 			fixture := newAppACLConvergencePostgresFixture(t, ctx)
 			migrator := fixture.openDirectRolePool(t, ctx, fixture.migrator)
-			if _, err := ConvergeAppACLCurrent(ctx, migrator, fixture.runtime, fixture.admin); err != nil {
+			if _, err := ConvergeAppACLCurrent(ctx, migrator, fixture.runtime, fixture.admin, fixture.deletionWorker); err != nil {
 				t.Fatal(err)
 			}
 			runtime := fixture.openDirectRolePool(t, ctx, fixture.runtime)

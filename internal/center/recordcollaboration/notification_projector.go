@@ -169,16 +169,13 @@ func (projector *NotificationProjector) processExternalDelivery(ctx context.Cont
 	}
 	result, err := projector.delivery.ProcessExternalDelivery(ctx, claim)
 	if err != nil {
-		if retryErr := projector.queue.RetryOutbox(ctx, claim, projector.retryAfter); retryErr != nil {
-			return errors.Join(err, retryErr)
-		}
 		return err
 	}
 	if result.Validate() != nil {
-		if retryErr := projector.queue.RetryOutbox(ctx, claim, projector.retryAfter); retryErr != nil {
-			return errors.Join(ErrInvalidExternalDeliveryResult, retryErr)
-		}
 		return ErrInvalidExternalDeliveryResult
+	}
+	if result.QueueFinalized {
+		return nil
 	}
 	switch result.Disposition {
 	case ExternalDeliveryOutboxComplete:

@@ -56,6 +56,7 @@ func TestBlobPublicationPrepareRequestBindsClosedOwnerKinds(t *testing.T) {
 		{name: "processor preview", request: BlobPublicationPrepareRequest{
 			ProjectID: "default", OwnerKind: BlobPublicationOwnerProcessorPreview,
 			OwnerID: "apj_publication1", OwnerGeneration: 7,
+			ClaimOwnerID: "processor_publication1", ClaimExpiresAt: expiresAt.Add(-time.Minute),
 			Target: testBlobPublicationTarget(), PublishExpiresAt: expiresAt,
 		}},
 		{name: "upload generation drift", wantErr: true, request: BlobPublicationPrepareRequest{

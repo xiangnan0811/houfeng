@@ -86,7 +86,6 @@ func TestEvidenceHandlerCapturePreviewAndReadMatrix(t *testing.T) {
 		},
 	}
 	handler := EvidenceWithOptions(application, EvidenceHandlerOptions{
-		NewRecordID:   func() (string, error) { return "rec_generated", nil },
 		NewSnapshotID: func() (string, error) { return "evs_httpcontract", nil },
 	})
 

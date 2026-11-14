@@ -3,6 +3,7 @@ set -euo pipefail
 
 usage() {
   printf 'usage: %s postgres -- <command> [args...]\n' "$0" >&2
+  printf '       %s postgres-v2-locks -- <command> [args...]\n' "$0" >&2
   printf '       %s pg16-catalog -- <command> [args...]\n' "$0" >&2
 }
 
@@ -14,7 +15,7 @@ fi
 
 mode=$1
 case "$mode" in
-  postgres)
+  postgres|postgres-v2-locks)
     postgres_image=postgres:16-alpine
     ;;
   pg16-catalog)
@@ -39,6 +40,24 @@ case "$mode" in
     ;;
 esac
 shift 2
+
+v2_coordinate_names=(
+  HOUFENG_RECORD_PLATFORM_V2_LOCKS
+  HOUFENG_RECORD_PLATFORM_APP_CONTAINER_ID
+  HOUFENG_RECORD_PLATFORM_APP_VOLUME
+  HOUFENG_RECORD_PLATFORM_APP_SYSTEM_IDENTIFIER
+)
+if [ "$mode" = postgres-v2-locks ]
+then
+  for coordinate in "${v2_coordinate_names[@]}"
+  do
+    if [[ -v $coordinate ]]
+    then
+      printf 'postgres-v2-locks refuses prefilled %s\n' "$coordinate" >&2
+      exit 2
+    fi
+  done
+fi
 
 script_dir=${0%/*}
 if [ "$script_dir" = "$0" ]
@@ -87,6 +106,15 @@ start_postgres() {
   name=$1
   port=$2
   password=$3
+  local -a storage_args postgres_args
+  if [ "$mode" = postgres-v2-locks ] && [ "$name" = "$app_name" ]
+  then
+    storage_args=(-v "$app_volume:/var/lib/postgresql/data")
+    postgres_args=(-c max_prepared_transactions=16)
+  else
+    storage_args=(--tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=4g)
+    postgres_args=()
+  fi
   containers+=("$name")
   docker run -d \
     --name "$name" \
@@ -94,10 +122,11 @@ start_postgres() {
     --label "com.houfeng.records.run=$records_run_id" \
     --label "com.houfeng.records.owner=$records_owner_id" \
     --network=host \
-    --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=4g \
+    "${storage_args[@]}" \
     -e POSTGRES_PASSWORD="$password" \
+    -e POSTGRES_INITDB_ARGS="--auth-local=trust --auth-host=scram-sha-256" \
     "$postgres_image" \
-    -c port="$port" -c listen_addresses=127.0.0.1 >/dev/null
+    -c port="$port" -c listen_addresses=127.0.0.1 "${postgres_args[@]}" >/dev/null
 }
 
 wait_for_postgres() {
@@ -132,6 +161,18 @@ ledger_password=$(random_password)
 witness_password=$(random_password)
 recovery_password=$(random_password)
 
+if [ "$mode" = postgres-v2-locks ]
+then
+  app_volume="houfeng-rp-v2locks-${records_run_id}-${RANDOM}${RANDOM}"
+  volumes+=("$app_volume")
+  docker volume create \
+    --label "com.houfeng.records.runner=$records_runner_kind" \
+    --label "com.houfeng.records.run=$records_run_id" \
+    --label "com.houfeng.records.owner=$records_owner_id" \
+    "$app_volume" >/dev/null
+  records_runner_verify_volume_ownership "$app_volume"
+fi
+
 start_postgres "$app_name" "$app_port" "$app_password"
 wait_for_postgres "$app_name" "$app_port"
 start_postgres "$ledger_name" "$ledger_port" "$ledger_password"
@@ -159,6 +200,28 @@ then
   exit 1
 fi
 
+child_coordinate_args=()
+for coordinate in "${v2_coordinate_names[@]}"
+do
+  child_coordinate_args+=(-u "$coordinate")
+done
+if [ "$mode" = postgres-v2-locks ]
+then
+  app_container_id=$(docker container inspect --format '{{.Id}}' "$app_name")
+  app_system_identifier=${system_identifiers%%$'\n'*}
+  if [[ ! $app_container_id =~ ^[0-9a-f]{64}$ ]] || [[ ! $app_system_identifier =~ ^[0-9]+$ ]]
+  then
+    printf 'postgres-v2-locks could not identify the APP container and PostgreSQL system\n' >&2
+    exit 1
+  fi
+  child_coordinate_args+=(
+    "HOUFENG_RECORD_PLATFORM_V2_LOCKS=1"
+    "HOUFENG_RECORD_PLATFORM_APP_CONTAINER_ID=$app_container_id"
+    "HOUFENG_RECORD_PLATFORM_APP_VOLUME=$app_volume"
+    "HOUFENG_RECORD_PLATFORM_APP_SYSTEM_IDENTIFIER=$app_system_identifier"
+  )
+fi
+
 stdout_file="$workspace/child-stdout.log"
 stderr_file="$workspace/child-stderr.log"
 exec {stdout_tee_fd}> >(tee "$stdout_file")
@@ -169,6 +232,7 @@ set +e
 setsid env \
   --default-signal=INT \
   --default-signal=TERM \
+  "${child_coordinate_args[@]}" \
   HOUFENG_POSTGRES_INTEGRATION=1 \
   HOUFENG_RECORD_PLATFORM_EPHEMERAL_OWNER="$records_owner_id" \
   HOUFENG_DATABASE_URL="postgres://postgres:${app_password}@127.0.0.1:${app_port}/postgres?sslmode=disable" \
@@ -212,5 +276,14 @@ then
   final_status=0
 else
   final_status=$?
+fi
+if [ "$mode" = postgres-v2-locks ] && [ "$final_status" -eq 0 ]
+then
+  if ! grep -Eq '^=== RUN[[:space:]]+TestRecordDeletionV2PreparedLocks[[:space:]]*$' "$stdout_file" || \
+     ! grep -Eq '^[[:space:]]*--- PASS: TestRecordDeletionV2PreparedLocks \(' "$stdout_file"
+  then
+    printf 'postgres-v2-locks requires RUN/PASS evidence for TestRecordDeletionV2PreparedLocks\n' >&2
+    final_status=1
+  fi
 fi
 exit "$final_status"

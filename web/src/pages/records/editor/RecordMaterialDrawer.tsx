@@ -8,9 +8,9 @@ import type { AttachmentMetadata } from '../../../lib/types'
 import { ATTACHMENT_ACCEPT, ATTACHMENT_FORMAT_HINT } from '../attachments/attachmentFiles'
 import type { RecordAttachmentQueueStatus } from '../attachments/recordAttachments'
 import { isActiveUpload, type RecordAttachmentUploadRow } from '../attachments/useRecordAttachmentUploads'
-import { EvidenceCapturePicker, type EvidenceCaptureSubject, type PendingEvidence } from '../evidence/EvidenceCapturePicker'
+import { EvidenceCapturePicker, type EvidenceCaptureSubject, type EvidenceReservationNotice, type PendingEvidence } from '../evidence/EvidenceCapturePicker'
 import type { OtherEvidenceSourceLoaders } from '../evidence/useOtherEvidenceSource'
-import type { EvidenceCapturePreview, EvidenceCapturePreviewInput } from '../../../lib/types'
+import type { EvidenceCapturePreview, EvidenceCapturePreviewInput, RecordAllocation } from '../../../lib/types'
 import { RecordMaterialList } from './RecordMaterialList'
 
 export type RecordMaterialItem = DocumentReference & {
@@ -20,15 +20,22 @@ export type RecordMaterialItem = DocumentReference & {
   attachment?: AttachmentMetadata
   /** 元数据仍在读取。 */
   pending?: boolean
+  /** The publication is unresolved and this material has not been authorized. */
+  confirmationPending?: boolean
   /** 本次编辑新采集、尚未随发布保存的证据。 */
   unsaved?: boolean
 }
 
 export type RecordMaterialCapture = {
   recordId?: string | undefined
+  /** 新建记录首次证据预览取得的服务端预留。 */
+  allocation?: RecordAllocation | undefined
   subjects: readonly EvidenceCaptureSubject[]
   otherSources?: OtherEvidenceSourceLoaders | undefined
   requestPreview: (input: EvidenceCapturePreviewInput, signal: AbortSignal) => Promise<EvidenceCapturePreview>
+  reservationNotice?: EvidenceReservationNotice | null
+  onDiscardReservation?: (() => Promise<void>) | undefined
+  previewBlocked?: boolean
   onConfirm: (evidence: PendingEvidence) => void
   /** 发布进行中：不能加入或移除待保存证据。 */
   disabled?: boolean
@@ -177,13 +184,18 @@ export function RecordMaterialDrawer({
     <Modal open={open} onClose={onClose} title="材料与引用" size="lg">
       <div className="record-material-drawer">
         {!readOnly && tools.length > 1 ? <SegmentedControl label="添加材料" items={tools} value={activeTool ?? 'upload'} onChange={setTool} /> : null}
+        {capture?.reservationNotice && activeTool !== 'capture' ? <p className="record-upload__notice" role="status">{capture.reservationNotice.message}</p> : null}
         {!readOnly && uploads && activeTool === 'upload' ? <AttachmentUploadArea uploads={uploads} /> : null}
         {!readOnly && capture && activeTool === 'capture' ? (
           <EvidenceCapturePicker
             recordId={capture.recordId}
+            allocation={capture.allocation}
             subjects={capture.subjects}
             otherSources={capture.otherSources}
             requestPreview={capture.requestPreview}
+            reservationNotice={capture.reservationNotice ?? null}
+            onDiscardReservation={capture.onDiscardReservation}
+            previewBlocked={capture.previewBlocked ?? false}
             onConfirm={capture.onConfirm}
             disabled={capture.disabled ?? false}
           />

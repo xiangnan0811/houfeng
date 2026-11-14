@@ -6,35 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
 )
-
-const (
-	intervalTestRecordID = "rec_9a1b2c"
-	intervalTestOtherID  = "rec_7f8e9d"
-)
-
-// newRevisionCommitCandidate is a record-domain event that committed a revision,
-// which is the only kind of event that moves a record's current pointer.
-func newRevisionCommitCandidate(
-	t *testing.T,
-	eventID string,
-	recordID string,
-	revisionID string,
-	revisionNo uint64,
-	eventAt time.Time,
-) activity.CandidateEvent {
-	t.Helper()
-	candidate := newActivityCandidate(t, eventID, eventAt)
-	candidate.RecordID = recordID
-	candidate.RevisionID = revisionID
-	candidate.RevisionNo = revisionNo
-	candidate.OpensRevision = true
-	candidate.CanonicalHash = candidate.ComputeCanonicalHash()
-	return candidate
-}
 
 type revisionInterval struct {
 	revisionID string
@@ -86,12 +62,12 @@ func loadRevisionIntervals(
 // visible at the sequence where the previous one closes.
 func TestPostgresIntegrationActivityRevisionIntervalsChainAtPublishedSequences(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-
-	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	first, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_r1", intervalTestRecordID, "rrv_000001", 1, base),
-	})
+	fixture := newActivityRecordFixture(t, ctx)
+	pool := fixture.runtime
+	results := fixture.commitRevisions(t, ctx, "interval-chain", activityRecordInput(t, "First", ""), activityRecordInput(t, "Second", ""))
+	candidates := fixture.revisionCandidates(t, ctx, results)
+	recordID := results[0].RecordID
+	first, err := publishActivityTestBatch(t, ctx, pool, 1, candidates[:1])
 	if err != nil {
 		t.Fatalf("publish first revision: %v", err)
 	}
@@ -99,14 +75,12 @@ func TestPostgresIntegrationActivityRevisionIntervalsChainAtPublishedSequences(t
 		t.Fatalf("superseded = %d, want 0 for a record's first revision", first.SupersededRevisions)
 	}
 
-	second, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_r2", intervalTestRecordID, "rrv_000002", 2, base.Add(time.Hour)),
-	})
+	second, err := publishActivityTestBatch(t, ctx, pool, 1, candidates[1:])
 	if err != nil {
 		t.Fatalf("publish second revision: %v", err)
 	}
 
-	intervals := loadRevisionIntervals(t, ctx, pool, 1, intervalTestRecordID)
+	intervals := loadRevisionIntervals(t, ctx, pool, 1, recordID)
 	if len(intervals) != 2 {
 		t.Fatalf("intervals = %+v, want one per revision", intervals)
 	}
@@ -129,12 +103,12 @@ func TestPostgresIntegrationActivityRevisionIntervalsChainAtPublishedSequences(t
 
 	// The watermark where one closes and the next opens must resolve to exactly
 	// one revision, which is what a half-open interval gives.
-	current := currentRevisionAt(t, ctx, pool, 1, intervalTestRecordID, second.AssignedFrom)
-	if current != "rrv_000002" {
+	current := currentRevisionAt(t, ctx, pool, 1, recordID, second.AssignedFrom)
+	if current != results[1].RevisionID {
 		t.Fatalf("current at the handover sequence = %q, want the new revision", current)
 	}
-	current = currentRevisionAt(t, ctx, pool, 1, intervalTestRecordID, second.AssignedFrom-1)
-	if current != "rrv_000001" {
+	current = currentRevisionAt(t, ctx, pool, 1, recordID, second.AssignedFrom-1)
+	if current != results[0].RevisionID {
 		t.Fatalf("current just below the handover = %q, want the old revision", current)
 	}
 }
@@ -189,19 +163,17 @@ func currentRevisionAt(
 // in an order.
 func TestPostgresIntegrationActivityRevisionIntervalsChainWithinOneBatch(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-
-	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	result, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_b1", intervalTestRecordID, "rrv_000001", 1, base),
-		newRevisionCommitCandidate(t, "rac_b2", intervalTestRecordID, "rrv_000002", 2, base.Add(time.Minute)),
-		newRevisionCommitCandidate(t, "rac_b3", intervalTestRecordID, "rrv_000003", 3, base.Add(2*time.Minute)),
-	})
+	fixture := newActivityRecordFixture(t, ctx)
+	pool := fixture.runtime
+	results := fixture.commitRevisions(t, ctx, "interval-batch",
+		activityRecordInput(t, "First", ""), activityRecordInput(t, "Second", ""), activityRecordInput(t, "Third", ""))
+	recordID := results[0].RecordID
+	result, err := publishActivityTestBatch(t, ctx, pool, 1, fixture.revisionCandidates(t, ctx, results))
 	if err != nil {
 		t.Fatalf("publish batch: %v", err)
 	}
 
-	intervals := loadRevisionIntervals(t, ctx, pool, 1, intervalTestRecordID)
+	intervals := loadRevisionIntervals(t, ctx, pool, 1, recordID)
 	if len(intervals) != 3 {
 		t.Fatalf("intervals = %+v, want three", intervals)
 	}
@@ -219,7 +191,7 @@ func TestPostgresIntegrationActivityRevisionIntervalsChainWithinOneBatch(t *test
 		t.Fatal("the last revision in the batch must be the open one")
 	}
 	for sequence := result.AssignedFrom; sequence <= result.AssignedThrough; sequence++ {
-		if currentRevisionAt(t, ctx, pool, 1, intervalTestRecordID, sequence) == "" {
+		if currentRevisionAt(t, ctx, pool, 1, recordID, sequence) == "" {
 			t.Fatalf("no revision resolves at sequence %d", sequence)
 		}
 	}
@@ -231,18 +203,17 @@ func TestPostgresIntegrationActivityRevisionIntervalsChainWithinOneBatch(t *test
 // be mistaken for a lost write.
 func TestPostgresIntegrationActivityLateLowerRevisionDoesNotTakeThePointer(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-
-	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_l3", intervalTestRecordID, "rrv_000003", 3, base.Add(2*time.Hour)),
-	}); err != nil {
+	fixture := newActivityRecordFixture(t, ctx)
+	pool := fixture.runtime
+	results := fixture.commitRevisions(t, ctx, "interval-late",
+		activityRecordInput(t, "First", ""), activityRecordInput(t, "Second", ""), activityRecordInput(t, "Third", ""))
+	candidates := fixture.revisionCandidates(t, ctx, results)
+	recordID := results[0].RecordID
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, candidates[2:]); err != nil {
 		t.Fatalf("publish the newer revision: %v", err)
 	}
 
-	late, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_l2", intervalTestRecordID, "rrv_000002", 2, base.Add(time.Hour)),
-	})
+	late, err := publishActivityTestBatch(t, ctx, pool, 1, candidates[1:2])
 	if err != nil {
 		t.Fatalf("publish the late revision: %v", err)
 	}
@@ -253,14 +224,14 @@ func TestPostgresIntegrationActivityLateLowerRevisionDoesNotTakeThePointer(t *te
 		t.Fatalf("superseded = %d, want 1 so the skipped pointer move is visible", late.SupersededRevisions)
 	}
 
-	intervals := loadRevisionIntervals(t, ctx, pool, 1, intervalTestRecordID)
-	if len(intervals) != 1 || intervals[0].revisionID != "rrv_000003" {
+	intervals := loadRevisionIntervals(t, ctx, pool, 1, recordID)
+	if len(intervals) != 1 || intervals[0].revisionID != results[2].RevisionID {
 		t.Fatalf("intervals = %+v, want only the newer revision to hold the pointer", intervals)
 	}
 	if intervals[0].validTo != nil {
 		t.Fatal("the newer revision must stay open after a late lower one arrives")
 	}
-	if current := currentRevisionAt(t, ctx, pool, 1, intervalTestRecordID, late.AssignedThrough); current != "rrv_000003" {
+	if current := currentRevisionAt(t, ctx, pool, 1, recordID, late.AssignedThrough); current != results[2].RevisionID {
 		t.Fatalf("current = %q, want the newer revision to keep the pointer", current)
 	}
 }
@@ -269,77 +240,77 @@ func TestPostgresIntegrationActivityLateLowerRevisionDoesNotTakeThePointer(t *te
 // contradiction, and it must stop the batch rather than pick one.
 func TestPostgresIntegrationActivityRefusesTwoEventsOpeningOneRevision(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-
-	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_d1", intervalTestRecordID, "rrv_000001", 1, base),
-	}); err != nil {
+	fixture := newActivityRecordFixture(t, ctx)
+	pool := fixture.runtime
+	results := fixture.commitRevisions(t, ctx, "interval-duplicate", activityRecordInput(t, "First", ""))
+	original := fixture.revisionCandidates(t, ctx, results)[0]
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{original}); err != nil {
 		t.Fatalf("publish first: %v", err)
 	}
 
-	_, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_d2", intervalTestRecordID, "rrv_000001", 1, base.Add(time.Minute)),
-	})
+	// The source event is a real committed action. Simulate a faulty adapter
+	// claiming that this distinct event also opened the existing revision.
+	duplicate := fixture.createAction(t, ctx, results[0], "interval-duplicate-action")
+	if duplicate.RevisionID != original.RevisionID || duplicate.OpensRevision {
+		t.Fatalf("action did not refer to the existing revision: %+v", duplicate)
+	}
+	duplicate.OpensRevision = true
+	duplicate.CanonicalHash = duplicate.ComputeCanonicalHash()
+	_, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{duplicate})
 	if !errors.Is(err, ErrActivityRevisionIntervalConflict) {
 		t.Fatalf("error = %v, want a revision interval conflict", err)
 	}
 
 	// The refusal must leave nothing behind, including the event row.
-	intervals := loadRevisionIntervals(t, ctx, pool, 1, intervalTestRecordID)
+	intervals := loadRevisionIntervals(t, ctx, pool, 1, results[0].RecordID)
 	if len(intervals) != 1 {
 		t.Fatalf("intervals = %+v, want the rejected batch rolled back", intervals)
 	}
 	assertActivitySequencesAreContiguous(t, ctx, pool, 1, 1)
 }
 
-// Events that carry a revision without having created it — comments, archives —
-// must leave the pointer alone.
+// An action can refer to a revision without creating it; it must leave the
+// pointer alone.
 func TestPostgresIntegrationActivityNonCommitEventsLeaveIntervalsAlone(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-
-	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	commit := newRevisionCommitCandidate(t, "rac_n1", intervalTestRecordID, "rrv_000001", 1, base)
-
-	comment := newActivityCandidate(t, "rac_n2", base.Add(time.Minute))
-	comment.RecordID = intervalTestRecordID
-	comment.RevisionID = "rrv_000001"
-	comment.RevisionNo = 1
-	comment.CanonicalHash = comment.ComputeCanonicalHash()
-
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{commit, comment}); err != nil {
+	fixture := newActivityRecordFixture(t, ctx)
+	pool := fixture.runtime
+	results := fixture.commitRevisions(t, ctx, "interval-action", activityRecordInput(t, "First", ""))
+	commit := fixture.revisionCandidates(t, ctx, results)[0]
+	action := fixture.createAction(t, ctx, results[0], "interval-action-create")
+	if action.RevisionID != commit.RevisionID || action.OpensRevision {
+		t.Fatalf("action revision route = %+v, want the current revision without a commit", action)
+	}
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{commit, action}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 
-	intervals := loadRevisionIntervals(t, ctx, pool, 1, intervalTestRecordID)
+	intervals := loadRevisionIntervals(t, ctx, pool, 1, results[0].RecordID)
 	if len(intervals) != 1 {
 		t.Fatalf("intervals = %+v, want only the commit to open one", intervals)
 	}
 	if intervals[0].validTo != nil {
-		t.Fatal("a comment must not close the revision it was written against")
+		t.Fatal("an action must not close the revision it was written against")
 	}
 }
 
 // Records are independent: one record's revisions must not close another's.
 func TestPostgresIntegrationActivityRevisionIntervalsAreScopedPerRecord(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-
-	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_s1", intervalTestRecordID, "rrv_000001", 1, base),
-		newRevisionCommitCandidate(t, "rac_s2", intervalTestOtherID, "rrv_000101", 1, base.Add(time.Minute)),
-		newRevisionCommitCandidate(t, "rac_s3", intervalTestOtherID, "rrv_000102", 2, base.Add(2*time.Minute)),
-	}); err != nil {
+	fixture := newActivityRecordFixture(t, ctx)
+	pool := fixture.runtime
+	firstRecord := fixture.commitRevisions(t, ctx, "interval-scoped-a", activityRecordInput(t, "First", ""))
+	secondRecord := fixture.commitRevisions(t, ctx, "interval-scoped-b", activityRecordInput(t, "First", ""), activityRecordInput(t, "Second", ""))
+	candidates := append(fixture.revisionCandidates(t, ctx, firstRecord), fixture.revisionCandidates(t, ctx, secondRecord)...)
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, candidates); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 
-	first := loadRevisionIntervals(t, ctx, pool, 1, intervalTestRecordID)
+	first := loadRevisionIntervals(t, ctx, pool, 1, firstRecord[0].RecordID)
 	if len(first) != 1 || first[0].validTo != nil {
 		t.Fatalf("intervals for the untouched record = %+v, want one open", first)
 	}
-	second := loadRevisionIntervals(t, ctx, pool, 1, intervalTestOtherID)
+	second := loadRevisionIntervals(t, ctx, pool, 1, secondRecord[0].RecordID)
 	if len(second) != 2 {
 		t.Fatalf("intervals for the revised record = %+v, want two", second)
 	}
@@ -348,46 +319,100 @@ func TestPostgresIntegrationActivityRevisionIntervalsAreScopedPerRecord(t *testi
 	}
 }
 
-// A rebuild opens a new generation while the retired one's rows are still there.
-// The one-open-interval rule is per generation, so the old open row must not
-// stop the new generation from establishing its own pointer.
+// Rebuilding clears the retired generation and permits the same committed
+// source event to establish its revision pointer in the new generation.
 func TestPostgresIntegrationActivityRetiredGenerationIntervalDoesNotBlockTheNext(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-
-	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_g1", intervalTestRecordID, "rrv_000001", 1, base),
-	}); err != nil {
+	fixture := newActivityRecordFixture(t, ctx)
+	pool := fixture.runtime
+	results := fixture.commitRevisions(t, ctx, "interval-generation", activityRecordInput(t, "First", ""))
+	candidate := fixture.revisionCandidates(t, ctx, results)[0]
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{candidate}); err != nil {
 		t.Fatalf("publish into generation 1: %v", err)
 	}
-
-	if _, err := pool.Exec(ctx, `
-		update public.record_activity_projection_heads
-		set head_state = 'retired', retired_at = now()
-		where projection_generation = 1`); err != nil {
-		t.Fatalf("retire generation 1: %v", err)
+	assertActivitySequencesAreContiguous(t, ctx, pool, 1, 1)
+	repository, err := NewActivityProjectionRepository(pool)
+	if err != nil {
+		t.Fatalf("new activity repository: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		insert into public.record_activity_projection_heads
-		  (project_id, projection_generation, published_ingest_sequence, allocated_ingest_sequence)
-		values ('default', 2, 0, 0)`); err != nil {
-		t.Fatalf("open generation 2: %v", err)
+	rebuilt, err := repository.RebuildActivityProjection(ctx)
+	if err != nil || rebuilt.RetiredGeneration != 1 || rebuilt.ActiveGeneration != 2 {
+		t.Fatalf("rebuild activity projection = %+v, error %v", rebuilt, err)
 	}
-
-	// The rebuilt generation re-derives the record's history; here it reaches the
-	// same revision through a different source event, which is enough to show the
-	// two generations hold independent pointers.
-	if _, err := PublishActivityBatch(ctx, pool, 2, []activity.CandidateEvent{
-		newRevisionCommitCandidate(t, "rac_g2", intervalTestRecordID, "rrv_000001", 1, base),
-	}); err != nil {
+	if old := loadRevisionIntervals(t, ctx, pool, 1, results[0].RecordID); len(old) != 0 {
+		t.Fatalf("retired generation retained intervals after rebuild: %+v", old)
+	}
+	head, err := repository.LoadPublishedHead(ctx)
+	if err != nil || head.Generation != 2 || head.PublishedIngestSequence != 0 {
+		t.Fatalf("rebuilt activity head = %+v, error %v; want generation 2 at watermark 0", head, err)
+	}
+	if _, err := publishActivityTestBatch(t, ctx, pool, 2, []activity.CandidateEvent{candidate}); err != nil {
 		t.Fatalf("publish into generation 2: %v", err)
 	}
-
-	for _, generation := range []uint64{1, 2} {
-		intervals := loadRevisionIntervals(t, ctx, pool, generation, intervalTestRecordID)
-		if len(intervals) != 1 || intervals[0].validTo != nil {
-			t.Fatalf("generation %d intervals = %+v, want its own open row", generation, intervals)
-		}
+	assertActivitySequencesAreContiguous(t, ctx, pool, 2, 1)
+	intervals := loadRevisionIntervals(t, ctx, pool, 2, results[0].RecordID)
+	if len(intervals) != 1 || intervals[0].revisionID != results[0].RevisionID || intervals[0].validTo != nil {
+		t.Fatalf("rebuilt intervals = %+v, want the committed revision open", intervals)
 	}
+}
+
+func TestPostgresIntegrationActivityRecordRouteRecheckRejectsDrift(t *testing.T) {
+	ctx := context.Background()
+	fixture := newActivityRecordFixture(t, ctx)
+	results := fixture.commitRevisions(t, ctx, "activity-route-recheck", activityRecordInput(t, "First", ""), activityRecordInput(t, "Second", ""))
+	original := fixture.revisionCandidates(t, ctx, results)[0]
+	tests := []struct {
+		name       string
+		mutate     func(*activity.CandidateEvent)
+		incomplete bool
+	}{
+		{"missing source record", func(candidate *activity.CandidateEvent) { candidate.SourceRecordID = "" }, true},
+		{"different record", func(candidate *activity.CandidateEvent) { candidate.RecordID = "rec_different" }, true},
+		{"different source version", func(candidate *activity.CandidateEvent) { candidate.Source.Version++ }, false},
+		{"different revision", func(candidate *activity.CandidateEvent) { candidate.RevisionID = results[1].RevisionID }, false},
+		{"different actor", func(candidate *activity.CandidateEvent) {
+			actor := *candidate.Actor
+			actor.ActorID = "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
+			candidate.Actor = &actor
+		}, false},
+		{"different recorded time", func(candidate *activity.CandidateEvent) {
+			candidate.RecordedAt = candidate.RecordedAt.Add(time.Microsecond)
+		}, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := original
+			test.mutate(&candidate)
+			var err error
+			candidate.ActivityID, err = activity.NewActivityID(activityTestNamespace(), candidate.Source, candidate.EventKind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate.CanonicalHash = candidate.ComputeCanonicalHash()
+			_, err = publishActivityTestBatch(t, ctx, fixture.runtime, 1, []activity.CandidateEvent{candidate})
+			if test.incomplete {
+				if !errors.Is(err, activity.ErrIncompleteRevisionClaim) {
+					t.Fatalf("publish changed route error = %v, want incomplete revision claim", err)
+				}
+			} else {
+				var postgresError *pgconn.PgError
+				if !errors.As(err, &postgresError) || postgresError.Code != "40001" {
+					t.Fatalf("publish changed route error = %v, want source route retry", err)
+				}
+			}
+			var rows, watermark uint64
+			if err := fixture.owner.QueryRow(ctx, `select
+				(select count(*) from public.record_activity_projection),
+				(select published_ingest_sequence from public.record_activity_projection_heads where projection_generation=1)`).Scan(&rows, &watermark); err != nil {
+				t.Fatal(err)
+			}
+			if rows != 0 || watermark != 0 {
+				t.Fatalf("rejected route left %d rows and watermark %d", rows, watermark)
+			}
+		})
+	}
+	if _, err := publishActivityTestBatch(t, ctx, fixture.runtime, 1, []activity.CandidateEvent{original}); err != nil {
+		t.Fatalf("publish unchanged committed route: %v", err)
+	}
+	assertActivitySequencesAreContiguous(t, ctx, fixture.runtime, 1, 1)
 }

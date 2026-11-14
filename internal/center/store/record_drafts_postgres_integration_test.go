@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/recordauth"
@@ -19,10 +20,8 @@ const recordsPostgresDraftAuthorID = "usr_aaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestPostgresIntegrationRecordDraftConcurrentPatchHasOneExactETagWinner(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	seedRepository := newRecordsPostgresDraftRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-draft-race-seed", 1),
-	)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	seedRepository := newAdmittedCoreDraftRepository(t, fixture.openDirectRuntimePool(t, ctx, "record-draft-race-seed", 1), fixture.admissionGate)
 	original := recordsPostgresDraftPayload(t, "Original")
 	draft := createRecordsPostgresDraft(t, ctx, seedRepository, "rdf_pgrace", original)
 
@@ -49,9 +48,7 @@ func TestPostgresIntegrationRecordDraftConcurrentPatchHasOneExactETagWinner(t *t
 	outcomes := make(chan patchOutcome, len(commands))
 	start := make(chan struct{})
 	for index, command := range commands {
-		repository := newRecordsPostgresDraftRepository(
-			fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-draft-race-%d", index), 1),
-		)
+		repository := newAdmittedCoreDraftRepository(t, fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-draft-race-%d", index), 1), fixture.admissionGate)
 		command := command
 		go func() {
 			<-start
@@ -101,25 +98,16 @@ func TestPostgresIntegrationRecordDraftConcurrentPatchHasOneExactETagWinner(t *t
 
 func TestPostgresIntegrationRecordDraftReservationFiltersExistingDraftRoutingAndOperations(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-fence", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
-	recordID := "rec_pgdraftfence"
+	recordRepository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate})
+	draftRepository := newAdmittedCoreDraftRepository(t, runtimePool, fixture.admissionGate)
 
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		recordID,
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Draft fence record"),
-		"record-draft-fence-create",
-	))
+	created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Draft fence record"), "record-draft-fence-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
+	recordID := created.RecordID
 	payload := recordsPostgresDraftPayload(t, "Existing reserved draft")
 	draft, err := draftRepository.CreateDraft(ctx, records.DraftCreateCommand{
 		DraftID:        "rdf_pgdraftfence",
@@ -190,10 +178,8 @@ func TestPostgresIntegrationRecordDraftReservationFiltersExistingDraftRoutingAnd
 
 func TestPostgresIntegrationRecordDraftCheckpointRetentionUsesFiveMinuteNewestTwentySevenDays(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	repository := newRecordsPostgresDraftRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-draft-retention", 1),
-	)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	repository := newAdmittedCoreDraftRepository(t, fixture.openDirectRuntimePool(t, ctx, "record-draft-retention", 1), fixture.admissionGate)
 	original := recordsPostgresDraftPayload(t, "Retention original")
 	draft := createRecordsPostgresDraft(t, ctx, repository, "rdf_pgretention", original)
 	payloadHash := original.Hash()
@@ -272,10 +258,8 @@ func TestPostgresIntegrationRecordDraftCheckpointRetentionUsesFiveMinuteNewestTw
 
 func TestPostgresIntegrationRecordDraftConcurrentExpiredCleanupClaimsAreDisjoint(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	seedRepository := newRecordsPostgresDraftRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-draft-cleanup-seed", 1),
-	)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	seedRepository := newAdmittedCoreDraftRepository(t, fixture.openDirectRuntimePool(t, ctx, "record-draft-cleanup-seed", 1), fixture.admissionGate)
 	wantIDs := make([]string, 0, 6)
 	for index := 0; index < 6; index++ {
 		draftID := fmt.Sprintf("rdf_pgcleanup%d", index)
@@ -323,9 +307,7 @@ func TestPostgresIntegrationRecordDraftConcurrentExpiredCleanupClaimsAreDisjoint
 	outcomes := make(chan cleanupOutcome, 2)
 	start := make(chan struct{})
 	for index := 0; index < 2; index++ {
-		repository := newRecordsPostgresDraftRepository(
-			fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-draft-cleanup-%d", index), 1),
-		)
+		repository := newAdmittedCoreDraftRepository(t, fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-draft-cleanup-%d", index), 1), fixture.admissionGate)
 		go func() {
 			<-start
 			ids, err := repository.ClaimExpiredDrafts(context.Background(), 3)
@@ -336,21 +318,46 @@ func TestPostgresIntegrationRecordDraftConcurrentExpiredCleanupClaimsAreDisjoint
 
 	claimed := make([]string, 0, 6)
 	seen := make(map[string]struct{}, 6)
+	collect := func(ids []string) {
+		t.Helper()
+		if len(ids) > 3 {
+			t.Fatalf("cleanup exceeded requested batch bound: %#v", ids)
+		}
+		for _, draftID := range ids {
+			if _, exists := seen[draftID]; exists {
+				t.Fatalf("cleanup claimed %q twice", draftID)
+			}
+			seen[draftID] = struct{}{}
+			claimed = append(claimed, draftID)
+		}
+	}
 	for range 2 {
 		outcome := waitForRecordPlatformResult(t, outcomes, "concurrent expired draft cleanup")
 		if outcome.err != nil {
 			t.Fatalf("ClaimExpiredDrafts() error = %v", outcome.err)
 		}
-		if len(outcome.ids) != 3 {
-			t.Fatalf("ClaimExpiredDrafts() = %#v, want three IDs", outcome.ids)
+		collect(outcome.ids)
+	}
+	if len(claimed) == 0 {
+		t.Fatal("both cleanup workers left every eligible draft untouched")
+	}
+	var remainingDrafts, remainingCheckpoints int
+	if err := fixture.db.QueryRow(ctx, `select
+		(select count(*) from public.record_drafts where draft_id=any($1::text[])),
+		(select count(*) from public.record_draft_checkpoints where draft_id=any($1::text[]))`, wantIDs).Scan(&remainingDrafts, &remainingCheckpoints); err != nil {
+		t.Fatal(err)
+	}
+	if remainingDrafts != len(wantIDs)-len(claimed) || remainingCheckpoints != remainingDrafts {
+		t.Fatalf("concurrent cleanup was not atomic: claimed=%v remaining drafts/checkpoints=%d/%d", claimed, remainingDrafts, remainingCheckpoints)
+	}
+	// Discovery grants no ownership: concurrent workers may select the same
+	// window before SKIP LOCKED. A later quiescent pass must drain the remainder.
+	for pass := 0; pass < len(wantIDs) && len(claimed) < len(wantIDs); pass++ {
+		ids, err := seedRepository.ClaimExpiredDrafts(ctx, 3)
+		if err != nil || len(ids) == 0 {
+			t.Fatalf("quiescent cleanup left eligible drafts: ids=%v err=%v", ids, err)
 		}
-		for _, draftID := range outcome.ids {
-			if _, exists := seen[draftID]; exists {
-				t.Fatalf("concurrent cleanup claimed %q twice", draftID)
-			}
-			seen[draftID] = struct{}{}
-			claimed = append(claimed, draftID)
-		}
+		collect(ids)
 	}
 	sort.Strings(claimed)
 	sort.Strings(wantIDs)
@@ -373,10 +380,10 @@ func TestPostgresIntegrationRecordDraftConcurrentExpiredCleanupClaimsAreDisjoint
 
 func TestPostgresIntegrationRecordDraftExpiredCleanupPreservesFencedAndCommittedDrafts(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-reserved-cleanup", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
+	recordRepository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate})
+	draftRepository := newAdmittedCoreDraftRepository(t, runtimePool, fixture.admissionGate)
 
 	tests := []struct {
 		name              string
@@ -389,20 +396,11 @@ func TestPostgresIntegrationRecordDraftExpiredCleanupPreservesFencedAndCommitted
 	}
 	wantDraftIDs := make([]string, 0, len(tests))
 	for _, tt := range tests {
-		recordID := "rec_pgcleanup" + tt.suffix
-		created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-			t,
-			recordplatform.OperationKindRecordCreate,
-			recordID,
-			"",
-			0,
-			0,
-			recordsPostgresCompleteRevisionInput(t, "Reserved cleanup "+tt.name),
-			"record-draft-reserved-cleanup-"+tt.name,
-		))
+		created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Reserved cleanup "+tt.name), "record-draft-reserved-cleanup-"+tt.name))
 		if err != nil {
 			t.Fatalf("CommitRevision(%s) error = %v", tt.name, err)
 		}
+		recordID := created.RecordID
 
 		draftID := "rdf_pgcleanup" + tt.suffix
 		payload := recordsPostgresDraftPayload(t, "Reserved cleanup "+tt.name)
@@ -522,9 +520,9 @@ func TestPostgresIntegrationRecordDraftExpiredCleanupPreservesFencedAndCommitted
 
 func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-lifecycle", 2)
-	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
+	draftRepository := newAdmittedCoreDraftRepository(t, runtimePool, fixture.admissionGate)
 
 	for _, tt := range []struct {
 		draftID string
@@ -543,6 +541,18 @@ func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t
 		})
 		if err != nil {
 			t.Fatalf("PatchDraft(%s) error = %v", tt.reason, err)
+		}
+		if tt.reason == records.DraftDeleteDiscarded {
+			if err := draftRepository.DeleteDraft(ctx, records.DraftDeleteCommand{DraftID: patched.DraftID, AuthorID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", Reason: records.DraftDeleteDiscarded}); !errors.Is(err, records.ErrDraftNotFound) {
+				t.Fatalf("foreign author deletion: %v", err)
+			}
+			if err := draftRepository.DeleteDraft(ctx, records.DraftDeleteCommand{DraftID: patched.DraftID, AuthorID: patched.AuthorID, Reason: records.DraftDeletePublished, IfMatch: draft.ETag}); !errors.Is(err, records.ErrDraftConflict) {
+				t.Fatalf("stale direct publication deletion: %v", err)
+			}
+			var drafts, checkpoints int
+			if err := fixture.db.QueryRow(ctx, `select (select count(*) from public.record_drafts where draft_id=$1),(select count(*) from public.record_draft_checkpoints where draft_id=$1)`, patched.DraftID).Scan(&drafts, &checkpoints); err != nil || drafts != 1 || checkpoints != 1 {
+				t.Fatalf("rejected deletion changed draft/checkpoints: %d/%d %v", drafts, checkpoints, err)
+			}
 		}
 		if err := draftRepository.DeleteDraft(ctx, records.DraftDeleteCommand{
 			DraftID:  patched.DraftID,
@@ -572,19 +582,10 @@ func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t
 		t.Fatalf("PatchDraft(publish) error = %v", err)
 	}
 	input := recordsPostgresCompleteRevisionInput(t, "Published record")
-	staleCommand := recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgdraftpublish",
-		"",
-		0,
-		0,
-		input,
-		"records-draft-publish-stale",
-	)
+	staleCommand := revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "records-draft-publish-stale")
 	staleCommand.DraftID = publishDraft.DraftID
 	staleCommand.DraftETag = publishDraft.ETag
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	recordRepository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate})
 	if result, err := recordRepository.CommitRevision(ctx, staleCommand); !errors.Is(err, records.ErrDraftConflict) {
 		t.Fatalf("CommitRevision(stale draft) = (%#v, %v), want ErrDraftConflict", result, err)
 	}
@@ -603,16 +604,7 @@ func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t
 			preservedDrafts, preservedCheckpoints, rolledBackRoots)
 	}
 
-	publishCommand := recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		staleCommand.RecordID,
-		"",
-		0,
-		0,
-		input,
-		"records-draft-publish",
-	)
+	publishCommand := revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "records-draft-publish")
 	publishCommand.DraftID = patchedPublish.DraftID
 	publishCommand.DraftETag = patchedPublish.ETag
 	published, err := recordRepository.CommitRevision(ctx, publishCommand)
@@ -658,19 +650,16 @@ func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t
 // one draft at a time to prove no draft is skipped or served twice.
 func TestPostgresIntegrationRecordDraftRebaseMovesBaseOnlyOntoCurrentHead(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-rebase", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
+	recordRepository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate})
+	draftRepository := newAdmittedCoreDraftRepository(t, runtimePool, fixture.admissionGate)
 
-	recordID := "rec_pgrebase"
-	first, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, "Rebase one"), "record-draft-rebase-create",
-	))
+	first, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Rebase one"), "record-draft-rebase-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision(first) error = %v", err)
 	}
+	recordID := first.RecordID
 	payload := recordsPostgresDraftPayload(t, "Local edit")
 	draft, err := draftRepository.CreateDraft(ctx, records.DraftCreateCommand{
 		DraftID:        "rdf_pgrebase",
@@ -692,8 +681,8 @@ func TestPostgresIntegrationRecordDraftRebaseMovesBaseOnlyOntoCurrentHead(t *tes
 		t.Fatalf("CommitRevision(second) error = %v", err)
 	}
 
-	rebase := func(ifMatch records.DraftETag, base string) (records.Draft, error) {
-		return draftRepository.PatchDraft(ctx, records.DraftPatchCommand{
+	rebase := func(ctx context.Context, repository *PostgresRecordDraftRepository, ifMatch records.DraftETag, base string) (records.Draft, error) {
+		return repository.PatchDraft(ctx, records.DraftPatchCommand{
 			DraftID:        draft.DraftID,
 			AuthorID:       draft.AuthorID,
 			IfMatch:        ifMatch,
@@ -703,7 +692,7 @@ func TestPostgresIntegrationRecordDraftRebaseMovesBaseOnlyOntoCurrentHead(t *tes
 		})
 	}
 	var revisionConflict *records.DraftRevisionConflictError
-	if _, err := rebase(draft.ETag, "rrv_pgnothead"); !errors.As(err, &revisionConflict) ||
+	if _, err := rebase(ctx, draftRepository, draft.ETag, "rrv_pgnothead"); !errors.As(err, &revisionConflict) ||
 		revisionConflict.ServerRevisionID != second.RevisionID ||
 		revisionConflict.ServerLockVersion != second.LockVersion ||
 		revisionConflict.ServerAuthorizationEpoch != second.AuthorizationEpoch ||
@@ -715,12 +704,13 @@ func TestPostgresIntegrationRecordDraftRebaseMovesBaseOnlyOntoCurrentHead(t *tes
 		t.Fatalf("NewDraftETag(stale) error = %v", err)
 	}
 	var draftConflict *records.DraftConflictError
-	if _, err := rebase(staleETag, second.RevisionID); !errors.As(err, &draftConflict) {
+	if _, err := rebase(ctx, draftRepository, staleETag, second.RevisionID); !errors.As(err, &draftConflict) {
 		t.Fatalf("rebase(stale etag) error = %v, want draft conflict", err)
 	}
 	assertRecordsPostgresDraftRow(t, ctx, fixture.db, draft.DraftID, first.RevisionID, 1)
 
-	// 模拟附件上传事务先持有记录行锁：改基准必须先等记录行，不能先锁草稿行形成交错死锁。
+	// A rebase acquires the record root at rank 60 before the draft at rank 72.
+	// Hold the root and observe the actual worker waiting before probing the draft.
 	holder, err := fixture.db.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin record lock holder: %v", err)
@@ -729,6 +719,17 @@ func TestPostgresIntegrationRecordDraftRebaseMovesBaseOnlyOntoCurrentHead(t *tes
 	if _, err := holder.Exec(ctx, `select 1 from public.records where record_id = $1 for update`, recordID); err != nil {
 		t.Fatalf("hold record row: %v", err)
 	}
+	workerPool := fixture.openDirectRuntimePool(t, ctx, "record-draft-rebase-worker", 1)
+	workerRepository := newAdmittedCoreDraftRepository(t, workerPool, fixture.admissionGate)
+	var holderPID, workerPID int
+	if err := holder.QueryRow(ctx, `select pg_catalog.pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := workerPool.QueryRow(ctx, `select pg_catalog.pg_backend_pid()`).Scan(&workerPID); err != nil {
+		t.Fatal(err)
+	}
+	raceCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	type rebaseOutcome struct {
 		draft records.Draft
 		err   error
@@ -736,17 +737,17 @@ func TestPostgresIntegrationRecordDraftRebaseMovesBaseOnlyOntoCurrentHead(t *tes
 	outcome := make(chan rebaseOutcome, 1)
 	go func() {
 		// 内容不变也要推进版本：其他标签页手里旧 ETag 必须失效。
-		rebased, err := rebase(draft.ETag, second.RevisionID)
+		rebased, err := rebase(raceCtx, workerRepository, draft.ETag, second.RevisionID)
 		outcome <- rebaseOutcome{draft: rebased, err: err}
 	}()
-	waitForRecordsPostgresLockWaiter(t, ctx, fixture.db, "%from public.records%for key share%")
+	waitForMutationTestBlocker(t, raceCtx, fixture.db, workerPID, holderPID, outcome)
 	if _, err := holder.Exec(ctx, `select 1 from public.record_drafts where draft_id = $1 for update nowait`, draft.DraftID); err != nil {
 		t.Fatalf("draft row locked before record row: %v", err)
 	}
 	if err := holder.Rollback(ctx); err != nil {
 		t.Fatalf("release record lock holder: %v", err)
 	}
-	result := <-outcome
+	result := waitForRecordPlatformResult(t, outcome, "draft rebase after root lock")
 	rebased, err := result.draft, result.err
 	if err != nil {
 		t.Fatalf("rebase(head) error = %v", err)
@@ -838,10 +839,8 @@ func assertRecordsPostgresDraftRow(
 
 func TestPostgresIntegrationRecordDraftRoutingKeysetPagesThroughTiedTimestamps(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	repository := newRecordsPostgresDraftRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-draft-keyset", 2),
-	)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	repository := newAdmittedCoreDraftRepository(t, fixture.openDirectRuntimePool(t, ctx, "record-draft-keyset", 2), fixture.admissionGate)
 	seeded := make(map[string]bool, 5)
 	for index := 0; index < 5; index++ {
 		draftID := fmt.Sprintf("rdf_pgkeyset%d", index)
@@ -889,8 +888,89 @@ func TestPostgresIntegrationRecordDraftRoutingKeysetPagesThroughTiedTimestamps(t
 	}
 }
 
+func TestPostgresIntegrationRecordDraftPatchRechecksMembershipAfterLockWait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	const application = "draft-membership-recheck"
+	pool := fixture.openDirectRuntimePool(t, ctx, application, 4)
+	recordRepository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate})
+	created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Membership target"), "draft-member-target"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := newAdmittedCoreDraftRepository(t, pool, fixture.admissionGate)
+	draft, err := repository.CreateDraft(ctx, records.DraftCreateCommand{
+		DraftID: "rdf_memberrecheck", ProjectID: recordauth.ProjectIDDefault, RecordID: created.RecordID,
+		BaseRevisionID: created.RevisionID, AuthorID: recordsPostgresDraftAuthorID,
+		Payload: recordsPostgresDraftPayload(t, "before"), Policy: records.DefaultDraftRetentionPolicy(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	if _, err := holder.Exec(ctx, `select 1 from public.users where user_id=$1 for update`, draft.AuthorID); err != nil {
+		t.Fatal(err)
+	}
+	updatedPayload := recordsPostgresDraftPayload(t, "after")
+	done := make(chan error, 1)
+	go func() {
+		_, err := repository.PatchDraft(ctx, records.DraftPatchCommand{DraftID: draft.DraftID, AuthorID: draft.AuthorID,
+			IfMatch: draft.ETag, Payload: updatedPayload, Policy: records.DefaultDraftRetentionPolicy()})
+		done <- err
+	}()
+	waitForRecordPlatformBackendLock(t, ctx, fixture.db, application)
+	if _, err := holder.Exec(ctx, `update public.users set disabled_at=clock_timestamp() where user_id=$1`, draft.AuthorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForRecordPlatformResult(t, done, "draft membership recheck"); !errors.Is(err, recordauth.ErrDenied) {
+		t.Fatalf("patch after member was disabled = %v", err)
+	}
+	var version, checkpoints int64
+	if err := fixture.db.QueryRow(ctx, `select draft_version,(select count(*) from public.record_draft_checkpoints where draft_id=$1)
+		from public.record_drafts where draft_id=$1`, draft.DraftID).Scan(&version, &checkpoints); err != nil {
+		t.Fatal(err)
+	}
+	if version != 1 || checkpoints != 0 {
+		t.Fatalf("disabled member changed draft: version=%d checkpoints=%d", version, checkpoints)
+	}
+}
+
+func newAdmittedCoreDraftRepository(t *testing.T, pool *pgxpool.Pool, gate AdmissionGate) *PostgresRecordDraftRepository {
+	t.Helper()
+	repository := NewPostgresRecordDraftRepository(pool, gate)
+	if err := repository.ConfigureRecordMutationAuthorization(NewPostgresCollaborationMembershipReader(), newRecordsPostgresAuthorization(t, pool, gate)); err != nil {
+		t.Fatal(err)
+	}
+	return repository
+}
+
 func newRecordsPostgresDraftRepository(pool *pgxpool.Pool) *PostgresRecordDraftRepository {
-	return NewPostgresRecordDraftRepository(pool, allowRecordPlatformAdmissionGate)
+	subjects, err := records.NewSubjectAdapterRegistry([]records.SubjectSourceAdapter{
+		NewVPSRecordSubjectAdapter(NewPostgresVPSAssetRepository(pool)),
+		NewMonitoringInstanceRecordSubjectAdapter(NewPostgresMonitoringInstanceRepository(pool)),
+		NewTargetRecordSubjectAdapter(NewPostgresTargetRepository(pool)),
+	})
+	if err != nil {
+		panic(err)
+	}
+	witness, err := NewWitnessedRecordSubjectTombstoneReader("", recordauth.ProjectIDDefault, nil, pool)
+	if err != nil {
+		panic(err)
+	}
+	repository := NewPostgresRecordDraftRepository(pool, allowRecordPlatformAdmissionGate)
+	authorization := NewPostgresCurrentRecordAuthorizationSource(pool, NewRecordSubjectReadResolver(subjects, witness), allowRecordPlatformAdmissionGate)
+	if err := repository.ConfigureRecordMutationAuthorization(NewPostgresCollaborationMembershipReader(), authorization); err != nil {
+		panic(err)
+	}
+	return repository
 }
 
 func recordsPostgresDraftPayload(t *testing.T, title string) records.DraftPayload {
@@ -942,4 +1022,105 @@ func assertRecordsPostgresDraftFormalSideEffects(
 		t.Fatalf("draft formal side effects = activities %d outbox %d, want %d/%d",
 			activityCount, outboxCount, wantActivities, wantOutbox)
 	}
+}
+
+func TestPostgresIntegrationRecordDraftPublicationRollbackAndNoChange(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	pool := fixture.openDirectRuntimePool(t, ctx, "draft-publication-atomicity", 2)
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate})
+	drafts := newAdmittedCoreDraftRepository(t, pool, fixture.admissionGate)
+	initial, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Initial"), "draft-atomic-create"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(id, recordID, base string) records.Draft {
+		t.Helper()
+		draft, err := drafts.CreateDraft(ctx, records.DraftCreateCommand{DraftID: id, ProjectID: recordauth.ProjectIDDefault, RecordID: recordID, BaseRevisionID: base, AuthorID: recordsPostgresDraftAuthorID, Payload: recordsPostgresDraftPayload(t, id), Policy: records.DefaultDraftRetentionPolicy()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return draft
+	}
+	assertRows := func(draft records.Draft, revision string, version uint64, revisionCount, draftCount, checkpointCount int) {
+		t.Helper()
+		var current string
+		var lock uint64
+		var revisions, retained, checkpoints int
+		if err := fixture.db.QueryRow(ctx, `select r.current_revision_id,r.lock_version,(select count(*) from public.record_revisions where record_id=r.record_id),(select count(*) from public.record_drafts where draft_id=$2),(select count(*) from public.record_draft_checkpoints where draft_id=$2) from public.records r where record_id=$1`, initial.RecordID, draft.DraftID).Scan(&current, &lock, &revisions, &retained, &checkpoints); err != nil {
+			t.Fatal(err)
+		}
+		if current != revision || lock != version || revisions != revisionCount || retained != draftCount || checkpoints != checkpointCount {
+			t.Fatalf("draft publication state: head=%s/%d revisions=%d draft/checkpoints=%d/%d", current, lock, revisions, retained, checkpoints)
+		}
+	}
+	updateDraft := create("rdf_draftatomicupdate", initial.RecordID, initial.RevisionID)
+	input := recordsPostgresCompleteRevisionInput(t, "Updated through draft")
+	update := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordUpdate, initial.RecordID, initial.RevisionID, initial.LockVersion, initial.AuthorizationEpoch, input, "draft-atomic-update")
+	update.DraftID, update.DraftETag = updateDraft.DraftID, updateDraft.ETag
+	updated, err := repository.CommitRevision(ctx, update)
+	if err != nil || !updated.Created || updated.RevisionNo != 2 {
+		t.Fatalf("update with draft: %#v %v", updated, err)
+	}
+	assertRows(updateDraft, updated.RevisionID, updated.LockVersion, 2, 0, 0)
+	newDraft := create("rdf_draftatomicnew", "", "")
+	wrongRoute := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordUpdate, updated.RecordID, updated.RevisionID, updated.LockVersion, updated.AuthorizationEpoch, recordsPostgresCompleteRevisionInput(t, "Rejected new draft"), "draft-rejected-new")
+	wrongRoute.DraftID, wrongRoute.DraftETag = newDraft.DraftID, newDraft.ETag
+	if _, err := repository.CommitRevision(ctx, wrongRoute); !errors.Is(err, records.ErrDraftRevisionConflict) {
+		t.Fatalf("mismatched draft route: %v", err)
+	}
+	assertRows(newDraft, updated.RevisionID, updated.LockVersion, 2, 1, 0)
+	noChangeDraft := create("rdf_draftatomicnochange", updated.RecordID, updated.RevisionID)
+	noChangeDraft, err = drafts.PatchDraft(ctx, records.DraftPatchCommand{DraftID: noChangeDraft.DraftID, AuthorID: noChangeDraft.AuthorID, IfMatch: noChangeDraft.ETag, Payload: recordsPostgresDraftPayload(t, "no-change checkpoint"), Policy: records.DefaultDraftRetentionPolicy()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noChange := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordUpdate, updated.RecordID, updated.RevisionID, updated.LockVersion, updated.AuthorizationEpoch, input, "draft-atomic-nochange")
+	noChange.DraftID, noChange.DraftETag = noChangeDraft.DraftID, noChangeDraft.ETag
+	unchanged, err := repository.CommitRevision(ctx, noChange)
+	if err != nil || unchanged.Created || unchanged.Replayed || unchanged.RevisionID != updated.RevisionID {
+		t.Fatalf("no-change draft publication: %#v %v", unchanged, err)
+	}
+	assertRows(noChangeDraft, updated.RevisionID, updated.LockVersion, 2, 0, 0)
+	replay, err := repository.CommitRevision(ctx, noChange)
+	if err != nil || !replay.Replayed || replay.Created || replay.RevisionID != unchanged.RevisionID {
+		t.Fatalf("cleaned no-change draft replay: %#v %v", replay, err)
+	}
+	assertRecordsPostgresDraftFormalSideEffects(t, ctx, fixture.db, 2, 2)
+	failingDraft := create("rdf_draftatomicfailure", updated.RecordID, updated.RevisionID)
+	failingDraft, err = drafts.PatchDraft(ctx, records.DraftPatchCommand{DraftID: failingDraft.DraftID, AuthorID: failingDraft.AuthorID, IfMatch: failingDraft.ETag, Payload: recordsPostgresDraftPayload(t, "rollback checkpoint"), Policy: records.DefaultDraftRetentionPolicy()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.db.Exec(ctx, `create function public.reject_draft_cleanup() returns trigger language plpgsql as $$ begin raise exception 'injected draft cleanup failure'; end $$; create trigger reject_draft_cleanup before delete on public.record_drafts for each row when (old.draft_id='rdf_draftatomicfailure') execute function public.reject_draft_cleanup()`); err != nil {
+		t.Fatal(err)
+	}
+	failed := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordUpdate, updated.RecordID, updated.RevisionID, updated.LockVersion, updated.AuthorizationEpoch, recordsPostgresCompleteRevisionInput(t, "After cleanup succeeds"), "draft-atomic-failure")
+	failed.DraftID, failed.DraftETag = failingDraft.DraftID, failingDraft.ETag
+	_, err = repository.CommitRevision(ctx, failed)
+	var pgError *pgconn.PgError
+	if !errors.As(err, &pgError) || pgError.Message != "injected draft cleanup failure" {
+		t.Fatalf("cleanup failure boundary: %v", err)
+	}
+	assertRows(failingDraft, updated.RevisionID, updated.LockVersion, 2, 1, 1)
+	assertRecordsPostgresDraftFormalSideEffects(t, ctx, fixture.db, 2, 2)
+	if _, err := fixture.db.Exec(ctx, `drop trigger reject_draft_cleanup on public.record_drafts; drop function public.reject_draft_cleanup()`); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := repository.CommitRevision(ctx, failed)
+	if err != nil || !recovered.Created || recovered.Replayed || recovered.RevisionNo != 3 {
+		t.Fatalf("retry rolled back publication: %#v %v", recovered, err)
+	}
+	assertRows(failingDraft, recovered.RevisionID, recovered.LockVersion, 3, 0, 0)
+	staleBaseDraft := create("rdf_draftatomicstalebase", recovered.RecordID, recovered.RevisionID)
+	advanced, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordUpdate, recovered.RecordID, recovered.RevisionID, recovered.LockVersion, recovered.AuthorizationEpoch, recordsPostgresCompleteRevisionInput(t, "Concurrent edit"), "draft-atomic-concurrent"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordUpdate, advanced.RecordID, advanced.RevisionID, advanced.LockVersion, advanced.AuthorizationEpoch, recordsPostgresCompleteRevisionInput(t, "Stale draft"), "draft-atomic-stalebase")
+	stale.DraftID, stale.DraftETag = staleBaseDraft.DraftID, staleBaseDraft.ETag
+	if _, err := repository.CommitRevision(ctx, stale); !errors.Is(err, records.ErrDraftRevisionConflict) {
+		t.Fatalf("mismatched draft base: %v", err)
+	}
+	assertRows(staleBaseDraft, advanced.RevisionID, advanced.LockVersion, 4, 1, 0)
 }

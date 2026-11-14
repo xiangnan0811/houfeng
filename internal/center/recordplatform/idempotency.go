@@ -63,8 +63,8 @@ type IdempotencyResolutionV1 struct {
 }
 
 // IdempotencyClaimInputV1 supplies only durable identity and lease durations.
-// The store derives all timestamps from transaction_timestamp(), never from a
-// caller-provided expiration time.
+// The store observes the database clock after acquiring the key scope and row;
+// expiration is never taken from a caller or the transaction's start time.
 type IdempotencyClaimInputV1 struct {
 	Key                IdempotencyKey
 	RequestFingerprint RequestFingerprintV1
@@ -166,8 +166,8 @@ func (key IdempotencyKey) Validate() error {
 }
 
 // ResolveIdempotencyV1 classifies an observed row using an observed database
-// timestamp. The store, not this helper, performs all actual owner-fenced SQL
-// transitions at transaction_timestamp().
+// timestamp. The store performs owner-fenced SQL transitions using fresh
+// database time after any lock wait.
 func ResolveIdempotencyV1(record IdempotencyRecordV1, request RequestFingerprintV1, observedDBTime time.Time) (IdempotencyResolutionV1, error) {
 	if err := record.Validate(); err != nil {
 		return IdempotencyResolutionV1{}, err

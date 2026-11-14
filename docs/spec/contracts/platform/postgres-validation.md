@@ -31,6 +31,7 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 - `postgres` 保持通用通用集成合同：
   `scripts/test-record-platform-integration.sh postgres -- <command> [args...]`。
   严格 catalog image variable 不对该 mode 施加 validation 或 defaulting。
+- 两种 mode 的四个隔离 PostgreSQL 实例均以 `--auth-host=scram-sha-256` 初始化，包含 loopback TCP；容器内本地 Unix socket 保留 `--auth-local=trust` 供受控管理命令使用。不能只设置 `POSTGRES_PASSWORD` 而留下优先匹配的 loopback `trust` 规则，否则旧密码拒绝与凭据轮换验收失去意义。
 - required workflow job id 是 `record-platform-pg16-catalog`；显式 job name
   是 `record-platform-pg16-catalog (${{ matrix.postgres_image }})`。literal
   matrix 必须产生以下精确 check contexts：

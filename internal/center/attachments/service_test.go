@@ -457,7 +457,7 @@ func TestUploadServiceCompleteDirectS3DatabaseFailurePreservesTemporaryForRetry(
 	if _, err := fixture.service.CompleteUpload(context.Background(), validCompleteUploadRequest()); err != nil {
 		t.Fatalf("CompleteUpload(retry) error = %v", err)
 	}
-	if fixture.blob.publishTemporaryCalls != 2 || len(fixture.blob.deletedTemporaryVersions) != 1 {
+	if fixture.blob.publishTemporaryCalls != 1 || len(fixture.blob.deletedTemporaryVersions) != 1 {
 		t.Fatalf("CompleteUpload(retry) publish/delete calls = %d/%d",
 			fixture.blob.publishTemporaryCalls, len(fixture.blob.deletedTemporaryVersions))
 	}
@@ -703,6 +703,7 @@ func newUploadServiceFixtureWithArchiveScannerReadiness(
 	}
 	fixture.temporaryKeys = []string{uploadServiceTemporaryKey1, uploadServiceTemporaryKey2}
 	service, err := NewUploadService(fixture.authorizer, fixture.repository, fixture.blob, UploadServiceOptions{
+		Writer:                  fixtureBlobWriter{blob: fixture.blob},
 		TransportKind:           transport,
 		Limits:                  DefaultLimits(),
 		Now:                     func() time.Time { return uploadServiceNow },
@@ -843,6 +844,7 @@ func (stub *uploadServiceRepositoryStub) RecordBlobPublicationVersion(
 		return intent, nil
 	}
 	intent.ObjectVersion = request.Object.VersionID
+	intent.ObligationID = request.ObligationID
 	intent.State = BlobPublicationStatePublished
 	stub.publicationIntent = intent
 	return intent, nil
@@ -1044,4 +1046,20 @@ func captureAttachmentCallPanic(call func() error) (err error, panicValue any) {
 		panicValue = recover()
 	}()
 	return call(), nil
+}
+
+// Service/worker unit tests control only the I/O result. Durable managed-write
+// ordering and filesystem behavior are exercised by the integration fixtures.
+type fixtureBlobWriter struct{ blob BlobStore }
+
+func (writer fixtureBlobWriter) NamespaceID() string { return "" }
+
+func (writer fixtureBlobWriter) Put(ctx context.Context, request WriteRequest, reader io.Reader) (WrittenBlob, error) {
+	version, err := writer.blob.Put(ctx, request.Content, reader)
+	return WrittenBlob{Version: version, ObligationID: "rwo_01010101010101010101010101010101"}, err
+}
+
+func (writer fixtureBlobWriter) PublishTemporaryVersion(ctx context.Context, request WriteRequest, source TemporaryObjectVersion) (WrittenBlob, error) {
+	version, err := writer.blob.(TemporaryObjectStore).PublishTemporaryVersion(ctx, TemporaryObjectPublishRequest{Version: source, ExpectedSHA256: request.Content.ExpectedSHA256, ExpectedSizeBytes: request.Content.ExpectedSizeBytes})
+	return WrittenBlob{Version: version, ObligationID: "rwo_01010101010101010101010101010101"}, err
 }

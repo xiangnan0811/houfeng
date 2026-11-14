@@ -324,6 +324,8 @@ var recordDomainEventTitles = map[activity.EventKind]string{
 	activity.EventKindRecordRestored:           "记录已恢复",
 	activity.EventKindRecordArchived:           "记录已归档",
 	activity.EventKindRecordUnarchived:         "记录已取消归档",
+	activity.EventKindRecordTrashed:            "记录已移入回收站",
+	activity.EventKindRecordTrashRestored:      "记录已从回收站恢复",
 	activity.EventKindRecordOwnerChanged:       "负责人已变更",
 	activity.EventKindRecordParticipantChanged: "参与人已变更",
 	activity.EventKindRecordFollowUpChanged:    "跟进状态已变更",
@@ -339,23 +341,12 @@ var recordDomainEventTitles = map[activity.EventKind]string{
 
 // recordDomainRevisionCommitKinds are the kinds whose writer commits a new
 // revision. The split is the writer's own, not a guess: `RevisionCommitCommand`
-// accepts exactly these three, while archive and unarchive go through the
-// lifecycle path and name the revision that was already current.
+// accepts exactly these three, while archive/unarchive and trash/restore go
+// through the lifecycle path and name the revision that was already current.
 var recordDomainRevisionCommitKinds = map[activity.EventKind]bool{
 	activity.EventKind(records.DomainActivityRecordCreated):  true,
 	activity.EventKind(records.DomainActivityRecordRevised):  true,
 	activity.EventKind(records.DomainActivityRecordRestored): true,
-}
-
-// RecordDomainEventKinds is the closed set this source can emit. It exists so a
-// test can prove the projected vocabulary matches what the record writers
-// actually write, instead of drifting into kinds nothing produces.
-func RecordDomainEventKinds() []activity.EventKind {
-	kinds := make([]activity.EventKind, 0, len(recordDomainEventTitles))
-	for kind := range recordDomainEventTitles {
-		kinds = append(kinds, kind)
-	}
-	return kinds
 }
 
 func buildRecordDomainCandidate(
@@ -417,11 +408,12 @@ func buildRecordDomainCandidate(
 			Version: activity.PresentationVersionV1,
 			Title:   title,
 		},
-		Severity:   "info",
-		RecordID:   row.recordID,
-		RevisionID: row.revisionID,
-		RevisionNo: uint64(row.revisionNo),
-		AuthScope:  authScope,
+		Severity:       "info",
+		RecordID:       row.recordID,
+		SourceRecordID: row.recordID,
+		RevisionID:     row.revisionID,
+		RevisionNo:     uint64(row.revisionNo),
+		AuthScope:      authScope,
 		// Only an event that carries its own revision and comes from the commit
 		// path created that revision. Everything else — comments, actions, archive
 		// — names a revision it merely happened alongside.

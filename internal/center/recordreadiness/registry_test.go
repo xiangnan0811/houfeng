@@ -455,6 +455,10 @@ func newDeletionAdapterStub(t *testing.T, name recorddeletion.AdapterName, seed 
 		surfaces = recorddeletion.RecordActivitySurfaceNames()
 	case recorddeletion.AdapterNameRecordPortability:
 		surfaces = recorddeletion.RecordPortabilitySurfaceNames()
+	case recorddeletion.AdapterNameRecordMarkdownClient:
+		surfaces = recorddeletion.RecordMarkdownClientSurfaceNames()
+	case recorddeletion.AdapterNameRecordComparison:
+		surfaces = recorddeletion.RecordComparisonSurfaceNames()
 	}
 	descriptor, err := recorddeletion.NewAdapterDescriptor(name, surfaces)
 	if err != nil {

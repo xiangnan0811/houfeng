@@ -7,6 +7,12 @@ import { recordRevisionFixture } from '../testFixtures'
 import { ComparisonSelectionBasket } from './ComparisonSelectionBasket'
 import { COMPARISON_SELECTION_LIMIT_ERROR, COMPARISON_URL_VERSION, type ComparisonURLState } from './comparisonQueryState'
 
+vi.mock('../../../lib/auth-context', () => ({ useAuth: () => ({ user: { user_id: 'usr_compare' } }) }))
+vi.mock('../draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../draftBuffer')>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
+
 const api = vi.hoisted(() => ({
   snapshot: vi.fn(),
   revision: vi.fn(),
@@ -80,6 +86,7 @@ describe('ComparisonSelectionBasket', () => {
       if (id === 'evs_missing') throw new ApiError(404, 'hidden', { code: 'resource_not_found' })
       return {
         snapshot_id: id,
+        record_id: 'rec_1',
         title: id === 'evs_a' ? '左侧观测' : '右侧观测',
         kind: 'monitoring.host',
         observed_at: '2026-07-01T03:00:00Z',

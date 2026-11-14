@@ -81,6 +81,7 @@ type ComparisonItemInput struct {
 	Revision        *RevisionMetadataSnapshot
 	RecordID        string
 	RevisionID      string
+	SourceRecordID  string
 	SubjectKind     string
 	SubjectID       string
 	Snapshot        CanonicalSnapshot
@@ -109,8 +110,11 @@ type ResolvedComparisonItem struct {
 	Revision        *RevisionMetadataSnapshot
 	RecordID        string
 	RevisionID      string
-	SubjectKind     string
-	SubjectID       string
+	// SourceRecordID is authorized ownership provenance, not revision context.
+	// It is intentionally outside the historical canonical comparison payload.
+	SourceRecordID string
+	SubjectKind    string
+	SubjectID      string
 }
 
 type ComparabilityFinding struct {
@@ -161,6 +165,7 @@ func EvaluateComparison(registry Registry, input ComparisonEvaluateInput) (Compa
 			RevisionContext: item.RevisionContext,
 			RecordID:        item.RecordID,
 			RevisionID:      item.RevisionID,
+			SourceRecordID:  item.SourceRecordID,
 			SubjectKind:     item.SubjectKind,
 			SubjectID:       item.SubjectID,
 		}

@@ -3,59 +3,54 @@ package store
 import (
 	"context"
 	"errors"
-	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
-	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
+	"houfeng/internal/center/recordplatform"
 )
 
-func TestExternalBindingConstructorFailsClosedForExplicitTypedNil(t *testing.T) {
-	var bindings *typedNilScopedTransportBindingSource
-	if repository := NewPostgresRecordNotificationRepositoryWithExternalBindings(nil, nil, nil, nil, time.Second, bindings); repository != nil {
-		t.Fatalf("NewPostgresRecordNotificationRepositoryWithExternalBindings(typed nil) = %#v, want nil", repository)
-	}
-	if repository := NewPostgresRecordNotificationRepository(nil, nil, nil, nil, time.Second); repository == nil {
-		t.Fatal("plain unconfigured constructor = nil, want valid disabled repository")
-	}
+// This private fixture rejects preparation while discovery is still open.
+type notificationUnitPrefetcher struct {
+	tx  *fakeRecordPlatformTx
+	err error
 }
 
-type typedNilScopedTransportBindingSource struct{}
-
-func (*typedNilScopedTransportBindingSource) ListScopedTransportBindings(context.Context, pgx.Tx, recordauth.ProjectID, string) ([]recordcollaboration.ScopedTransportBindingRef, error) {
-	return nil, nil
+func (fixture notificationUnitPrefetcher) prepareCurrentAuthorization(_ context.Context, recordIDs []string) (currentRecordAuthorizationTransactionResolver, error) {
+	if !fixture.tx.committed || len(recordIDs) != 1 || recordIDs[0] != "rec_notification" {
+		return nil, errors.New("invalid notification discovery")
+	}
+	return nil, fixture.err
 }
 
-func (*typedNilScopedTransportBindingSource) ResolveScopedTransportBinding(context.Context, pgx.Tx, recordcollaboration.ScopedTransportBindingRef) (recordcollaboration.ScopedTransportBinding, error) {
-	return recordcollaboration.ScopedTransportBinding{}, nil
-}
-
-func TestQueryInboxCandidatePageUsesStableKeysetAndSQLLimit(t *testing.T) {
-	cursor := inboxQueryCursor{
-		EventAt:        time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC),
-		NotificationID: "rnt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+func TestNotificationPreparationFailsClosedWhenPrefetchUnavailable(t *testing.T) {
+	unavailable := errors.New("source prefetch unavailable")
+	tx := &fakeRecordPlatformTx{queryRow: func(context.Context, string, ...any) pgx.Row {
+		return fakeRecordPlatformRow{scan: func(dest ...any) error {
+			*(dest[0].(*string)) = "rev_notification"
+			*(dest[1].(*string)) = "rec_notification"
+			*(dest[2].(*string)) = "usr_aaaaaaaaaaaaaaaaaaaaaaaa"
+			*(dest[3].(**string)) = nil
+			*(dest[4].(*time.Time)) = time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
+			return nil
+		}}
+	}}
+	repository := &PostgresRecordNotificationRepository{
+		platform: &PostgresRecordPlatformRepository{
+			beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+			gate:    allowRecordPlatformAdmissionGate,
+		},
+		authorization: notificationUnitPrefetcher{tx: tx, err: unavailable},
 	}
-	tx := &inboxCandidateQueryTx{}
-	items, err := queryInboxCandidatePage(context.Background(), tx, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", inboxQueryUnread, cursor, 17)
-	if err != nil || items == nil || len(items) != 0 {
-		t.Fatalf("queryInboxCandidatePage() = (%#v, %v), want nonnil empty", items, err)
+	event := recordplatform.OutboxEvent{
+		ProjectID: string(recordplatform.ProjectIDDefault), SubjectKind: recordplatform.OutboxSubjectKindRecord,
+		SubjectID: "rec_notification", SourceVersion: 1, AuthorizationEpoch: 1,
 	}
-	for _, fragment := range []string{
-		"recipients.read_at is null", "recipients.dismissed_at is null",
-		"notifications.event_at < $2", "notifications.event_at = $2", "notifications.notification_id > $3",
-		"order by notifications.event_at desc, notifications.notification_id", "limit $4",
-	} {
-		if !strings.Contains(tx.sql, fragment) {
-			t.Fatalf("inbox page SQL missing %q:\n%s", fragment, tx.sql)
-		}
-	}
-	wantArgs := []any{"usr_aaaaaaaaaaaaaaaaaaaaaaaa", cursor.EventAt, cursor.NotificationID, 17}
-	if !reflect.DeepEqual(tx.args, wantArgs) {
-		t.Fatalf("inbox page args = %#v, want %#v", tx.args, wantArgs)
+	_, _, err := repository.prepareNotificationAuthorization(context.Background(), event, recordcollaboration.NotificationEventRecordOwnerChanged)
+	if !errors.Is(err, unavailable) {
+		t.Fatalf("prepareNotificationAuthorization error = %v, want prefetch unavailable", err)
 	}
 }
 
@@ -115,21 +110,3 @@ type inboxSubjectQueryTx struct {
 }
 
 func (tx inboxSubjectQueryTx) QueryRow(context.Context, string, ...any) pgx.Row { return tx.row }
-
-type inboxCandidateQueryTx struct {
-	pgx.Tx
-	sql  string
-	args []any
-}
-
-func (tx *inboxCandidateQueryTx) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
-	tx.sql = sql
-	tx.args = append([]any(nil), args...)
-	return emptyInboxRows{}, nil
-}
-
-type emptyInboxRows struct{ pgx.Rows }
-
-func (emptyInboxRows) Close()     {}
-func (emptyInboxRows) Err() error { return nil }
-func (emptyInboxRows) Next() bool { return false }

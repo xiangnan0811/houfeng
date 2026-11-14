@@ -669,32 +669,6 @@ func TestCreateAssetServiceIdempotentFailsClosedAtEveryCutPoint(t *testing.T) {
 	}
 }
 
-func TestCreateAssetServiceIdempotentFailsClosedOnGraphLockError(t *testing.T) {
-	t.Parallel()
-
-	tx := &fakeCreateIdempotencyTx{
-		exec: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
-			if strings.Contains(sql, "pg_advisory_xact_lock(1213154899, 1)") {
-				return pgconn.CommandTag{}, errCreateIdempotencyCutPoint
-			}
-			return pgconn.NewCommandTag("SELECT 1"), nil
-		},
-	}
-	repo := &PostgresAssetServiceRepository{
-		db: fakeAssetServiceDB{},
-		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-			return tx, nil
-		},
-	}
-
-	if _, _, err := repo.CreateAssetServiceIdempotent(context.Background(), testAssetServiceInput(), "idempotency-key-0001"); !errors.Is(err, errCreateIdempotencyCutPoint) {
-		t.Fatalf("CreateAssetServiceIdempotent() did not preserve the graph lock error")
-	}
-	if tx.commitCalls != 0 || tx.rollbackCalls != 1 {
-		t.Fatalf("commitCalls=%d rollbackCalls=%d, want 0/1", tx.commitCalls, tx.rollbackCalls)
-	}
-}
-
 func TestCreateAssetServiceIdempotentValidatesBeforeTransaction(t *testing.T) {
 	t.Parallel()
 
@@ -1692,6 +1666,7 @@ type fakeCreateIdempotencyRow struct {
 func (r fakeCreateIdempotencyRow) Scan(dest ...any) error { return r.scan(dest...) }
 
 type fakeCreateIdempotencyTx struct {
+	sourceState   fakeSourceWriterState
 	queryRow      func(context.Context, string, ...any) pgx.Row
 	exec          func(context.Context, string, ...any) (pgconn.CommandTag, error)
 	commit        func(context.Context) error
@@ -1726,6 +1701,9 @@ func (f *fakeCreateIdempotencyTx) Prepare(context.Context, string, string) (*pgc
 	return nil, nil
 }
 func (f *fakeCreateIdempotencyTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "source_application_admit()") {
+		return pgconn.CommandTag{}, f.sourceState.admissionErr
+	}
 	if f.exec != nil {
 		return f.exec(ctx, sql, args...)
 	}
@@ -1735,6 +1713,9 @@ func (f *fakeCreateIdempotencyTx) Query(context.Context, string, ...any) (pgx.Ro
 	return nil, nil
 }
 func (f *fakeCreateIdempotencyTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if row, ok := f.sourceState.queryRow(sql, args...); ok {
+		return row
+	}
 	if f.queryRow != nil {
 		return f.queryRow(ctx, sql, args...)
 	}

@@ -14,6 +14,8 @@ import (
 	"houfeng/internal/center/assetservices"
 	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 var _ assetservices.Repository = (*PostgresAssetServiceRepository)(nil)
@@ -205,6 +207,9 @@ func (r *PostgresAssetServiceRepository) CreateAssetService(ctx context.Context,
 }
 
 func ensureAssetServiceCreateAllowed(ctx context.Context, tx pgx.Tx, input assetservices.CreateInput) error {
+	if err := assertAssetServiceSourcesWritable(ctx, tx, input); err != nil {
+		return err
+	}
 	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, input.VPSID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return assetservices.ErrServiceOwnerNotFound
@@ -254,6 +259,9 @@ func (r *PostgresAssetServiceRepository) CreateAssetServiceIdempotent(
 		return assetservices.Record{}, false, fmt.Errorf("begin asset service create transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertAssetServiceSourcesWritable(ctx, tx, input); err != nil {
+		return assetservices.Record{}, false, err
+	}
 
 	lockKey := createidempotency.NamespacedLockKey(assetServiceCreateOperation, key)
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, lockKey); err != nil {
@@ -409,4 +417,22 @@ func mapAssetServiceWriteError(err error) error {
 	default:
 		return nil
 	}
+}
+
+func assertAssetServiceSourcesWritable(ctx context.Context, tx pgx.Tx, input assetservices.CreateInput) error {
+	if err := assertSourceWritable(ctx, tx, "vps", input.VPSID); err != nil {
+		if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+			return assetservices.ErrServiceOwnerNotFound
+		}
+		return err
+	}
+	if input.TargetID != nil {
+		if err := assertSourceWritable(ctx, tx, "target", *input.TargetID); err != nil {
+			if errors.Is(err, targets.ErrTargetNotFound) {
+				return assetservices.ErrServiceTargetNotFound
+			}
+			return err
+		}
+	}
+	return nil
 }

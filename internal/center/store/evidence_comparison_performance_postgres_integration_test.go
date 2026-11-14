@@ -7,37 +7,15 @@ import (
 	"time"
 
 	"houfeng/internal/center/evidence"
-	"houfeng/internal/center/recordplatform"
 )
 
 func TestEvidenceComparisonCandidatePostgresQueryIsBounded(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-comparison-perf", 2)
-	repository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	record, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_cmpperf", "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, "Comparison performance"), "comparison-performance",
-	))
-	if err != nil {
-		t.Fatalf("CommitRevision() error = %v", err)
-	}
-
-	windowStart := time.Date(2026, time.August, 10, 11, 0, 0, 0, time.UTC)
-	windowEnd := windowStart.Add(time.Hour)
-	left := evidence.ComparisonSubjectRef{Kind: "monitoring_instance", ID: "mi_0123456789abcdef"}
-	right := evidence.ComparisonSubjectRef{Kind: "monitoring_instance", ID: "mi_0123456789abcde0"}
-	seedComparisonCandidateSnapshot(t, ctx, fixture, comparisonCandidateSeed{
-		snapshotID: "evs_cmpperfleft", recordID: record.RecordID, kind: "monitoring.host", schemaVersion: 1,
-		sourceKind: left.Kind, sourceID: left.ID, subjectKind: left.Kind, subjectID: left.ID,
-		actualStart: windowStart, actualEnd: windowEnd, digestByte: "b1",
-	})
-	seedComparisonCandidateSnapshot(t, ctx, fixture, comparisonCandidateSeed{
-		snapshotID: "evs_cmpperfright", recordID: record.RecordID, kind: "monitoring.host", schemaVersion: 1,
-		sourceKind: right.Kind, sourceID: right.ID, subjectKind: right.Kind, subjectID: right.ID,
-		actualStart: windowStart, actualEnd: windowEnd, digestByte: "b2",
-	})
+	fixture := newComparisonCandidateFixture(t, ctx, false)
+	runtimePool := fixture.signed.Runtime
+	repository := fixture.repository
+	windowStart, windowEnd := fixture.window.Start, fixture.window.End
+	left, right := fixture.left, fixture.right
 
 	planRows, err := runtimePool.Query(ctx, "explain "+comparisonCandidateListSQL,
 		[]string{left.Kind, right.Kind}, []string{left.ID, right.ID},

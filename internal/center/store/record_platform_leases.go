@@ -186,7 +186,7 @@ const assertServingLeaseSQL = `
 		where fence.project_id = object_lease.project_id
 		  and fence.object_kind = object_lease.object_kind
 		  and fence.object_id = object_lease.object_id
-		  and fence.expires_at > transaction_timestamp()
+		  and fence.expires_at > clock_timestamp()
 	)`
 
 // AcquireIdentityMutationGuards claims the supplied guard rows in canonical

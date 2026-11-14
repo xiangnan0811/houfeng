@@ -14,26 +14,19 @@ import (
 
 func TestPostgresIntegrationRecordDeletionPreviewReserveAndExpiredReplay(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-preview-reserve", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgdeletepreview",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Deletion preview record"),
-		"record-deletion-preview-create",
-	))
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture)
+	created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Deletion preview record"), "record-deletion-preview-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
 
-	deploymentID := recordplatform.DeploymentID("dp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
 	createCommand, token := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	repository := NewPostgresRecordDeletionRepository(runtimePool, fixture.admissionGate)
 	repository.newReservationID = func() (string, error) { return "drs_pgdeletepreview", nil }
 	repository.newOperationID = func() (string, error) { return "rpo_pgdeletepreview", nil }
 	repository.newAuditID = func() (string, error) { return "rda_pgdeletepreview", nil }
@@ -59,7 +52,7 @@ func TestPostgresIntegrationRecordDeletionPreviewReserveAndExpiredReplay(t *test
 		!createCommand.RequestFingerprint.MatchesPersisted(resolved.RequestFingerprint) {
 		t.Fatalf("ResolvePreview() before reserve = %#v", resolved)
 	}
-	platformRepository := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	platformRepository := NewPostgresRecordPlatformRepository(runtimePool, fixture.admissionGate)
 	serving, err := platformRepository.AcquireServingLease(ctx, createCommand.Object, recordplatform.LeaseClaimInputV1{
 		OwnerID:       "attachment_delivery_pgdeletepreview",
 		LeaseDuration: time.Second,
@@ -191,26 +184,19 @@ func TestPostgresIntegrationRecordDeletionPreviewReserveAndExpiredReplay(t *test
 
 func TestPostgresIntegrationRecordDeletionReserveCASDriftRollsBackFenceAndOperation(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-cas-drift", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgdeletecasdrift",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Deletion CAS record"),
-		"record-deletion-cas-create",
-	))
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture)
+	created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Deletion CAS record"), "record-deletion-cas-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision(create) error = %v", err)
 	}
 
-	deploymentID := recordplatform.DeploymentID("dp-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
 	createCommand, _ := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	repository := NewPostgresRecordDeletionRepository(runtimePool, fixture.admissionGate)
 	repository.newReservationID = func() (string, error) { return "drs_pgdeletecasdrift", nil }
 	repository.newOperationID = func() (string, error) { return "rpo_pgdeletecasdrift", nil }
 	repository.newAuditID = func() (string, error) { return "rda_pgdeletecasdrift", nil }
@@ -291,20 +277,13 @@ func TestPostgresIntegrationRecordDeletionReserveCASDriftRollsBackFenceAndOperat
 
 func TestPostgresIntegrationRecordDeletionDeleteCommitPurgesCoreAndDeliveryEpoch(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-delete-commit", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgdeletecommit",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Deletion committed record"),
-		"record-deletion-commit-create",
-	))
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture)
+	draftRepository := newAdmittedCoreDraftRepository(t, runtimePool, fixture.admissionGate)
+	created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Deletion committed record"), "record-deletion-commit-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
@@ -340,9 +319,9 @@ func TestPostgresIntegrationRecordDeletionDeleteCommitPurgesCoreAndDeliveryEpoch
 		t.Fatalf("checkpoint count before deletion = %d, want 1", checkpointCount)
 	}
 
-	deploymentID := recordplatform.DeploymentID("dp-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
 	createCommand, _ := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	repository := NewPostgresRecordDeletionRepository(runtimePool, fixture.admissionGate)
 	preview, err := repository.CreatePreview(ctx, createCommand)
 	if err != nil {
 		t.Fatalf("CreatePreview() error = %v", err)
@@ -463,26 +442,19 @@ func TestPostgresIntegrationRecordDeletionDeleteCommitPurgesCoreAndDeliveryEpoch
 
 func TestPostgresIntegrationRecordDeletionNotCommittedTakeoverRejectsStaleOwnerAndRestoresRead(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-deletion-not-committed", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgdeletenotcommitted",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Deletion not committed record"),
-		"record-deletion-not-committed-create",
-	))
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture)
+	created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Deletion not committed record"), "record-deletion-not-committed-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
 
-	deploymentID := recordplatform.DeploymentID("dp-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+	deploymentID := recordsPostgresActiveDeletionDeployment(t, ctx, fixture)
 	createCommand, token := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
-	repository := NewPostgresRecordDeletionRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	repository := NewPostgresRecordDeletionRepository(runtimePool, fixture.admissionGate)
 	preview, err := repository.CreatePreview(ctx, createCommand)
 	if err != nil {
 		t.Fatalf("CreatePreview() error = %v", err)
@@ -767,10 +739,9 @@ type recordsPostgresCoreDeletionPurger struct {
 
 func (purger *recordsPostgresCoreDeletionPurger) PurgeOnline(
 	ctx context.Context,
-	operation recorddeletion.DeletionOperation,
+	target recorddeletion.PurgeTarget,
 ) (recorddeletion.OnlinePurgeReceipt, error) {
 	purger.calls++
-	target := recorddeletion.PurgeTarget{Operation: operation}
 	receipt, err := purger.adapter.PurgeDeletion(ctx, target)
 	if err != nil {
 		purger.lastErr = err
@@ -781,7 +752,7 @@ func (purger *recordsPostgresCoreDeletionPurger) PurgeOnline(
 		return recorddeletion.OnlinePurgeReceipt{}, err
 	}
 	return recorddeletion.OnlinePurgeReceipt{
-		OperationID: operation.OperationID, ReceiptDigest: receipt.ReceiptDigest,
+		OperationID: target.Operation.OperationID, ReceiptDigest: receipt.ReceiptDigest,
 	}, nil
 }
 
@@ -789,9 +760,22 @@ type recordsPostgresUnexpectedDeletionPurger struct{}
 
 func (recordsPostgresUnexpectedDeletionPurger) PurgeOnline(
 	context.Context,
-	recorddeletion.DeletionOperation,
+	recorddeletion.PurgeTarget,
 ) (recorddeletion.OnlinePurgeReceipt, error) {
 	return recorddeletion.OnlinePurgeReceipt{}, errors.New("unexpected online purge")
+}
+
+func recordsPostgresActiveDeletionDeployment(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture) recordplatform.DeploymentID {
+	t.Helper()
+	var deploymentID recordplatform.DeploymentID
+	if err := fixture.db.QueryRow(ctx, `select deployment_id from public.deployment_contract_state where project_id = $1`,
+		recordplatform.ProjectIDDefault).Scan(&deploymentID); err != nil {
+		t.Fatalf("read admitted deletion deployment: %v", err)
+	}
+	if err := recordplatform.ValidateDeploymentID(deploymentID); err != nil {
+		t.Fatalf("invalid admitted deletion deployment: %v", err)
+	}
+	return deploymentID
 }
 
 func recordsPostgresDeletionPreviewCommand(

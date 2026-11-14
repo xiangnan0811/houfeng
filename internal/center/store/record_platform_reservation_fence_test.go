@@ -33,7 +33,7 @@ func TestPostgresRecordPlatformFenceDeletionReservationPersistsCancellationFence
 				*(dest[0].(*int64)) = 3
 				return nil
 			}}
-		case strings.Contains(sql, "from public.deletion_fence_leases"):
+		case strings.Contains(sql, "public.record_serving_deletion_fence_lock"):
 			return fakeRecordPlatformRow{scan: func(dest ...any) error {
 				*(dest[0].(*string)) = "expired_owner"
 				*(dest[1].(*int64)) = 3
@@ -86,16 +86,17 @@ func TestPostgresRecordPlatformFenceDeletionReservationPersistsCancellationFence
 	if len(tx.querySQL) < 7 {
 		t.Fatalf("reservation fence queries = %#v, want lock and update sequence", tx.querySQL)
 	}
-	wantRelations := []string{
-		"public.deletion_reservations",
-		"public.content_delivery_epochs",
-		"public.deletion_fence_leases",
-		"public.object_content_leases",
-	}
-	for index, relation := range wantRelations {
-		if !strings.Contains(tx.querySQL[index], relation) || !strings.Contains(tx.querySQL[index], "for update") {
-			t.Fatalf("lock query %d = %q, want FOR UPDATE on %s", index, tx.querySQL[index], relation)
+	for index, relation := range []string{"public.deletion_reservations", "public.content_delivery_epochs", "public.object_content_leases"} {
+		queryIndex := index
+		if index == 2 {
+			queryIndex = 3
 		}
+		if !strings.Contains(tx.querySQL[queryIndex], relation) || !strings.Contains(tx.querySQL[queryIndex], "for update") {
+			t.Fatalf("lock query %d = %q, want FOR UPDATE on %s", queryIndex, tx.querySQL[queryIndex], relation)
+		}
+	}
+	if !strings.Contains(tx.querySQL[2], "public.record_serving_deletion_fence_lock") {
+		t.Fatalf("fence lock query = %q, want restricted lock command", tx.querySQL[2])
 	}
 	for _, fragment := range []string{"state = 'fenced'", "fence_epoch", "owner_id", "owner_generation", "owner_expires_at"} {
 		if !strings.Contains(tx.querySQL[5], fragment) {
@@ -126,7 +127,7 @@ func TestPostgresRecordPlatformFenceDeletionReservationFailsClosedForMissingEpoc
 						return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
 					}
 					return fakeRecordPlatformRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = 3; return nil }}
-				case strings.Contains(sql, "from public.deletion_fence_leases"):
+				case strings.Contains(sql, "public.record_serving_deletion_fence_lock"):
 					if !test.fenceLease {
 						return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
 					}

@@ -29,7 +29,7 @@ func testPostgresIntegrationAppACLCurrentP71Upgrade(t *testing.T) {
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C71 to C74 convergence: %v", err)
 	}
@@ -47,7 +47,7 @@ func testPostgresIntegrationAppACLCurrentP71Upgrade(t *testing.T) {
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
 		appACLCurrentP72Migration, appACLCurrentP73Migration, appACLCurrentP74Migration,
-		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
 		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
@@ -58,7 +58,7 @@ func testPostgresIntegrationAppACLCurrentP71Upgrade(t *testing.T) {
 	}
 
 	beforeRepeat := after
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("repeat C71 to C74 convergence: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -31,12 +32,17 @@ func TestPostgresIntegrationAttachmentRecoveryInventoryPinsAndRestoreVerificatio
 	}
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	first := attachmentBlobGCIntegrationObject(
-		"attachment recovery first", "local-recovery-first-v1", attachments.BackendKindLocal,
-	)
-	second := attachmentBlobGCIntegrationObject(
-		"attachment recovery second", "local-recovery-second-v1", attachments.BackendKindLocal,
-	)
+	blob, err := newPostgresLocalBlobStore(t, ctx, fixture, filepath.Join(t.TempDir(), "blob-root"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeObject := func(content string) attachments.BlobObject {
+		version := seedPostgresManagedLocalBlob(t, ctx, fixture, blob, []byte(content)).Version
+		return attachments.BlobObject{Key: version.Key, ObjectVersion: version.VersionID, SHA256: version.SHA256,
+			SizeBytes: version.SizeBytes, BackendKind: attachments.BackendKindLocal, NamespaceID: blob.Namespace().NamespaceID}
+	}
+	first := makeObject("attachment recovery first")
+	second := makeObject("attachment recovery second")
 	objects := []attachments.BlobObject{first, second}
 	sort.Slice(objects, func(left, right int) bool {
 		if objects[left].Key == objects[right].Key {
@@ -87,11 +93,15 @@ func TestPostgresIntegrationAttachmentRecoveryInventoryPinsAndRestoreVerificatio
 		ProcessorJobIDs: []string{jobA.ProcessorJobID, jobZ.ProcessorJobID},
 		WorkspaceIDs:    []string{"cpw_recoverya", "cpw_recoveryz"},
 	}
-	if !reflect.DeepEqual(inventory, want) {
+	if !reflect.DeepEqual(inventory.Blobs, want.Blobs) || !reflect.DeepEqual(inventory.UploadIDs, want.UploadIDs) ||
+		!reflect.DeepEqual(inventory.ProcessorJobIDs, want.ProcessorJobIDs) || !reflect.DeepEqual(inventory.WorkspaceIDs, want.WorkspaceIDs) {
 		t.Fatalf("EnumerateAttachmentInventory() = %#v, want %#v", inventory, want)
 	}
 	if err := inventory.Validate(); err != nil {
 		t.Fatalf("EnumerateAttachmentInventory().Validate() error = %v", err)
+	}
+	if inventory.LocalDB == nil || inventory.LocalDB.Validate() != nil {
+		t.Fatal("local responsibilities were omitted from recovery inventory")
 	}
 
 	pin := attachments.CreateBlobGCPinCommand{

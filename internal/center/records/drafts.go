@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 const (
@@ -58,7 +59,7 @@ func (draft Draft) Validate() error {
 		return ErrInvalidDraftCommand
 	}
 	newRecord := draft.RecordID == "" && draft.BaseRevisionID == ""
-	existingRecord := validRecordRootID(draft.RecordID) && validRevisionID(draft.BaseRevisionID)
+	existingRecord := recordidentity.IsValid(draft.RecordID) && validRevisionID(draft.BaseRevisionID)
 	if !newRecord && !existingRecord {
 		return fmt.Errorf("%w: record and base revision", ErrInvalidDraftCommand)
 	}
@@ -188,7 +189,7 @@ func (routing DraftRouting) Validate() error {
 		return ErrInvalidDraftCommand
 	}
 	newRecord := routing.RecordID == "" && routing.BaseRevisionID == ""
-	existingRecord := validRecordRootID(routing.RecordID) && validRevisionID(routing.BaseRevisionID)
+	existingRecord := recordidentity.IsValid(routing.RecordID) && validRevisionID(routing.BaseRevisionID)
 	if !newRecord && !existingRecord {
 		return ErrInvalidDraftCommand
 	}
@@ -374,7 +375,7 @@ func (service *DraftService) CreateDraft(ctx context.Context, request DraftCreat
 			return Draft{}, recordauth.ErrDenied
 		}
 	} else {
-		if !validRecordRootID(request.RecordID) || !validRevisionID(request.BaseRevisionID) {
+		if !recordidentity.IsValid(request.RecordID) || !validRevisionID(request.BaseRevisionID) {
 			return Draft{}, ErrInvalidDraftCommand
 		}
 		current, err := service.current.ResolveCurrentRecordAuthorization(ctx, actor.Clone(), request.RecordID)
@@ -627,7 +628,7 @@ func (command DraftCreateCommand) Validate() error {
 		return ErrInvalidDraftCommand
 	}
 	newRecord := command.RecordID == "" && command.BaseRevisionID == ""
-	existingRecord := validRecordRootID(command.RecordID) && validRevisionID(command.BaseRevisionID)
+	existingRecord := recordidentity.IsValid(command.RecordID) && validRevisionID(command.BaseRevisionID)
 	if !newRecord && !existingRecord {
 		return fmt.Errorf("%w: record and base revision", ErrInvalidDraftCommand)
 	}

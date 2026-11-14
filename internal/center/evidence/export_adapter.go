@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 var (
@@ -57,7 +58,7 @@ func (adapter *ExportAdapter) Export(ctx context.Context, request ExportRequest)
 	if err != nil {
 		return ExportMaterial{}, err
 	}
-	if authorized.SnapshotID != request.SnapshotID || !validClosedPreparedID(authorized.RecordID, "rec_") {
+	if authorized.SnapshotID != request.SnapshotID || !recordidentity.IsValid(authorized.RecordID) {
 		return ExportMaterial{}, ErrExportUnavailable
 	}
 	kind, err := adapter.registry.LookupKey(authorized.Key)

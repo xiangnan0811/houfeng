@@ -6,6 +6,8 @@ import { Modal } from '../../../components/atoms/Modal'
 import { PageState } from '../../../components/PageState'
 import { ApiError } from '../../../lib/apiRequest'
 import { getEvidenceSnapshot, getRecordRevision } from '../../../lib/recordsApi'
+import { useAuth } from '../../../lib/auth-context'
+import { createRecordReadCleanupScope } from '../../../lib/recordReadCleanup'
 import type { RecordSubjectKind } from '../../../lib/types'
 import { ComparisonEvidenceChoice } from './ComparisonEvidenceChoice'
 import { evidenceChoiceMeta, factsFromSnapshot, isAbortError } from './comparisonEvidenceCopy'
@@ -62,11 +64,13 @@ function revisionEvidenceKey(item: RevisionItem): string {
 }
 
 export function ComparisonRevisionEvidenceDialog({ item, onClose, onApply }: Props) {
+  const userId = useAuth().user?.user_id ?? ''
   return (
     <Modal open={item != null} onClose={onClose} title="选择修订证据" size="lg">
       {item ? (
         <RevisionEvidenceBody
-          key={revisionEvidenceKey(item)}
+          key={`${userId}:${revisionEvidenceKey(item)}`}
+          userId={userId}
           item={item}
           onClose={onClose}
           onApply={onApply}
@@ -78,10 +82,12 @@ export function ComparisonRevisionEvidenceDialog({ item, onClose, onApply }: Pro
 
 function RevisionEvidenceBody({
   item,
+  userId,
   onClose,
   onApply,
 }: {
   item: RevisionItem
+  userId: string
   onClose: () => void
   onApply: (item: RevisionItem, snapshotIds: string[]) => void
 }) {
@@ -95,10 +101,14 @@ function RevisionEvidenceBody({
 
   useEffect(() => {
     const requestId = ++requestRef.current
-    const controller = new AbortController()
+    const cleanup = createRecordReadCleanupScope(userId, () => {
+      requestRef.current += 1
+      setChecked([])
+      setLoad({ status: 'unreadable', message: '该修订访问已撤销。' })
+    })
     touchedRef.current = new Set()
     const initial = new Set(snapshotKey.split('\n').filter(Boolean))
-    void getRecordRevision(recordId, revisionId)
+    void cleanup.include(recordId).then(() => getRecordRevision(recordId, revisionId))
       .then(async (revision) => {
         if (requestId !== requestRef.current) return
         const ids = [...new Set((revision.evidence_snapshot_ids ?? []).map((id) => id.trim()).filter(Boolean))]
@@ -114,8 +124,9 @@ function RevisionEvidenceBody({
         setLoad({ status: 'ready', rows, evidenceHref })
         await Promise.all(ids.map(async (snapshotId) => {
           try {
-            const snapshot = await getEvidenceSnapshot(snapshotId, controller.signal)
-            if (requestId !== requestRef.current || controller.signal.aborted) return
+            const snapshot = await getEvidenceSnapshot(snapshotId, cleanup.signal)
+            await cleanup.include(snapshot.record_id)
+            if (requestId !== requestRef.current || cleanup.signal.aborted) return
             const facts = factsFromSnapshot(snapshot)
             setLoad((current) => {
               if (current.status !== 'ready') return current
@@ -138,7 +149,7 @@ function RevisionEvidenceBody({
               setChecked((current) => current.includes(snapshotId) ? current : [...current, snapshotId])
             }
           } catch (error) {
-            if (requestId !== requestRef.current || controller.signal.aborted || isAbortError(error)) return
+            if (requestId !== requestRef.current || cleanup.signal.aborted || isAbortError(error)) return
             setLoad((current) => {
               if (current.status !== 'ready') return current
               return {
@@ -162,9 +173,9 @@ function RevisionEvidenceBody({
       })
     return () => {
       requestRef.current += 1
-      controller.abort()
+      cleanup.dispose()
     }
-  }, [recordId, revisionId, snapshotKey])
+  }, [recordId, revisionId, snapshotKey, userId])
 
   function toggle(snapshotId: string) {
     touchedRef.current.add(snapshotId)

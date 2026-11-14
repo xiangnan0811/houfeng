@@ -191,8 +191,14 @@ func createComposeState(root string, randomness io.Reader) (VerifiedComposeState
 	if err := os.Mkdir(publicDirectory, 0o755); err != nil {
 		return VerifiedComposeState{}, fmt.Errorf("%w: create public authority directory", ErrComposeStateInvalid)
 	}
+	if err := os.Chmod(publicDirectory, 0o755); err != nil {
+		return VerifiedComposeState{}, fmt.Errorf("%w: set public authority directory permissions", ErrComposeStateInvalid)
+	}
 	if err := os.Mkdir(privateDirectory, 0o700); err != nil {
 		return VerifiedComposeState{}, fmt.Errorf("%w: create private authority directory", ErrComposeStateInvalid)
+	}
+	if err := os.Chmod(privateDirectory, 0o700); err != nil {
+		return VerifiedComposeState{}, fmt.Errorf("%w: set private authority directory permissions", ErrComposeStateInvalid)
 	}
 	files := []struct {
 		path string

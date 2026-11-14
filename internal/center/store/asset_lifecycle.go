@@ -111,6 +111,9 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSArchive(ctx context.Context, 
 		return assetlifecycle.ArchiveReview{}, fmt.Errorf("begin vps archive transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertVPSLifecycleSourcesWritable(ctx, tx, vpsID); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
 
 	requestDigest := assetlifecycle.DigestArchiveRequest(input)
 	var storedDigest string
@@ -244,6 +247,9 @@ func (r *PostgresAssetLifecycleRepository) RestoreVPSFromArchive(ctx context.Con
 		return vpsassets.Record{}, fmt.Errorf("begin restore vps from archive transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertVPSLifecycleSourcesWritable(ctx, tx, vpsID); err != nil {
+		return vpsassets.Record{}, err
+	}
 
 	currentVPS, err := getLifecycleVPSAsset(ctx, tx, vpsID, true)
 	if err != nil {
@@ -301,6 +307,9 @@ func (r *PostgresAssetLifecycleRepository) ExtendVPSValidity(ctx context.Context
 		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("begin vps validity extension transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "vps", vpsID); err != nil {
+		return assetlifecycle.LifecycleActionResult{}, err
+	}
 
 	currentVPS, err := getLifecycleVPSAsset(ctx, tx, vpsID, true)
 	if err != nil {

@@ -15,6 +15,8 @@ import (
 	"houfeng/internal/center/assetrelations"
 	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 var _ assetdomains.Repository = (*PostgresAssetDomainRepository)(nil)
@@ -217,6 +219,9 @@ func (r *PostgresAssetDomainRepository) CreateAssetDomain(ctx context.Context, i
 }
 
 func ensureAssetDomainCreateAllowed(ctx context.Context, tx pgx.Tx, input assetdomains.CreateInput) error {
+	if err := assertAssetDomainSourcesWritable(ctx, tx, input); err != nil {
+		return err
+	}
 	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, input.VPSID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return assetdomains.ErrDomainOwnerNotFound
@@ -276,6 +281,9 @@ func (r *PostgresAssetDomainRepository) CreateAssetDomainIdempotent(
 		return assetdomains.Record{}, false, fmt.Errorf("begin asset domain create transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertAssetDomainSourcesWritable(ctx, tx, input); err != nil {
+		return assetdomains.Record{}, false, err
+	}
 
 	lockKey := createidempotency.NamespacedLockKey(assetDomainCreateOperation, key)
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, lockKey); err != nil {
@@ -443,4 +451,22 @@ func mapAssetDomainWriteError(err error) error {
 	default:
 		return nil
 	}
+}
+
+func assertAssetDomainSourcesWritable(ctx context.Context, tx pgx.Tx, input assetdomains.CreateInput) error {
+	if err := assertSourceWritable(ctx, tx, "vps", input.VPSID); err != nil {
+		if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+			return assetdomains.ErrDomainOwnerNotFound
+		}
+		return err
+	}
+	if input.TargetID != nil {
+		if err := assertSourceWritable(ctx, tx, "target", *input.TargetID); err != nil {
+			if errors.Is(err, targets.ErrTargetNotFound) {
+				return assetdomains.ErrDomainTargetNotFound
+			}
+			return err
+		}
+	}
+	return nil
 }

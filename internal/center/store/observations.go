@@ -30,13 +30,29 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 		return nil
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("begin observation batch tx: %w", err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	for _, sample := range batch.HostSamples {
+		if err := assertMonitoringSourceWritable(ctx, tx, sample.MonitoringInstanceID); err != nil {
+			return err
+		}
+	}
+	for _, observation := range batch.ProbeObservations {
+		if err := assertMonitoringSourceWritable(ctx, tx, observation.MonitoringInstanceID); err != nil {
+			return err
+		}
+		if err := assertSourceWritable(ctx, tx, "target", observation.TargetID); err != nil {
+			return err
+		}
+	}
 
 	if err := recordObservationBatch(ctx, tx, batch); err != nil {
 		return err

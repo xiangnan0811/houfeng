@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 
 import { Badge, Button, Timestamp } from '../../../components/atoms'
@@ -8,6 +8,8 @@ import { useAuth } from '../../../lib/auth-context'
 import { ApiError } from '../../../lib/apiRequest'
 import { getEvidenceSnapshot } from '../../../lib/recordsApi'
 import type { EvidenceSnapshotRead } from '../../../lib/types'
+import { createRecordSecurityController, type RecordSecurityController } from '../../../lib/recordSecurity'
+import { DraftWriteInvalidatedError, openIndexedDBDraftBuffer } from '../draftBuffer'
 import { comparisonEntryHref } from '../compare/comparisonQueryState'
 import { decideRegisteredEvidenceRender } from './EvidenceRendererRegistry'
 import { EvidenceTechnicalDetails } from './EvidenceTechnicalDetails'
@@ -57,28 +59,40 @@ export function EvidenceSnapshotPage() {
   const location = useLocation()
   const snapshotId = evidenceId?.trim() ?? ''
   const [retryToken, setRetryToken] = useState(0)
-  const requestKey = `${snapshotId}:${retryToken}`
+  const userId = auth.user?.user_id ?? ''
+  const store = useMemo(() => openIndexedDBDraftBuffer(), [])
+  const requestKey = `${userId}:${snapshotId}:${retryToken}`
   const [result, setResult] = useState<{ key: string; load: SettledLoad } | null>(null)
 
   useEffect(() => {
-    if (!snapshotId) return
+    if (!snapshotId || !userId) return
     const controller = new AbortController()
+    let security: RecordSecurityController | undefined
     let active = true
-    getEvidenceSnapshot(snapshotId, controller.signal)
-      .then((snapshot) => {
+    const userScope = store.captureScope(userId)
+    void Promise.all([getEvidenceSnapshot(snapshotId, controller.signal), userScope])
+      .then(async ([snapshot, capturedUser]) => {
+        const sourceScope = await store.captureScope(userId, snapshot.record_id)
+        await store.validateScopes([capturedUser, sourceScope])
         if (!active) return
+        security = createRecordSecurityController(snapshot.record_id, userId, 0, () => {
+          active = false
+          controller.abort()
+          setResult({ key: requestKey, load: { status: 'not-found' } })
+        })
         setResult({ key: requestKey, load: { status: 'ready', snapshot } })
       })
       .catch((error: unknown) => {
         if (!active) return
         if (error instanceof DOMException && error.name === 'AbortError') return
-        setResult({ key: requestKey, load: describeLoadFailure(error) })
+        setResult({ key: requestKey, load: error instanceof DraftWriteInvalidatedError ? { status: 'not-found' } : describeLoadFailure(error) })
       })
     return () => {
       active = false
       controller.abort()
+      security?.dispose()
     }
-  }, [snapshotId, requestKey])
+  }, [snapshotId, requestKey, store, userId])
 
   const load: LoadState = !snapshotId
     ? { status: 'not-found' }

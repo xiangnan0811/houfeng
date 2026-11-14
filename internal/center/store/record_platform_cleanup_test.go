@@ -3,65 +3,112 @@ package store
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/recordplatform"
 )
 
-func TestPostgresRecordPlatformCleanupExpiresOnlyOutboxAndRetainsReusableGenerations(t *testing.T) {
-	tx := &fakeRecordPlatformTx{}
-	tx.exec = func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
-		switch {
-		case strings.Contains(sql, "public.record_outbox"):
-			return pgconn.NewCommandTag("DELETE 2"), nil
-		default:
-			return pgconn.CommandTag{}, errors.New("unexpected cleanup relation")
+func TestPostgresIntegrationOutboxCleanupRetainsUnresolvedEffects(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	repository := NewPostgresRecordPlatformRepository(runtime, gate)
+	recordIDs := make(map[string]string, 4)
+	for _, state := range []string{"sent", "cancelled", "processing", "pending"} {
+		recordID := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "retention-"+state).RecordID
+		recordIDs[state] = recordID
+		if state == "pending" {
+			continue
+		}
+		claim, err := repository.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{
+			OwnerID: "retention_worker", OwnerLeaseDuration: time.Minute,
+		})
+		if err != nil || claim == nil || claim.Event.SubjectID != recordID {
+			t.Fatalf("claim %s: %#v, %v", state, claim, err)
+		}
+		switch state {
+		case "sent":
+			err = repository.MarkOutboxSent(ctx, *claim)
+		case "cancelled":
+			err = repository.CancelOutbox(ctx, *claim)
+		}
+		if err != nil {
+			t.Fatalf("finalize %s: %v", state, err)
 		}
 	}
-	repository := &PostgresRecordPlatformRepository{
-		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
-		gate:    AdmissionGateFunc(func(context.Context, pgx.Tx) error { return nil }),
+	// Age all rows and the in-flight owner without changing their actual state.
+	if _, err := fixture.db.Exec(ctx, `update public.record_outbox
+		set created_at=clock_timestamp()-interval '3 minutes',
+		    expires_at=clock_timestamp()-interval '1 minute',
+		    owner_expires_at=case when owner_expires_at is not null
+		      then clock_timestamp()-interval '2 minutes' end`); err != nil {
+		t.Fatal(err)
 	}
-
-	result, err := repository.CleanupExpiredRecordPlatformPrimitives(context.Background())
+	for _, state := range []string{"pending", "processing"} {
+		recordID := recordIDs[state]
+		var rowID int64
+		if err := runtime.QueryRow(ctx, `select outbox_row_id from public.record_outbox where subject_id=$1`, recordID).Scan(&rowID); err != nil {
+			t.Fatal(err)
+		}
+		tx, err := runtime.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate, err := readOutboxCandidate(ctx, tx, rowID, false)
+		if rollbackErr := tx.Rollback(ctx); err == nil {
+			err = rollbackErr
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := outboxCandidateCommand(candidate, recordID, "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var deletedID int64
+		err = runtime.QueryRow(ctx, `select outbox_row_id from public.record_outbox_cleanup($1::bytea)`, body).Scan(&deletedID)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("direct cleanup of expired %s = %d, %v; want no deletion", state, deletedID, err)
+		}
+	}
+	result, err := repository.CleanupExpiredRecordPlatformPrimitives(ctx)
+	if err != nil || result.OutboxEvents != 2 {
+		t.Fatalf("cleanup terminal rows = %#v, %v", result, err)
+	}
+	rows, err := runtime.Query(ctx, `select subject_id,status,owner_id,owner_generation
+		from public.record_outbox order by subject_id`)
 	if err != nil {
-		t.Fatalf("CleanupExpiredRecordPlatformPrimitives() error = %v", err)
+		t.Fatal(err)
 	}
-	want := recordplatform.ExpiredPrimitiveCleanupResultV1{
-		OutboxEvents: 2,
-	}
-	if result != want {
-		t.Fatalf("CleanupExpiredRecordPlatformPrimitives() = %#v, want %#v", result, want)
-	}
-	if len(tx.execSQL) != 1 || !strings.Contains(tx.execSQL[0], "public.record_outbox") {
-		t.Fatalf("cleanup SQL = %#v, want only non-reusable outbox delete", tx.execSQL)
-	}
-	for _, sql := range tx.execSQL {
-		for _, relation := range []string{
-			"public.record_idempotency_keys",
-			"public.identity_mutation_guards",
-			"public.deletion_fence_leases",
-			"public.object_content_leases",
-			"public.client_content_leases",
-			"public.deletion_reservations",
-			"public.record_purge_operations",
-			"ledger",
-		} {
-			if strings.Contains(sql, relation) {
-				t.Fatalf("cleanup must retain reusable generation or durable evidence %q:\n%s", relation, sql)
+	defer rows.Close()
+	seen := make(map[string]bool)
+	for rows.Next() {
+		var recordID, state, owner string
+		var generation int64
+		if err := rows.Scan(&recordID, &state, &owner, &generation); err != nil {
+			t.Fatal(err)
+		}
+		switch recordID {
+		case recordIDs["pending"]:
+			if state != "pending" || owner != "" || generation != 0 {
+				t.Fatalf("pending responsibility changed: %s %s %d", state, owner, generation)
 			}
+		case recordIDs["processing"]:
+			if state != "processing" || owner != "retention_worker" || generation != 1 {
+				t.Fatalf("in-flight responsibility changed: %s %s %d", state, owner, generation)
+			}
+		default:
+			t.Fatalf("expired terminal row retained: %s", recordID)
 		}
-		if !strings.Contains(sql, "expires_at <= transaction_timestamp()") {
-			t.Fatalf("cleanup SQL missing expired predicate:\n%s", sql)
-		}
+		seen[recordID] = true
 	}
-	for _, fragment := range []string{"owner_expires_at is null", "owner_expires_at <= transaction_timestamp()"} {
-		if !strings.Contains(tx.execSQL[0], fragment) {
-			t.Fatalf("outbox cleanup SQL missing %q:\n%s", fragment, tx.execSQL[0])
-		}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !seen[recordIDs["pending"]] || !seen[recordIDs["processing"]] {
+		t.Fatalf("cleanup erased unresolved responsibilities: %v", seen)
 	}
 }

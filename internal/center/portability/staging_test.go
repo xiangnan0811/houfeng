@@ -5,20 +5,15 @@ import (
 	"errors"
 	"io"
 	"testing"
-
-	"houfeng/internal/center/attachments"
 )
 
 func TestPortabilityLeasedBlobStoreStopsNewBytesAfterRevoke(t *testing.T) {
 	t.Parallel()
 
-	inner, err := attachments.NewLocalBlobStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewLocalBlobStore() error = %v", err)
-	}
-	store := NewLeasedBlobStore(inner)
+	inner := newPortabilityMemoryBlob()
+	store := NewLeasedBlobStore(inner, &portabilityMemoryWriter{blob: inner, namespace: portabilityTestNamespace})
 	payload := []byte("staged-export-bytes")
-	if _, err := store.Stage(context.Background(), "rej_lease1", payload); err != nil {
+	if _, err := store.Stage(context.Background(), portabilityStageRequest("export_artifact", "rej_lease1"), payload); err != nil {
 		t.Fatalf("Stage() error = %v", err)
 	}
 
@@ -45,24 +40,21 @@ func TestPortabilityLeasedBlobStoreStopsNewBytesAfterRevoke(t *testing.T) {
 func TestPortabilityLeasedBlobStoreStageImportOpensAfterLeaseDrop(t *testing.T) {
 	t.Parallel()
 
-	inner, err := attachments.NewLocalBlobStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewLocalBlobStore() error = %v", err)
-	}
-	store := NewLeasedBlobStore(inner)
+	inner := newPortabilityMemoryBlob()
+	store := NewLeasedBlobStore(inner, &portabilityMemoryWriter{blob: inner, namespace: portabilityTestNamespace})
 	payload := []byte("staged-import-bytes")
-	version, err := store.StageImport(context.Background(), "rij_lease1", payload)
+	version, err := store.StageImport(context.Background(), portabilityStageRequest("import_archive", "rij_lease1"), payload)
 	if err != nil {
 		t.Fatalf("StageImport() error = %v", err)
 	}
 	store.dropLease("rij_lease1")
-	reader, opened, err := store.OpenPublished(context.Background(), "rij_lease1", version)
+	reader, opened, err := store.OpenPublished(context.Background(), "rij_lease1", version.Version, version.NamespaceID)
 	if err != nil {
 		t.Fatalf("OpenPublished() error = %v", err)
 	}
 	defer reader.Close()
 	got, err := io.ReadAll(reader)
-	if err != nil || string(got) != string(payload) || opened.Key != version.Key {
+	if err != nil || string(got) != string(payload) || opened != version.Version {
 		t.Fatalf("OpenPublished() = %q %v key=%q", got, err, opened.Key)
 	}
 }
@@ -70,16 +62,13 @@ func TestPortabilityLeasedBlobStoreStageImportOpensAfterLeaseDrop(t *testing.T) 
 func TestPortabilityLeasedBlobStoreStageUsesS3TemporaryKeyContract(t *testing.T) {
 	t.Parallel()
 
-	inner, err := attachments.NewLocalBlobStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewLocalBlobStore() error = %v", err)
-	}
+	inner := newPortabilityMemoryBlob()
 	capture := &capturingBlobStore{inner: inner}
-	store := NewLeasedBlobStore(capture)
-	if _, err := store.Stage(context.Background(), "rej_tmp1", []byte("export-bytes")); err != nil {
+	store := NewLeasedBlobStore(capture, &portabilityMemoryWriter{blob: capture, namespace: portabilityTestNamespace})
+	if _, err := store.Stage(context.Background(), portabilityStageRequest("export_artifact", "rej_tmp1"), []byte("export-bytes")); err != nil {
 		t.Fatalf("Stage() error = %v", err)
 	}
-	if _, err := store.StageImport(context.Background(), "rij_tmp1", []byte("import-bytes")); err != nil {
+	if _, err := store.StageImport(context.Background(), portabilityStageRequest("import_archive", "rij_tmp1"), []byte("import-bytes")); err != nil {
 		t.Fatalf("StageImport() error = %v", err)
 	}
 	if len(capture.puts) != 2 {

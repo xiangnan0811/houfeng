@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"testing"
 
 	"houfeng/internal/center/recorddeletion"
@@ -13,9 +14,9 @@ import (
 
 func TestPostgresIntegrationRecordSearchDeletionPurgesEveryGenerationAndReplays(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	purged := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_searchdelete", "Purged parent")
-	survivor := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_searchkeep", "Survivor parent")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	purged := seedRecordWithoutSearchProjection(t, ctx, fixture, "Purged parent")
+	survivor := seedRecordWithoutSearchProjection(t, ctx, fixture, "Survivor parent")
 
 	digest := testStoreRecordPlatformDigest(0x71)
 	indexed := []struct {
@@ -65,16 +66,14 @@ func TestPostgresIntegrationRecordSearchDeletionPurgesEveryGenerationAndReplays(
 		}
 	}
 
-	operation := recorddeletion.DeletionOperation{
-		OperationID: "rpo_searchdelete", ReservationID: "drs_searchdelete",
+	operation := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1, OperationID: "rpo_searchdelete", ReservationID: "drs_searchdelete",
 		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: purged.RecordID},
 		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging,
-		FenceEpoch: 7, LedgerSequence: 11, LedgerEntryHash: sha256.Sum256([]byte("search deletion ledger")),
-	}
+		FenceEpoch: 7, LedgerSequence: 11, LedgerEntryHash: sha256.Sum256([]byte("search deletion ledger"))}
 	seedAttachmentDeletionOperation(t, ctx, fixture, operation, purged.RevisionID)
 	repository := NewPostgresRecordDeletionRepository(
 		fixture.openDirectRuntimePool(t, ctx, "record-search-deletion", 2),
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	adapter, err := recordsearch.NewDeletionAdapter(repository)
 	if err != nil {
@@ -138,8 +137,8 @@ func TestPostgresIntegrationRecordSearchDeletionPurgesEveryGenerationAndReplays(
 
 func TestPostgresIntegrationRecordSearchDeletionDoesNotCommitReceiptBeforeExactAbsence(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	parent := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_searchblocked", "Blocked parent")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	parent := seedRecordWithoutSearchProjection(t, ctx, fixture, "Blocked parent")
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_search_generations (generation, generation_state, published_at)
 		values (1, 'published', transaction_timestamp())`); err != nil {
@@ -168,16 +167,14 @@ func TestPostgresIntegrationRecordSearchDeletionDoesNotCommitReceiptBeforeExactA
 		for each row execute function record_platform_internal.suppress_search_document_delete()`); err != nil {
 		t.Fatalf("install blocked search delete trigger: %v", err)
 	}
-	operation := recorddeletion.DeletionOperation{
-		OperationID: "rpo_searchblocked", ReservationID: "drs_searchblocked",
+	operation := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1, OperationID: "rpo_searchblocked", ReservationID: "drs_searchblocked",
 		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: parent.RecordID},
 		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging,
-		FenceEpoch: 7, LedgerSequence: 12, LedgerEntryHash: sha256.Sum256([]byte("blocked search deletion ledger")),
-	}
+		FenceEpoch: 7, LedgerSequence: 12, LedgerEntryHash: sha256.Sum256([]byte("blocked search deletion ledger"))}
 	seedAttachmentDeletionOperation(t, ctx, fixture, operation, parent.RevisionID)
 	repository := NewPostgresRecordDeletionRepository(
 		fixture.openDirectRuntimePool(t, ctx, "record-search-blocked-deletion", 2),
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	adapter, err := recordsearch.NewDeletionAdapter(repository)
 	if err != nil {
@@ -200,25 +197,23 @@ func TestPostgresIntegrationRecordSearchDeletionDoesNotCommitReceiptBeforeExactA
 	}
 }
 
-// seedRecordWithoutSearchProjection commits with no search participant, which is
-// what a record written before the index looks like. Revision identity is derived
-// from the payload, so seeded records need distinct titles or their revision rows
-// collide.
+// seedRecordWithoutSearchProjection creates a real ordinary record without the
+// search participant, as for a record created before search was initialized.
 func seedRecordWithoutSearchProjection(
 	t *testing.T,
 	ctx context.Context,
 	fixture recordPlatformPostgresFixture,
-	recordID string,
 	title string,
 ) records.RevisionCommitResult {
 	t.Helper()
-	repository := newRecordsPostgresRepository(t, fixture.openDirectRuntimePool(t, ctx, recordID+"-seed", 1))
-	result, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, title), recordID+"-seed",
-	))
+	key := fmt.Sprintf("search-seed-%x", sha256.Sum256([]byte(title)))
+	runtime := fixture.openDirectRuntimePool(t, ctx, key, 1)
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtime, Gate: fixture.admissionGate}
+	repository := newRevisionMutationAdmittedRepository(t, birthFixture)
+	result, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, title), key))
 	if err != nil {
-		t.Fatalf("CommitRevision(%s) error = %v", recordID, err)
+		t.Fatalf("CommitRevision(%q) error = %v", title, err)
 	}
 	return result
 }

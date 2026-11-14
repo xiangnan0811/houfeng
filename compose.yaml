@@ -30,20 +30,9 @@ services:
     user: "10002:10002"
     group_add:
       - "10001"
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        copy_secret() {
-          install -g "$$4" -m "$$3" "$$1" "$$2.next"
-          mv -f "$$2.next" "$$2"
-        }
-        copy_secret /run/secrets/postgres_bootstrap_password /state/secrets/db-init/postgres_bootstrap_password 0400 10002
-        copy_secret /run/secrets/houfeng_runtime_password /state/secrets/db-init/houfeng_runtime_password 0400 10002
-        copy_secret /run/secrets/houfeng_platform_admin_password /state/secrets/db-init/houfeng_platform_admin_password 0400 10002
-        copy_secret /run/secrets/houfeng_migrator_password /state/secrets/db-init/houfeng_migrator_password 0400 10002
-        copy_secret /run/secrets/houfeng_runtime_password /state/secrets/processor/houfeng_runtime_password 0040 10001
+    entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]
+    command: ["deploy-stage-secrets", "--scope", "compose"]
     restart: "no"
-    network_mode: none
     cap_drop:
       - ALL
     security_opt:
@@ -51,12 +40,22 @@ services:
     depends_on:
       houfeng-storage-init:
         condition: service_completed_successfully
+      db:
+        condition: service_healthy
     volumes:
       - ./data/secrets:/state/secrets
+      - ./data:/var/lib/houfeng:ro
+      - ./maintenance:/var/lib/houfeng-maintenance
+      - type: tmpfs
+        target: /var/lib/houfeng/secrets
+        tmpfs:
+          size: 4096
+          mode: 0
     secrets:
       - postgres_bootstrap_password
       - houfeng_runtime_password
       - houfeng_platform_admin_password
+      - houfeng_record_deletion_worker_password
       - houfeng_migrator_password
 
   db:
@@ -100,6 +99,7 @@ services:
     volumes:
       - ./data:/var/lib/houfeng
       - ./data/secrets/db-init:/run/secrets:ro
+      - ./maintenance:/var/lib/houfeng-maintenance
 
   houfeng-record-authority:
     logging: *bounded-logging
@@ -130,6 +130,7 @@ services:
       start_period: 10s
     volumes:
       - ./data:/var/lib/houfeng:ro
+      - ./maintenance:/var/lib/houfeng-maintenance
       - type: tmpfs
         target: /var/lib/houfeng/secrets
         tmpfs:
@@ -295,6 +296,8 @@ secrets:
     environment: "${HOUFENG_RUNTIME_PASSWORD:+HOUFENG_RUNTIME_PASSWORD}"
   houfeng_platform_admin_password:
     environment: "${HOUFENG_PLATFORM_ADMIN_PASSWORD:+HOUFENG_PLATFORM_ADMIN_PASSWORD}"
+  houfeng_record_deletion_worker_password:
+    environment: "${HOUFENG_RECORD_DELETION_WORKER_PASSWORD:+HOUFENG_RECORD_DELETION_WORKER_PASSWORD}"
   houfeng_migrator_password:
     environment: "${HOUFENG_MIGRATOR_PASSWORD:+HOUFENG_MIGRATOR_PASSWORD}"
   houfeng_initial_password:

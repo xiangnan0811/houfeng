@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
-	"houfeng/internal/center/records"
+	"houfeng/internal/center/recordidentity"
 )
 
 // SortKey is the position of the last row on a page. It always carries the
@@ -155,7 +155,7 @@ func cursorBindingDigests(
 }
 
 func validateSortKey(sortKey SortKey) error {
-	if sortKey.UpdatedAt.IsZero() || !records.ValidRecordRootID(sortKey.RecordID) {
+	if sortKey.UpdatedAt.IsZero() || !recordidentity.IsValid(sortKey.RecordID) {
 		return ErrInvalidCursor
 	}
 	return nil

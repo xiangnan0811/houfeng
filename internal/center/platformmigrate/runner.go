@@ -48,13 +48,18 @@ func Names(fsys fs.FS) ([]string, error) {
 }
 
 func ApplyFS(ctx context.Context, store Store, fsys fs.FS) error {
-	if err := store.EnsureLedger(ctx); err != nil {
-		return fmt.Errorf("ensure migration ledger: %w", err)
-	}
-
 	sources, err := migrationSources(fsys)
 	if err != nil {
 		return err
+	}
+	// This migration requires a single transaction encompassing ownership,
+	// grants, the ledger and successor verification. Reject before even creating
+	// the ledger, including when a caller supplies a subset filesystem.
+	if _, found := sources["0003_record_birth_authority.sql"]; found {
+		return fmt.Errorf("record birth witness migration requires source authority convergence")
+	}
+	if err := store.EnsureLedger(ctx); err != nil {
+		return fmt.Errorf("ensure migration ledger: %w", err)
 	}
 	applied, err := store.Applied(ctx)
 	if err != nil {

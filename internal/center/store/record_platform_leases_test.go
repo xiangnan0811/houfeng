@@ -88,7 +88,7 @@ func TestPostgresRecordPlatformObjectContentLeaseUsesLiveOwnerFenceForAcquireRen
 		switch {
 		case strings.Contains(sql, "from public.content_delivery_epochs"):
 			return fakeRecordPlatformRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = 0; return nil }}
-		case strings.Contains(sql, "from public.deletion_fence_leases"):
+		case strings.Contains(sql, "public.record_serving_deletion_fence_lock"):
 			return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
 		case strings.Contains(sql, "public.object_content_leases"):
 			return fakeRecordPlatformRow{scan: func(dest ...any) error {
@@ -130,13 +130,9 @@ func TestPostgresRecordPlatformObjectContentLeaseUsesLiveOwnerFenceForAcquireRen
 	if len(tx.querySQL) != 4 || len(tx.execSQL) != 1 {
 		t.Fatalf("lease SQL queries=%#v execs=%#v, want epoch/fence/object acquire, renew, release", tx.querySQL, tx.execSQL)
 	}
-	for index, relation := range []string{
-		"public.content_delivery_epochs",
-		"public.deletion_fence_leases",
-	} {
-		if !strings.Contains(tx.querySQL[index], relation) || !strings.Contains(tx.querySQL[index], "for update") {
-			t.Fatalf("object-content claim lock %d = %q, want FOR UPDATE on %s", index, tx.querySQL[index], relation)
-		}
+	if !strings.Contains(tx.querySQL[0], "public.content_delivery_epochs") || !strings.Contains(tx.querySQL[0], "for update") ||
+		!strings.Contains(tx.querySQL[1], "public.record_serving_deletion_fence_lock") {
+		t.Fatalf("object-content claim locks = %#v, want epoch lock followed by restricted fence lock", tx.querySQL[:2])
 	}
 	if !strings.Contains(tx.querySQL[2], "public.object_content_leases") || !strings.Contains(tx.querySQL[2], "on conflict") {
 		t.Fatalf("object-content claim SQL = %q, want fenced upsert after epoch and deletion-fence locks", tx.querySQL[2])
@@ -177,7 +173,7 @@ func TestPostgresRecordPlatformObjectContentLeaseFailsClosedForMissingEpochAndLi
 				if strings.Contains(sql, "from public.content_delivery_epochs") {
 					return fakeRecordPlatformRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = 0; return nil }}
 				}
-				if strings.Contains(sql, "from public.deletion_fence_leases") {
+				if strings.Contains(sql, "public.record_serving_deletion_fence_lock") {
 					return fakeRecordPlatformRow{scan: func(dest ...any) error {
 						*(dest[0].(*string)) = "fence_worker"
 						*(dest[1].(*int64)) = 1
@@ -216,7 +212,7 @@ func TestPostgresRecordPlatformServingLeaseIsCapturedAndAssertedFromOneAdmittedD
 		switch {
 		case strings.Contains(sql, "from public.content_delivery_epochs"):
 			return fakeRecordPlatformRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = 4; return nil }}
-		case strings.Contains(sql, "from public.deletion_fence_leases") && strings.Contains(sql, "for update"):
+		case strings.Contains(sql, "public.record_serving_deletion_fence_lock"):
 			return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
 		case strings.Contains(sql, "insert into public.object_content_leases"):
 			return fakeRecordPlatformRow{scan: func(dest ...any) error {
@@ -258,7 +254,6 @@ func TestPostgresRecordPlatformServingLeaseIsCapturedAndAssertedFromOneAdmittedD
 		"object_lease.expires_at > transaction_timestamp()",
 		"epoch.delivery_epoch = $",
 		"public.deletion_fence_leases",
-		"expires_at > transaction_timestamp()",
 	} {
 		if !strings.Contains(assertSQL, fragment) {
 			t.Fatalf("serving assertion SQL missing %q:\n%s", fragment, assertSQL)
@@ -303,7 +298,7 @@ func TestPostgresRecordPlatformRenewServingLeaseAtomicallyChecksEpochFenceAndOwn
 				*dest[0].(*int64) = 4
 				return nil
 			}}
-		case strings.Contains(sql, "from public.deletion_fence_leases") && strings.Contains(sql, "for update"):
+		case strings.Contains(sql, "public.record_serving_deletion_fence_lock"):
 			return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
 		case strings.Contains(sql, "from public.object_content_leases") && strings.Contains(sql, "for update"):
 			return fakeRecordPlatformRow{scan: func(dest ...any) error {
@@ -351,11 +346,11 @@ func TestPostgresRecordPlatformRenewServingLeaseAtomicallyChecksEpochFenceAndOwn
 	}
 	for index, relation := range []string{
 		"public.content_delivery_epochs",
-		"public.deletion_fence_leases",
+		"public.record_serving_deletion_fence_lock",
 		"public.object_content_leases",
 	} {
-		if !strings.Contains(tx.querySQL[index], relation) || !strings.Contains(tx.querySQL[index], "for update") {
-			t.Fatalf("RenewServingLease() lock %d = %q, want %s FOR UPDATE", index, tx.querySQL[index], relation)
+		if !strings.Contains(tx.querySQL[index], relation) || (index != 1 && !strings.Contains(tx.querySQL[index], "for update")) {
+			t.Fatalf("RenewServingLease() lock %d = %q, want %s", index, tx.querySQL[index], relation)
 		}
 	}
 	if !strings.Contains(tx.querySQL[3], "update public.object_content_leases") ||

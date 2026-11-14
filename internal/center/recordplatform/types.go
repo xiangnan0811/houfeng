@@ -382,6 +382,15 @@ func (fingerprint PersistedRequestFingerprintV1) Validate() error {
 	return nil
 }
 
+// PersistedBytes returns a validated copy for independent ledger encoding.
+// The readback remains distinct from a write-capable request fingerprint.
+func (fingerprint PersistedRequestFingerprintV1) PersistedBytes() ([sha256.Size]byte, error) {
+	if err := fingerprint.Validate(); err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	return fingerprint.digest, nil
+}
+
 // Equal compares two persisted readback fingerprints without exposing either
 // digest or making either value write-capable.
 func (fingerprint PersistedRequestFingerprintV1) Equal(other PersistedRequestFingerprintV1) bool {

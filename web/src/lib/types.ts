@@ -3063,8 +3063,29 @@ export type EvidenceFieldDecision = {
   action: 'included' | 'stripped' | 'masked' | 'forbidden'
 }
 
+// 新目标记录的服务端预留。generation 0 是普通域、正数是可认证域；语法和本对象都不证明认证状态，
+// 客户端只原样保存、原样回传，不能据此推断出生证明。
+export type RecordAllocationPurpose = 'record_create' | 'evidence_preview' | 'comparison_save'
+
+export type RecordAllocation = {
+  allocation_id: string
+  reservation_id: string
+  record_id: string
+  purpose: RecordAllocationPurpose
+  request_digest: string
+  generation: number
+  idempotency_key: string
+}
+
+export type RecordAllocationInput = {
+  purpose: RecordAllocationPurpose
+  request_digest: string
+}
+
 export type EvidenceCapturePreviewInput = {
   record_id?: string
+  // 新目标首次预览返回的预留；之后同一目标的预览原样带上。已有记录不带。
+  allocation?: RecordAllocation
   kind: EvidenceKindName
   schema_version: number
   source_type: string
@@ -3105,6 +3126,7 @@ export type EvidenceCapturePreview = EvidenceEnvelopeTransport & {
   estimated_canonical_bytes: number
   previewed_at: string
   valid_until: string
+  allocation?: RecordAllocation
 }
 
 export type EvidenceSnapshotRead = EvidenceEnvelopeTransport & {
@@ -3120,7 +3142,7 @@ export type EvidenceCaptureReference = {
   capture_intent_id: string
 }
 
-export type RecordLifecycle = 'active' | 'archived'
+export type RecordLifecycle = 'active' | 'archived' | 'trashed'
 
 export type RecordType =
   | 'troubleshooting'
@@ -3426,12 +3448,14 @@ export type RecordImportPlan = {
   quarantine: RecordImportQuarantine[]
   object_count: number
   expires_at: string
+  certification_pending?: boolean
 }
 
 export type RecordImportApplyResult = {
   plan_id: string
   job_state: string
   record_ids: string[]
+  certification_pending?: boolean
 }
 
 export type RecordFollowUpState = 'none' | 'scheduled' | 'overdue'
@@ -3491,6 +3515,8 @@ export type RecordMutationResult = {
   created: boolean
   replayed: boolean
   committed_at: string
+  /** APP has committed; the independent birth confirmation remains pending. */
+  certification_pending?: boolean
 }
 
 export type RecordLifecycleResult = {
@@ -3566,9 +3592,10 @@ export type PublishRecordInput = {
   evidence_items?: RecordEvidenceItemInput[]
 }
 
-// 新建记录带证据时，record_id 必须是首次证据预览时服务端预分配的那个；修订请求不接受该字段。
+// 新建记录：record_id 与 allocation 必须是同一个服务端预留（带证据时来自首次证据预览）；修订请求不接受这两个字段。
 export type CreateRecordInput = PublishRecordInput & {
-  record_id?: string
+  record_id: string
+  allocation: RecordAllocation
 }
 
 export type PublishRecordRevisionInput = PublishRecordInput & {
@@ -3614,11 +3641,25 @@ export type RecordSurvivingCopyKind =
   | 'offline_browser_buffer'
   | 'possible_external_delivery'
 
-export type RecordDeletionSurvivingCopy = {
+export type RecordDeletionKnownSurvivingCopy = {
   scope: RecordDeletionScope
   kind: RecordSurvivingCopyKind
+  count_status: 'known'
   copy_count: number
 }
+
+// Only Markdown-client offline browser buffers may be uncountable; they report
+// a null count rather than a fabricated 0 or 1.
+export type RecordDeletionUnknownSurvivingCopy = {
+  scope: 'record_markdown_client'
+  kind: 'offline_browser_buffer'
+  count_status: 'unknown'
+  copy_count: null
+}
+
+export type RecordDeletionSurvivingCopy =
+  | RecordDeletionKnownSurvivingCopy
+  | RecordDeletionUnknownSurvivingCopy
 
 export type RecordDeletionManagedBackup = {
   retained_copy_count: number
@@ -3790,6 +3831,8 @@ export type SubjectActivityEventKind =
   | 'record_restored'
   | 'record_archived'
   | 'record_unarchived'
+  | 'record_trashed'
+  | 'record_trash_restored'
   | 'record_owner_changed'
   | 'record_participant_changed'
   | 'record_follow_up_changed'
@@ -4116,6 +4159,7 @@ export type ComparisonResolvedItem = {
   revision_context: 'bound' | 'not_applicable'
   record_id?: string
   revision_id?: string
+  source_record_id: string
   subject_kind?: ComparisonSubjectKind
   subject_id?: string
   revision?: ComparisonRevisionMetadata
@@ -4178,6 +4222,7 @@ export type SaveComparisonRecordInput = {
   draft_id: string
   draft_etag: string
   comparison_intent: string
+  allocation: RecordAllocation
 }
 
 export type SaveComparisonRevisionInput = {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -46,7 +47,7 @@ func (request LedgerAppendRequest) Validate() error {
 		recordplatform.ValidateProjectID(request.ProjectID) != nil ||
 		!validDeletionOperationID(request.OperationID) || recordauth.ValidateActorUserID(request.ActorID) != nil ||
 		request.Object.Validate() != nil || request.Object.ProjectID != string(request.ProjectID) ||
-		request.Object.ObjectKind != "record" || !validDeletionRecordID(request.Object.ObjectID) ||
+		request.Object.ObjectKind != "record" || !recordidentity.IsValid(request.Object.ObjectID) ||
 		zeroDeletionDigest(request.TokenCommitment) || request.RequestFingerprint.Validate() != nil ||
 		request.ReasonCode != DeletionReasonUserConfirmed {
 		return ErrInvalidDeletionWorkerResult
@@ -223,7 +224,15 @@ type ClaimedDeletionWork struct {
 }
 
 func (claim ClaimedDeletionWork) Validate() error {
-	if claim.Operation.Validate() != nil || claim.Owner.Validate() != nil || claim.Request.Validate() != nil ||
+	if claim.Operation.ContractVersion == DeletionContractV2 {
+		if claim.Operation.Validate() != nil || claim.Owner.Validate() != nil ||
+			claim.Stage != DeletionWorkPurgeOnline || claim.Operation.State != DeletionStateOnlinePurging ||
+			claim.Request != (LedgerAppendRequest{}) || claim.Entry != nil || claim.RetryStage != "" {
+			return ErrInvalidDeletionWorkerResult
+		}
+		return nil
+	}
+	if claim.Operation.ContractVersion != DeletionContractV1 || claim.Operation.Validate() != nil || claim.Owner.Validate() != nil || claim.Request.Validate() != nil ||
 		claim.Request.OperationID != claim.Operation.OperationID || claim.Request.Object != claim.Operation.Object ||
 		claim.Request.ReasonCode != claim.Operation.ReasonCode {
 		return ErrInvalidDeletionWorkerResult
@@ -309,7 +318,7 @@ type DeletionEntryWitness interface {
 }
 
 type DeletionOnlinePurger interface {
-	PurgeOnline(context.Context, DeletionOperation) (OnlinePurgeReceipt, error)
+	PurgeOnline(context.Context, PurgeTarget) (OnlinePurgeReceipt, error)
 }
 
 type DeletionWorkerOptions struct {
@@ -386,6 +395,9 @@ func (worker *DeletionWorker) RunOnce(ctx context.Context) error {
 	}
 	if claim == nil {
 		return nil
+	}
+	if claim.Operation.ContractVersion != DeletionContractV1 {
+		return ErrInvalidDeletionWorkerResult
 	}
 	if err := claim.Validate(); err != nil {
 		return err
@@ -492,7 +504,8 @@ func (worker *DeletionWorker) confirmEntry(ctx context.Context, claim ClaimedDel
 }
 
 func (worker *DeletionWorker) purgeOnline(ctx context.Context, claim ClaimedDeletionWork) error {
-	receipt, err := worker.purger.PurgeOnline(ctx, claim.Operation)
+	receipt, err := worker.purger.PurgeOnline(ctx, PurgeTarget{Operation: claim.Operation,
+		OwnerClaim: OperationOwnerClaim{OperationID: claim.Operation.OperationID, Owner: claim.Owner}})
 	if err != nil {
 		return worker.markRetryRequired(ctx, claim, DeletionWorkPurgeOnline, err)
 	}

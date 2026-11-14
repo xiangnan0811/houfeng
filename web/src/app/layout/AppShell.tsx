@@ -15,6 +15,7 @@ import {
   SHELL_SUMMARY_FRESHNESS_MS,
   type DashboardSummaryState,
 } from './shellSummaryModel'
+import { Button } from '../../components/atoms/Button'
 
 // 平板及以下宽度默认把侧栏收成图标栏，给内容让出宽度；跨过断点时回到该宽度的默认值，
 // 折叠按钮仍可手动展开。≤760px 的窄栏由 CSS 固定，不受这里影响。
@@ -58,6 +59,7 @@ type AuthenticatedAppShellProps = {
 }
 
 function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
+  const { status: authStatus, error: authError, retry: retrySession } = useAuth()
   const [collapsed, setCollapsed] = useState(() => compactShellQuery()?.matches ?? false)
   const [changePwOpen, setChangePwOpen] = useState(false)
 
@@ -143,6 +145,12 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
         <div className="main-wrap">
           <TopBar sync={sync} user={user} />
           <main className="main" id="main-content" tabIndex={-1}>
+            {authStatus === 'ready' && authError && (
+              <div className="shell-cleanup-notice" role="status" aria-live="polite">
+                <span>{authError}</span>
+                <Button type="button" size="sm" onClick={() => { void retrySession() }}>重试同步</Button>
+              </div>
+            )}
             <Suspense fallback={(
               <p className="asset-operation-feedback asset-operation-feedback--notice" role="status" aria-live="polite">
                 正在加载页面…

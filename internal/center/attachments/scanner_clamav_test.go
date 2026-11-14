@@ -499,6 +499,13 @@ func startFakeClamAVServer(t *testing.T, network string, handler func(net.Conn) 
 			_ = os.RemoveAll(socketDir)
 		})
 		address = filepath.Join(socketDir, "s")
+		// sun_path is limited to 108 bytes; in-checkout scratch TMPDIR under a
+		// worktree can exceed it, so prefer the shorter cwd-relative form.
+		if wd, err := os.Getwd(); err == nil {
+			if relative, err := filepath.Rel(wd, address); err == nil && len(relative) < len(address) {
+				address = relative
+			}
+		}
 	}
 	listener, err := net.Listen(network, address)
 	if err != nil {

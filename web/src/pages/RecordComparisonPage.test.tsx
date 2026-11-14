@@ -1,15 +1,22 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../lib/apiRequest'
 import type { ComparisonEvaluateResponse } from '../lib/types'
+import { recordAllocationFixture } from './records/testFixtures'
 import { RecordComparisonPage } from './RecordComparisonPage'
 import {
   COMPARISON_URL_VERSION,
   encodeComparisonURLState,
   type ComparisonURLState,
 } from './records/compare/comparisonQueryState'
+import type * as DraftBuffers from './records/draftBuffer'
+
+vi.mock('./records/draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof DraftBuffers>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 vi.mock('../lib/auth-context', () => {
   const auth = {
@@ -44,6 +51,7 @@ const api = vi.hoisted(() => ({
   instances: vi.fn(),
   targets: vi.fn(),
   createRecordDraft: vi.fn(),
+  createRecordAllocation: vi.fn(),
   saveComparisonRecord: vi.fn(),
 }))
 
@@ -54,6 +62,8 @@ vi.mock('../lib/recordsApi', () => ({
   getRecordRevision: (...args: unknown[]) => api.revision(...args),
   listSubjectActivity: (...args: unknown[]) => api.activity(...args),
   createRecordDraft: (...args: unknown[]) => api.createRecordDraft(...args),
+  createRecordAllocation: (...args: unknown[]) => api.createRecordAllocation(...args),
+  recoverLegacyComparisonRecord: vi.fn(),
   saveComparisonRecord: (...args: unknown[]) => api.saveComparisonRecord(...args),
   createRecord: vi.fn(),
 }))
@@ -74,6 +84,7 @@ const response: ComparisonEvaluateResponse = {
   items: [
     {
       snapshot_id: 'evs_a',
+      source_record_id: 'rec_a',
       canonical_hash: '11'.repeat(32),
       kind: 'monitoring.probe',
       schema_version: 2,
@@ -81,6 +92,7 @@ const response: ComparisonEvaluateResponse = {
     },
     {
       snapshot_id: 'evs_b',
+      source_record_id: 'rec_b',
       canonical_hash: '22'.repeat(32),
       kind: 'monitoring.probe',
       schema_version: 2,
@@ -282,15 +294,17 @@ describe('RecordComparisonPage', () => {
     expect(screen.queryByRole('button', { name: '另存为记录' })).not.toBeInTheDocument()
   })
 
-  it('removes the visible comparison when saving is denied for an invalid intent', async () => {
+  it('retains a sent save and offers exact retry after an invalid-intent response', async () => {
     api.compare.mockResolvedValue(response)
+    api.createRecordAllocation.mockImplementation(async (input: { request_digest: string }, key: string) =>
+      recordAllocationFixture('comparepage', { purpose: 'comparison_save', request_digest: input.request_digest, idempotency_key: key }))
     api.createRecordDraft.mockResolvedValue({
       draft_id: 'rdf_compare',
       etag: 'rdt1_compare',
     })
-    api.saveComparisonRecord.mockRejectedValue(
-      new ApiError(422, 'comparison intent is invalid', { code: 'comparison_intent_invalid' }),
-    )
+    api.saveComparisonRecord.mockReset()
+      .mockRejectedValueOnce(new ApiError(422, 'comparison intent is invalid', { code: 'comparison_intent_invalid' }))
+      .mockImplementationOnce(async (input: { record_id: string }) => ({ record_id: input.record_id }))
     renderCompare({
       version: COMPARISON_URL_VERSION,
       mode: 'fixed',
@@ -309,19 +323,19 @@ describe('RecordComparisonPage', () => {
     expect(document.querySelectorAll('polyline[data-segment]')).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: '另存为记录' }))
 
-    expect(await screen.findByRole('heading', { name: '比较不可用' })).toBeInTheDocument()
-    expect(screen.getByText('comparison intent is invalid')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '比较结果' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '趋势' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '可比性审查' })).not.toBeInTheDocument()
-    expect(screen.queryByText('1 项需注意')).not.toBeInTheDocument()
-    expect(screen.queryByText(response.digest)).not.toBeInTheDocument()
-    expect(document.querySelectorAll('polyline[data-segment]')).toHaveLength(0)
-    expect(screen.queryByRole('button', { name: '另存为记录' })).not.toBeInTheDocument()
-    expect(screen.getByText('缺少有效的比较意图，请重新比较后再保存。')).toBeInTheDocument()
+    const saveSection = screen.getByRole('region', { name: '结论与另存' })
+    expect(await within(saveSection).findByRole('alert')).toHaveTextContent('尚未确认')
+    expect(screen.queryByRole('heading', { name: '比较不可用' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '比较结果' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试确认另存' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '放弃确认' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '移出第 1 项' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '移出第 2 项' })).toBeInTheDocument()
     expect(screen.getByText('2 项')).toBeInTheDocument()
     expect(api.saveComparisonRecord).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '重试确认另存' }))
+    expect(await within(saveSection).findByText('比较记录已保存')).toBeInTheDocument()
+    expect(within(saveSection).queryByRole('alert')).not.toBeInTheDocument()
+    expect(api.saveComparisonRecord).toHaveBeenCalledTimes(2)
   })
 })

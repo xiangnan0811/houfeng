@@ -116,9 +116,11 @@ export async function requestJSON<T>(
   path: string,
   init?: RequestInit,
   decodeError?: ApiErrorDecoder,
+  decodeResponse?: (rawBody: string) => T,
 ): Promise<T> {
   const response = await request(path, init, decodeError)
-  return JSON.parse(await response.text()) as T
+  const rawBody = await response.text()
+  return decodeResponse ? decodeResponse(rawBody) : JSON.parse(rawBody) as T
 }
 
 export async function requestEmpty(

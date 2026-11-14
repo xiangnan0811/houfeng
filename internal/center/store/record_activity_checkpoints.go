@@ -37,10 +37,10 @@ func NewActivityProjectionRepository(pool *pgxpool.Pool) (*ActivityProjectionRep
 // PublishBatch satisfies activity.Publisher.
 func (repository *ActivityProjectionRepository) PublishBatch(
 	ctx context.Context,
-	generation uint64,
+	lease activity.SourceLease,
 	candidates []activity.CandidateEvent,
 ) (activity.PublishOutcome, error) {
-	result, err := PublishActivityBatch(ctx, repository.pool, generation, candidates)
+	result, err := PublishActivityBatch(ctx, repository.pool, lease, candidates)
 	if err != nil {
 		return activity.PublishOutcome{}, err
 	}
@@ -93,55 +93,54 @@ func (repository *ActivityProjectionRepository) LoadCheckpoint(
 	return checkpoint, nil
 }
 
-// SaveCheckpoint persists a position. The update refuses to move a position
-// backwards: the projector already declines to do that, and enforcing it here as
-// well means a stale worker writing an old position cannot open a gap that no
-// later pass would ever re-read.
-func (repository *ActivityProjectionRepository) SaveCheckpoint(
-	ctx context.Context,
-	generation uint64,
-	checkpoint activity.SourceCheckpoint,
-) error {
-	if generation == 0 {
-		return ErrActivityGenerationInactive
+// SaveCheckpoint advances only the exact live source claim.
+func (repository *ActivityProjectionRepository) SaveCheckpoint(ctx context.Context, lease activity.SourceLease, checkpoint activity.SourceCheckpoint) error {
+	if err := lease.Validate(); err != nil || checkpoint.Kind != lease.Kind {
+		return activity.ErrSourceLeaseLost
 	}
-	if !activity.ValidSourceKind(checkpoint.Kind) {
-		return fmt.Errorf("save activity checkpoint: unknown source kind %q", checkpoint.Kind)
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("save activity checkpoint: begin: %w", err)
 	}
-
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockComparisonDecisionForWriter(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockActivityLeaseHead(ctx, tx, lease.Generation); err != nil {
+		return err
+	}
+	if err := assertActivitySourceLease(ctx, tx, lease); err != nil {
+		return err
+	}
 	var recordedThrough *time.Time
 	if !checkpoint.RecordedThrough.IsZero() {
 		normalized := checkpoint.RecordedThrough.UTC()
 		recordedThrough = &normalized
 	}
-	var lastSuccessAt *time.Time
-	if checkpoint.LastErrorCode == "" {
-		now := time.Now().UTC()
-		lastSuccessAt = &now
-	}
-
-	if _, err := repository.pool.Exec(ctx, `
-		insert into public.record_activity_projection_checkpoints (
-		  project_id, projection_generation, source_kind,
-		  recorded_through, caught_up, attempt, last_error_code, last_success_at
-		) values ($1, $2, $3, $4, $5, $6, $7, $8)
-		on conflict (project_id, projection_generation, source_kind) do update
-		set recorded_through = greatest(
-		      public.record_activity_projection_checkpoints.recorded_through,
-		      excluded.recorded_through
-		    ),
-		    caught_up = excluded.caught_up,
-		    attempt = excluded.attempt,
-		    last_error_code = excluded.last_error_code,
-		    last_success_at = coalesce(
-		      excluded.last_success_at,
-		      public.record_activity_projection_checkpoints.last_success_at
-		    ),
-		    updated_at = now()`,
-		recordplatform.ProjectIDDefault, generation, string(checkpoint.Kind),
-		recordedThrough, checkpoint.CaughtUp, int64(checkpoint.Attempt), checkpoint.LastErrorCode, lastSuccessAt,
-	); err != nil {
+	command, err := tx.Exec(ctx, `
+		update public.record_activity_projection_checkpoints
+		set recorded_through = greatest(recorded_through, $4), caught_up = $5,
+		    attempt = $6, last_error_code = $7,
+		    last_success_at = case when $7 = '' then clock_timestamp() else last_success_at end,
+		    updated_at = clock_timestamp()
+		where project_id=$1 and projection_generation=$2 and source_kind=$3
+		  and lease_owner_id=$8 and lease_expires_at=$9 and lease_expires_at > clock_timestamp()`,
+		recordplatform.ProjectIDDefault, lease.Generation, string(lease.Kind), recordedThrough,
+		checkpoint.CaughtUp, int64(checkpoint.Attempt), checkpoint.LastErrorCode, lease.OwnerID, lease.ExpiresAt)
+	if err != nil {
 		return fmt.Errorf("save activity checkpoint for %s: %w", checkpoint.Kind, err)
+	}
+	if command.RowsAffected() != 1 {
+		return activity.ErrSourceLeaseLost
+	}
+	if err := assertActivitySourceLease(ctx, tx, lease); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("save activity checkpoint: commit: %w", err)
 	}
 	return nil
 }
@@ -173,88 +172,114 @@ func (repository *ActivityProjectionRepository) ActiveGeneration(ctx context.Con
 	return uint64(generation), nil
 }
 
-// AcquireSourceLease takes the right to project one source, and reports whether
-// it got it.
-//
-// The lease is not what makes concurrent projection safe — the head lock keeps
-// allocation contiguous, publication is keyed on source identity, and a
-// checkpoint refuses to move backwards, so two workers on one source would
-// produce a correct result. What it prevents is the waste: two processes scanning
-// the same window and contending on the same head row for rows one of them has
-// already published.
-//
-// An expired lease is reclaimable, because a worker that died holding one must
-// not park its source until someone notices.
-func (repository *ActivityProjectionRepository) AcquireSourceLease(
-	ctx context.Context,
-	generation uint64,
-	kind activity.SourceKind,
-	ownerID string,
-	ttl time.Duration,
-) (bool, error) {
+// AcquireSourceLease commits an exact owner and database expiry before a pass.
+func (repository *ActivityProjectionRepository) AcquireSourceLease(ctx context.Context, generation uint64, kind activity.SourceKind, ownerID string, ttl time.Duration) (activity.SourceLease, bool, error) {
 	if generation == 0 {
-		return false, ErrActivityGenerationInactive
+		return activity.SourceLease{}, false, ErrActivityGenerationInactive
 	}
-	if !activity.ValidSourceKind(kind) {
-		return false, fmt.Errorf("acquire activity source lease: unknown source kind %q", kind)
+	if !activity.ValidSourceKind(kind) || !activity.ValidOwnerID(ownerID) || ttl.Microseconds() <= 0 {
+		return activity.SourceLease{}, false, errors.New("acquire activity source lease: invalid claim")
 	}
-	if !activity.ValidOwnerID(ownerID) {
-		return false, fmt.Errorf("acquire activity source lease: invalid owner %q", ownerID)
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return activity.SourceLease{}, false, fmt.Errorf("acquire activity source lease: begin: %w", err)
 	}
-	if ttl <= 0 {
-		return false, errors.New("acquire activity source lease: non-positive ttl")
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return activity.SourceLease{}, false, err
 	}
-
-	// The insert covers a source that has never run; the update covers taking over
-	// an unheld, expired, or already-ours lease. Re-acquiring our own extends it,
-	// which is how a long pass keeps the lease alive.
-	var claimed bool
-	err := repository.pool.QueryRow(ctx, `
+	if err := lockComparisonDecisionForWriter(ctx, tx); err != nil {
+		return activity.SourceLease{}, false, err
+	}
+	if err := lockActivityLeaseHead(ctx, tx, generation); err != nil {
+		return activity.SourceLease{}, false, err
+	}
+	lease := activity.SourceLease{Generation: generation, Kind: kind, OwnerID: ownerID}
+	err = tx.QueryRow(ctx, `
 		insert into public.record_activity_projection_checkpoints (
 		  project_id, projection_generation, source_kind, lease_owner_id, lease_expires_at
-		) values ($1, $2, $3, $4, transaction_timestamp() + ($5 * interval '1 microsecond'))
+		) values ($1, $2, $3, $4, clock_timestamp() + ($5 * interval '1 microsecond'))
 		on conflict (project_id, projection_generation, source_kind) do update
 		set lease_owner_id = excluded.lease_owner_id,
-		    lease_expires_at = excluded.lease_expires_at,
-		    updated_at = now()
+		    lease_expires_at = greatest(excluded.lease_expires_at, public.record_activity_projection_checkpoints.lease_expires_at + interval '1 microsecond'),
+		    updated_at = clock_timestamp()
 		where public.record_activity_projection_checkpoints.lease_owner_id is null
 		   or public.record_activity_projection_checkpoints.lease_owner_id = excluded.lease_owner_id
-		   or public.record_activity_projection_checkpoints.lease_expires_at <= transaction_timestamp()
-		returning true`,
+		   or public.record_activity_projection_checkpoints.lease_expires_at <= clock_timestamp()
+		returning lease_expires_at`,
 		recordplatform.ProjectIDDefault, generation, string(kind), ownerID, ttl.Microseconds(),
-	).Scan(&claimed)
+	).Scan(&lease.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Someone else holds a live lease.
-		return false, nil
+		return activity.SourceLease{}, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("acquire activity source lease for %s: %w", kind, err)
+		return activity.SourceLease{}, false, fmt.Errorf("acquire activity source lease for %s: %w", kind, err)
 	}
-	return claimed, nil
+	lease.ExpiresAt = lease.ExpiresAt.UTC()
+	if err := tx.Commit(ctx); err != nil {
+		return activity.SourceLease{}, false, fmt.Errorf("acquire activity source lease: commit: %w", err)
+	}
+	return lease, true, nil
 }
 
-// ReleaseSourceLease hands a source back. It only clears a lease this owner still
-// holds, so a worker whose lease already expired and was taken over cannot cut
-// the new holder's short.
-func (repository *ActivityProjectionRepository) ReleaseSourceLease(
-	ctx context.Context,
-	generation uint64,
-	kind activity.SourceKind,
-	ownerID string,
-) error {
-	if generation == 0 {
+// ReleaseSourceLease cannot clear a renewed or taken-over source lease.
+func (repository *ActivityProjectionRepository) ReleaseSourceLease(ctx context.Context, lease activity.SourceLease) error {
+	if err := lease.Validate(); err != nil {
+		return activity.ErrSourceLeaseLost
+	}
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("release activity source lease: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockComparisonDecisionForWriter(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockActivityLeaseHead(ctx, tx, lease.Generation); err != nil {
+		return err
+	}
+	command, err := tx.Exec(ctx, `
+		update public.record_activity_projection_checkpoints
+		set lease_owner_id=null, lease_expires_at=null, updated_at=clock_timestamp()
+		where project_id=$1 and projection_generation=$2 and source_kind=$3
+		  and lease_owner_id=$4 and lease_expires_at=$5 and lease_expires_at > clock_timestamp()`,
+		recordplatform.ProjectIDDefault, lease.Generation, string(lease.Kind), lease.OwnerID, lease.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("release activity source lease for %s: %w", lease.Kind, err)
+	}
+	if command.RowsAffected() != 1 {
+		return activity.ErrSourceLeaseLost
+	}
+	return tx.Commit(ctx)
+}
+
+func lockActivityLeaseHead(ctx context.Context, tx pgx.Tx, generation uint64) error {
+	var exists bool
+	err := tx.QueryRow(ctx, `select true from public.record_activity_projection_heads
+		where project_id=$1 and projection_generation=$2 and head_state='active' for share`,
+		recordplatform.ProjectIDDefault, generation).Scan(&exists)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrActivityGenerationInactive
 	}
-	if _, err := repository.pool.Exec(ctx, `
-		update public.record_activity_projection_checkpoints
-		set lease_owner_id = null, lease_expires_at = null, updated_at = now()
-		where project_id = $1
-		  and projection_generation = $2
-		  and source_kind = $3
-		  and lease_owner_id = $4`,
-		recordplatform.ProjectIDDefault, generation, string(kind), ownerID,
-	); err != nil {
-		return fmt.Errorf("release activity source lease for %s: %w", kind, err)
+	return err
+}
+
+// The caller already holds the generation head; expiry is checked using the
+// current database clock after any wait and immediately before commit.
+func assertActivitySourceLease(ctx context.Context, tx pgx.Tx, lease activity.SourceLease) error {
+	var owned bool
+	err := tx.QueryRow(ctx, `select lease_owner_id=$4 and lease_expires_at=$5 and lease_expires_at > clock_timestamp()
+		from public.record_activity_projection_checkpoints
+		where project_id=$1 and projection_generation=$2 and source_kind=$3 for update`,
+		recordplatform.ProjectIDDefault, lease.Generation, string(lease.Kind), lease.OwnerID, lease.ExpiresAt).Scan(&owned)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !owned {
+		return activity.ErrSourceLeaseLost
+	}
+	if err != nil {
+		return fmt.Errorf("check activity source lease: %w", err)
 	}
 	return nil
 }

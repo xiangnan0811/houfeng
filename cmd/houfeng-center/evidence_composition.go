@@ -12,6 +12,7 @@ import (
 	centerevidence "houfeng/internal/center/evidence"
 	evidenceadapters "houfeng/internal/center/evidence/adapters"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/recordbirth"
 	centerrecords "houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 )
@@ -35,6 +36,8 @@ type comparisonRuntimeConfig struct {
 type productionEvidenceCompositionDependencies struct {
 	Pool              *pgxpool.Pool
 	Gate              store.AdmissionGate
+	Birth             *recordbirth.Coordinator
+	Allocations       *store.PostgresRecordBirthRepository
 	Subjects          centerrecords.SubjectAdapterRegistry
 	Sources           productionEvidenceSources
 	Tombstones        store.WitnessedRecordSubjectTombstoneSource
@@ -53,7 +56,6 @@ type productionEvidenceComposition struct {
 	observer         *centerevidence.MaintenanceObserver
 	export           *centerevidence.ExportAdapter
 	deletion         *centerevidence.DeletionAdapter
-	recovery         *centerevidence.RecoveryAdapter
 	comparisonSigner centerevidence.ComparisonIntentSigner
 }
 
@@ -61,6 +63,7 @@ func newProductionEvidenceComposition(
 	dependencies productionEvidenceCompositionDependencies,
 ) (*productionEvidenceComposition, error) {
 	if dependencies.Pool == nil || nilBootstrapAdmissionGate(dependencies.Gate) ||
+		dependencies.Birth == nil || dependencies.Allocations == nil ||
 		!exactProductionEvidenceSubjectKinds(dependencies.Subjects.Kinds()) ||
 		nilBootstrapDependency(dependencies.Sources.IPQuality) ||
 		nilBootstrapDependency(dependencies.Sources.Monitoring) ||
@@ -117,7 +120,7 @@ func newProductionEvidenceComposition(
 	subjectReadResolver := store.NewRecordSubjectReadResolver(dependencies.Subjects, tombstones)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(dependencies.Pool, subjectReadResolver, dependencies.Gate)
 	repository, err := store.NewPostgresEvidenceRepositoryWithReadSources(
-		dependencies.Pool, dependencies.Gate, registry, authorizations, subjectReadResolver,
+		dependencies.Pool, dependencies.Gate, registry, authorizations, subjectReadResolver, dependencies.Birth,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: evidence repository", centerevidence.ErrEvidenceServiceUnavailable)
@@ -172,10 +175,6 @@ func newProductionEvidenceComposition(
 	if err != nil {
 		return nil, fmt.Errorf("%w: evidence deletion", centerevidence.ErrEvidenceServiceUnavailable)
 	}
-	recoveryAdapter, err := centerevidence.NewRecoveryAdapter(registry, repository)
-	if err != nil {
-		return nil, fmt.Errorf("%w: evidence recovery", centerevidence.ErrEvidenceServiceUnavailable)
-	}
 	observer := centerevidence.NewMaintenanceObserver()
 	worker := centerevidence.NewMaintenanceWorker(repository, observer, centerevidence.MaintenanceWorkerOptions{
 		Interval:          centerevidence.DefaultMaintenanceInterval,
@@ -191,10 +190,11 @@ func newProductionEvidenceComposition(
 	return &productionEvidenceComposition{
 		registry: registry, repository: repository, authorizations: authorizations,
 		application: application, preparer: preparer, handler: handlers.EvidenceWithOptions(application, handlers.EvidenceHandlerOptions{
+			Birth: dependencies.Birth, Allocations: dependencies.Allocations,
 			ComparisonEnabled: dependencies.ComparisonEnabled,
 		}),
 		worker: worker, observer: observer, export: exportAdapter,
-		deletion: deletionAdapter, recovery: recoveryAdapter, comparisonSigner: comparisonSigner,
+		deletion: deletionAdapter, comparisonSigner: comparisonSigner,
 	}, nil
 }
 

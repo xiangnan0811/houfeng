@@ -97,8 +97,6 @@ func TestOfficialArchivePreviewNamesAndRestoresAuthorizedAttachmentBytes(t *test
 			denied: map[string]error{denied: recordauth.ErrDenied},
 		},
 	})
-	capture := &capturingBlobStore{inner: service.attachmentBlobs}
-	service.attachmentBlobs = capture
 	preview, err := service.Preview(context.Background(), PreviewRequest{
 		Actor: portabilityTestActor(t), IdempotencyKey: "export-att-1",
 		RecordID: "rec_attach1", ExportKind: ExportKindArchive, ExportMode: ExportModeSafe,
@@ -131,6 +129,7 @@ func TestOfficialArchivePreviewNamesAndRestoresAuthorizedAttachmentBytes(t *test
 	imports := newMemoryImportRepository()
 	importer.repo = imports
 	service.imports = imports
+	attachImportBirth(t, service, imports)
 	service.importer = importer
 	service.evidenceImports = &evidenceImportStub{}
 	service.rebuilder = &importRebuildStub{}
@@ -166,10 +165,6 @@ func TestOfficialArchivePreviewNamesAndRestoresAuthorizedAttachmentBytes(t *test
 	if restored.Object.SHA256 != sha256.Sum256(notes) {
 		t.Fatal("restored object digest drifted")
 	}
-	if len(capture.puts) != 1 {
-		t.Fatalf("blob puts = %d, want 1", len(capture.puts))
-	}
-	requireBlobTemporaryKey(t, capture.puts[0].TemporaryKey)
 }
 
 func TestOfficialArchiveRestoresWebPAndNamesUnsupportedOnPreview(t *testing.T) {
@@ -230,6 +225,7 @@ func TestOfficialArchiveRestoresWebPAndNamesUnsupportedOnPreview(t *testing.T) {
 	imports := newMemoryImportRepository()
 	importer.repo = imports
 	service.imports = imports
+	attachImportBirth(t, service, imports)
 	service.importer = importer
 	service.evidenceImports = &evidenceImportStub{}
 	service.rebuilder = &importRebuildStub{}

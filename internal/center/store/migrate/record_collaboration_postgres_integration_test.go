@@ -205,9 +205,8 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration follower: %v", err)
 	}
-	if _, err := runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_aclother')`); err != nil {
-		t.Fatalf("runtime insert collaboration cross-record root: %v", err)
-	}
+	_, err = runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_aclother')`)
+	requirePostgresSQLState(t, err, "42501")
 	t.Run("mention rejects cross-record and cross-fence revision", func(t *testing.T) {
 		tx, err := runtimeDB.Begin(ctx)
 		if err != nil {
@@ -276,35 +275,42 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		t.Fatalf("runtime insert collaboration notification delivery: %v", err)
 	}
 	t.Run("delivery rejects cross-record and cross-fence recipient", func(t *testing.T) {
-		tx, err := runtimeDB.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin cross-record delivery transaction: %v", err)
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		_, err = tx.Exec(ctx, `
+		const insert = `
 			insert into public.record_notification_deliveries (
 				delivery_id, record_id, notification_id, recipient_user_id, channel,
 				binding_id, authorization_epoch, record_fence_epoch
 			) values ('rnd_cross', 'rec_aclother', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient', 'feishu',
-				'binding_cross', 0, 1)
-		`)
+				'binding_cross', 0, 1)`
+		// The runtime is stopped by the current record-epoch guard before FK
+		// evaluation. The owner-only predecessor probe tests the FK separately.
+		_, err := runtimeDB.Exec(ctx, insert)
+		requirePostgresSQLState(t, err, "55000")
+		migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
+		tx, err := migratorDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin cross-record delivery FK probe: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, insert)
 		requirePostgresSQLState(t, err, "23503")
 	})
 	t.Run("delivery retains captured recipient and fence after current recipient changes", func(t *testing.T) {
-		tx, err := runtimeDB.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin captured delivery audit transaction: %v", err)
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		_, err = tx.Exec(ctx, `
+		const insert = `
 			insert into public.record_notification_deliveries (
 				delivery_id, record_id, notification_id, recipient_user_id, channel,
 				binding_id, authorization_epoch, record_fence_epoch
 			) values ('rnd_capturedaudit', 'rec_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_historical', 'feishu',
-				'binding_capturedaudit', 7, 9)
-		`)
+				'binding_capturedaudit', 7, 9)`
+		_, err := runtimeDB.Exec(ctx, insert)
+		requirePostgresSQLState(t, err, "55000")
+		migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
+		tx, err := migratorDB.Begin(ctx)
 		if err != nil {
-			t.Fatalf("insert captured delivery audit independent of current recipient: %v", err)
+			t.Fatalf("begin captured delivery audit fixture: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, insert); err != nil {
+			t.Fatalf("insert predecessor captured delivery audit: %v", err)
 		}
 	})
 	if _, err := runtimeDB.Exec(ctx, `
@@ -325,8 +331,13 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime insert second collaboration notification recipient: %v", err)
 	}
+	migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
+	_, err = runtimeDB.Exec(ctx, `update public.record_notification_deliveries set reason_code = reason_code where false`)
+	requirePostgresSQLState(t, err, "42501")
+	_, err = runtimeDB.Exec(ctx, `insert into public.record_notification_delivery_attempts select * from public.record_notification_delivery_attempts where false`)
+	requirePostgresSQLState(t, err, "42501")
 	t.Run("attempt rejects tuple from another notification recipient", func(t *testing.T) {
-		tx, err := runtimeDB.Begin(ctx)
+		tx, err := migratorDB.Begin(ctx)
 		if err != nil {
 			t.Fatalf("begin cross-delivery attempt transaction: %v", err)
 		}
@@ -342,7 +353,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		requirePostgresSQLState(t, err, "23503")
 	})
 	t.Run("attempt rejects exact delivery tuple with wrong fence", func(t *testing.T) {
-		tx, err := runtimeDB.Begin(ctx)
+		tx, err := migratorDB.Begin(ctx)
 		if err != nil {
 			t.Fatalf("begin wrong-fence delivery attempt transaction: %v", err)
 		}
@@ -357,7 +368,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`)
 		requirePostgresSQLState(t, err, "23503")
 	})
-	_, err = runtimeDB.Exec(ctx, `
+	_, err = migratorDB.Exec(ctx, `
 		insert into public.record_notification_delivery_attempts (
 			attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
 			attempt_no, outcome, authorization_epoch, record_fence_epoch,
@@ -366,7 +377,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			9, 'temporary_failure', 0, 0, clock_timestamp(), clock_timestamp())
 	`)
 	requirePostgresSQLState(t, err, "23514")
-	if _, err := runtimeDB.Exec(ctx, `
+	if _, err := migratorDB.Exec(ctx, `
 		insert into public.record_notification_delivery_attempts (
 			attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
 			attempt_no, outcome, authorization_epoch, record_fence_epoch,
@@ -374,7 +385,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		) values ('rna_acl', 'rec_acl', 'rnd_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient',
 			1, 'temporary_failure', 0, 0, statement_timestamp(), statement_timestamp())
 	`); err != nil {
-		t.Fatalf("runtime insert collaboration notification delivery attempt: %v", err)
+		t.Fatalf("seed collaboration notification delivery attempt: %v", err)
 	}
 	_, err = runtimeDB.Exec(ctx, `
 		delete from public.record_notification_recipients
@@ -383,19 +394,17 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	_, err = runtimeDB.Exec(ctx, `delete from public.record_comments where comment_id = 'rcm_missing'`)
 	requirePostgresSQLState(t, err, "42501")
 	_, err = runtimeDB.Exec(ctx, `select public.record_collaboration_purge(convert_to('{}', 'UTF8'))`)
-	requirePostgresSQLState(t, err, "55000")
+	requirePostgresSQLState(t, err, "42501")
 
 	_, err = runtimeDB.Exec(ctx, `update public.record_action_events set actor_id = 'usr_changed' where action_event_id = 'raev_acl'`)
 	requirePostgresSQLState(t, err, "42501")
-	migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
 	_, err = migratorDB.Exec(ctx, `update public.record_action_events set actor_id = 'usr_changed' where action_event_id = 'raev_acl'`)
 	requirePostgresSQLState(t, err, "55000")
 	_, err = migratorDB.Exec(ctx, `update public.record_notification_delivery_attempts set reason_code = 'changed' where attempt_id = 'rna_acl'`)
 	requirePostgresSQLState(t, err, "55000")
 
-	if _, err := runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_collabdelete')`); err != nil {
-		t.Fatalf("runtime insert collaboration delete-fence root: %v", err)
-	}
+	_, err = runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_collabdelete')`)
+	requirePostgresSQLState(t, err, "42501")
 	if _, err := runtimeDB.Exec(ctx, `
 		insert into public.record_followers (
 			record_id, user_id, follower_version, manual_preference, record_fence_epoch
@@ -404,14 +413,29 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		t.Fatalf("runtime insert collaboration delete-fence follower: %v", err)
 	}
 	_, err = runtimeDB.Exec(ctx, `delete from public.records where record_id = 'rec_collabdelete'`)
+	requirePostgresSQLState(t, err, "42501")
+	_, err = migratorDB.Exec(ctx, `delete from public.records where record_id = 'rec_collabdelete'`)
+	requirePostgresSQLState(t, err, "42501")
+	// The isolated runner's bootstrap role can reach the table's FK checks;
+	// the rejected DELETE is rolled back and is not deletion authority.
+	var bootstrapSuperuser bool
+	if err := fixture.db.QueryRow(ctx, `select rolsuper from pg_catalog.pg_roles where rolname=session_user`).Scan(&bootstrapSuperuser); err != nil || !bootstrapSuperuser {
+		t.Fatalf("collaboration FK probe requires the isolated bootstrap superuser: %v", err)
+	}
+	probe, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin collaboration FK probe: %v", err)
+	}
+	defer func() { _ = probe.Rollback(ctx) }()
+	_, err = probe.Exec(ctx, `delete from public.records where record_id = 'rec_collabdelete'`)
 	requirePostgresSQLState(t, err, "23503")
-	for _, statement := range []string{
-		`delete from public.record_followers where record_id = 'rec_collabdelete'`,
-		`delete from public.records where record_id = 'rec_collabdelete'`,
-	} {
-		if _, err := migratorDB.Exec(ctx, statement); err != nil {
-			t.Fatalf("migrator clean collaboration no-cascade fixture with %q: %v", statement, err)
-		}
+	if err := probe.Rollback(ctx); err != nil {
+		t.Fatalf("roll back collaboration FK probe: %v", err)
+	}
+	var retained int
+	if err := fixture.db.QueryRow(ctx, `select count(*)::int from public.record_followers f
+		join public.records r on r.record_id=f.record_id where r.record_id='rec_collabdelete'`).Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("rejected root deletion retained follower count = %d: %v", retained, err)
 	}
 
 	adminDB := fixture.openDirectRolePool(t, ctx, fixture.admin)
@@ -441,7 +465,6 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			t.Fatalf("migrator clean collaboration ACL fixture with %q: %v", statement, err)
 		}
 	}
-	if _, err := runtimeDB.Exec(ctx, `delete from public.records where record_id = 'rec_aclother'`); err != nil {
-		t.Fatalf("runtime clean collaboration cross-record root: %v", err)
-	}
+	_, err = runtimeDB.Exec(ctx, `delete from public.records where record_id = 'rec_aclother'`)
+	requirePostgresSQLState(t, err, "42501")
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	ledgerMigrations "houfeng/db/deletionledger/migrations"
-	witnessMigrations "houfeng/db/deletionwitness/migrations"
 	applicationMigrations "houfeng/db/migrations"
 	"houfeng/db/recoverycontrol/migrations"
 )
@@ -157,7 +156,7 @@ func TestPostgresIntegrationIndependentMigrationDomains(t *testing.T) {
 			name: "witness",
 			env:  "HOUFENG_DELETION_WITNESS_DATABASE_URL",
 			apply: func(ctx context.Context, db *pgxpool.Pool) error {
-				return Apply(ctx, db, witnessMigrations.FS)
+				return Apply(ctx, db, witnessPredecessorFS(t))
 			},
 			tables:    []string{"deletion_witness_entries", "deletion_witness_head"},
 			immutable: "deletion_witness_entries",
@@ -258,7 +257,7 @@ func TestPostgresIntegrationProvisionPostgresDomainIdentity(t *testing.T) {
 			kind:      DomainKindDeletionWitness,
 			wrongKind: DomainKindRecoveryControl,
 			apply: func(ctx context.Context, db *pgxpool.Pool) error {
-				return Apply(ctx, db, witnessMigrations.FS)
+				return Apply(ctx, db, witnessPredecessorFS(t))
 			},
 		},
 		{

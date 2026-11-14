@@ -28,34 +28,51 @@ func (repository *PostgresRecordDeletionRepository) PortabilityDeletionHealth(
 	}
 	var health recorddeletion.AdapterHealthSnapshot
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		surfaces := recorddeletion.RecordPortabilitySurfaceNames()
-		names := make([]string, len(surfaces))
-		for index, surface := range surfaces {
-			names[index] = string(surface)
-		}
-		var count int64
-		if err := transaction.tx.QueryRow(ctx, `
+		var err error
+		health, err = portabilityDeletionHealthInTransaction(ctx, transaction.tx)
+		return err
+	})
+	return health, err
+}
+
+func portabilityDeletionHealthInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+) (recorddeletion.AdapterHealthSnapshot, error) {
+	if ctx == nil || tx == nil {
+		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	surfaces := recorddeletion.RecordPortabilitySurfaceNames()
+	names := make([]string, len(surfaces))
+	for index, surface := range surfaces {
+		names[index] = string(surface)
+	}
+	var count int64
+	if err := tx.QueryRow(ctx, `
 			select count(*)::bigint
 			from pg_catalog.pg_class as relation
 			join pg_catalog.pg_namespace as namespace on namespace.oid = relation.relnamespace
 			where namespace.nspname = 'public'
 			  and relation.relkind in ('r', 'p')
 			  and relation.relname = any($1::text[])`, names).Scan(&count); err != nil {
-			return fmt.Errorf("read record portability deletion health: %w", err)
-		}
-		if count != int64(len(names)) {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		var err error
-		health, err = recorddeletion.NewAdapterHealthSnapshot(
-			true, 1, digestRecordPurgeStrings(portabilityDeletionHealthDigestDomainV1, names...),
-		)
-		if err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
-	})
-	return health, err
+		return recorddeletion.AdapterHealthSnapshot{}, fmt.Errorf("read record portability deletion health: %w", err)
+	}
+	if count != int64(len(names)) {
+		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	if err := requireClientComparisonPurgeFunctions(ctx, tx, "public.local_portability_purge_prepare(bytea)", "public.local_portability_purge_complete(bytea)"); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	if err := requireClientComparisonPurgeFunctions(ctx, tx, "public.local_portability_purge_verify(bytea)", "public.local_portability_purge_verify(bytea)"); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	health, err := recorddeletion.NewAdapterHealthSnapshot(
+		true, 1, digestRecordPurgeStrings(portabilityDeletionHealthDigestDomainV1, names...),
+	)
+	if err != nil {
+		return health, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return health, nil
 }
 
 func (repository *PostgresRecordDeletionRepository) PreviewPortabilityDeletion(
@@ -67,12 +84,27 @@ func (repository *PostgresRecordDeletionRepository) PreviewPortabilityDeletion(
 	}
 	var snapshot recorddeletion.AdapterPreviewSnapshot
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var dependencyMaterial, impactMaterial []byte
-		var deliveredExports int64
-		// Preview material is job/origin identifiers and counts only. Markdown,
-		// archive bytes, and blob keys stay out of the hash so a preview log
-		// cannot reconstruct an exported document.
-		err := transaction.tx.QueryRow(ctx, `
+		var err error
+		snapshot, err = previewPortabilityDeletionInTransaction(ctx, transaction.tx, target)
+		return err
+	})
+	return snapshot, err
+}
+
+func previewPortabilityDeletionInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	target recorddeletion.PreviewTarget,
+) (recorddeletion.AdapterPreviewSnapshot, error) {
+	if ctx == nil || tx == nil || target.Validate() != nil {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	var dependencyMaterial, impactMaterial []byte
+	var deliveredExports int64
+	// Preview material is job/origin identifiers and counts only. Markdown,
+	// archive bytes, and blob keys stay out of the hash so a preview log
+	// cannot reconstruct an exported document.
+	err := tx.QueryRow(ctx, `
 			with root as materialized (
 				select record.record_id
 				from public.records as record
@@ -133,50 +165,51 @@ func (repository *PostgresRecordDeletionRepository) PreviewPortabilityDeletion(
 			       pg_catalog.convert_to(impact_material::text, 'UTF8'),
 			       delivered_exports
 			from material`,
-			target.Object.ProjectID, target.Object.ObjectID, target.CurrentRevisionID,
-			int64(target.LockVersion), int64(target.AuthorizationEpoch), int64(target.ContentDeliveryEpoch),
-		).Scan(&dependencyMaterial, &impactMaterial, &deliveredExports)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return recorddeletion.ErrDeletionPreviewStale
-		}
-		if err != nil {
-			return fmt.Errorf("preview record portability deletion: %w", err)
-		}
-		if len(dependencyMaterial) == 0 || len(impactMaterial) == 0 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		surviving := []recorddeletion.AdapterSurvivingCopy{}
-		if deliveredExports > 0 {
-			surviving = append(surviving, recorddeletion.AdapterSurvivingCopy{
-				Kind:      recorddeletion.SurvivingCopyKindDeliveredExport,
-				CopyCount: uint64(deliveredExports),
-			})
-		}
-		snapshot = recorddeletion.AdapterPreviewSnapshot{
-			DependencyDigest: digestRecordPurgeBytes(
-				portabilityDeletionPreviewDigestDomainV1, target.DependencyGraphDigest[:], dependencyMaterial,
-			),
-			ImpactDigest:    digestRecordPurgeBytes(portabilityDeletionImpactDigestDomainV1, impactMaterial),
-			SurvivingCopies: surviving,
-		}
-		if err := snapshot.Validate(); err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
-	})
-	return snapshot, err
+		target.Object.ProjectID, target.Object.ObjectID, target.CurrentRevisionID,
+		int64(target.LockVersion), int64(target.AuthorizationEpoch), int64(target.ContentDeliveryEpoch),
+	).Scan(&dependencyMaterial, &impactMaterial, &deliveredExports)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionPreviewStale
+	}
+	if err != nil {
+		return recorddeletion.AdapterPreviewSnapshot{}, fmt.Errorf("preview record portability deletion: %w", err)
+	}
+	if len(dependencyMaterial) == 0 || len(impactMaterial) == 0 {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	surviving := []recorddeletion.AdapterSurvivingCopy{}
+	if deliveredExports > 0 {
+		surviving = append(surviving, recorddeletion.KnownAdapterSurvivingCopy(
+			recorddeletion.SurvivingCopyKindDeliveredExport, uint64(deliveredExports),
+		))
+	}
+	snapshot := recorddeletion.AdapterPreviewSnapshot{
+		DependencyDigest: digestRecordPurgeBytes(
+			portabilityDeletionPreviewDigestDomainV1, target.DependencyGraphDigest[:], dependencyMaterial,
+		),
+		ImpactDigest:    digestRecordPurgeBytes(portabilityDeletionImpactDigestDomainV1, impactMaterial),
+		SurvivingCopies: surviving,
+	}
+	if err := snapshot.Validate(); err != nil {
+		return snapshot, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return snapshot, nil
 }
 
 func (repository *PostgresRecordDeletionRepository) PurgeRecordPortability(
 	ctx context.Context,
-	operation recorddeletion.DeletionOperation,
+	target recorddeletion.PurgeTarget,
 	surfaceDigest [sha256.Size]byte,
 ) (recorddeletion.AdapterPurgeReceipt, error) {
+	operation := target.Operation
 	if ctx == nil || repository == nil || repository.platform == nil ||
-		(recorddeletion.PurgeTarget{Operation: operation}).Validate() != nil ||
+		target.Validate() != nil ||
 		surfaceDigest != recorddeletion.RecordPortabilitySurfaceDigest() ||
 		operation.LedgerSequence > math.MaxInt64 || uint64(operation.FenceEpoch) > math.MaxInt64 {
 		return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	if operation.ContractVersion == recorddeletion.DeletionContractV2 {
+		return repository.purgeLocalRecordPortability(ctx, target, surfaceDigest)
 	}
 	var receipt recorddeletion.AdapterPurgeReceipt
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
@@ -241,7 +274,7 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordPortability(
 	if err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
-	if err := repository.VerifyRecordPortabilityPurge(ctx, operation, surfaceDigest, receipt); err != nil {
+	if err := repository.VerifyRecordPortabilityPurge(ctx, target, surfaceDigest, receipt); err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
 	return receipt, nil
@@ -249,17 +282,23 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordPortability(
 
 func (repository *PostgresRecordDeletionRepository) VerifyRecordPortabilityPurge(
 	ctx context.Context,
-	operation recorddeletion.DeletionOperation,
+	target recorddeletion.PurgeTarget,
 	surfaceDigest [sha256.Size]byte,
 	receipt recorddeletion.AdapterPurgeReceipt,
 ) error {
+	operation := target.Operation
 	if ctx == nil || repository == nil || repository.platform == nil ||
-		(recorddeletion.PurgeTarget{Operation: operation}).Validate() != nil ||
+		target.Validate() != nil ||
 		surfaceDigest != recorddeletion.RecordPortabilitySurfaceDigest() ||
 		receipt.AdapterName != recorddeletion.AdapterNameRecordPortability ||
 		receipt.OperationID != operation.OperationID || receipt.SurfaceDigest != surfaceDigest ||
-		receipt.VerifiedAbsentAt.IsZero() ||
-		receipt.ReceiptDigest != portabilityDeletionReceiptDigest(operation, surfaceDigest, receipt.RemovedRowCount) {
+		receipt.VerifiedAbsentAt.IsZero() {
+		return recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	if operation.ContractVersion == recorddeletion.DeletionContractV2 {
+		return repository.verifyLocalRecordPortabilityPurge(ctx, target, surfaceDigest, receipt)
+	}
+	if receipt.ReceiptDigest != portabilityDeletionReceiptDigest(operation, surfaceDigest, receipt.RemovedRowCount) {
 		return recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {

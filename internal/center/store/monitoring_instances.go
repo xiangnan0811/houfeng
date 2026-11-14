@@ -20,6 +20,7 @@ import (
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/center/vpsassets"
 )
 
 var _ monitoringinstances.Repository = (*PostgresMonitoringInstanceRepository)(nil)
@@ -445,8 +446,12 @@ func (r *PostgresMonitoringInstanceRepository) loadMonitoringRecordSubject(
 	ctx context.Context,
 	monitoringInstanceID string,
 ) (monitoringRecordSubject, error) {
+	return loadMonitoringRecordSubject(ctx, r.db, monitoringInstanceID)
+}
+
+func loadMonitoringRecordSubject(ctx context.Context, db currentRecordAuthorizationDB, monitoringInstanceID string) (monitoringRecordSubject, error) {
 	var subject monitoringRecordSubject
-	err := r.db.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		select mi.monitoring_instance_id,
 		       mi.display_name,
 		       coalesce((
@@ -515,6 +520,9 @@ func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx cont
 		return monitoringinstances.Record{}, fmt.Errorf("begin retire monitoring instance transaction for %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 
 	var storedDigest string
 	var storedResponse []byte
@@ -580,6 +588,9 @@ func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx cont
 // retireMonitoringInstanceTx reconciles every persisted MI lifecycle invariant
 // without acquiring the graph lock or committing the caller's transaction.
 func retireMonitoringInstanceTx(ctx context.Context, tx pgx.Tx, monitoringInstanceID, reason string) (monitoringinstances.Record, bool, error) {
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, false, err
+	}
 	current, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		select `+monitoringInstanceSelectColumns+`
 		from monitoring_instances
@@ -830,6 +841,9 @@ func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(
 		return monitoringinstances.Record{}, fmt.Errorf("begin update monitoring instance metadata transaction for %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 
 	args := []any{monitoringInstanceID}
 	if input.Group != nil {
@@ -896,6 +910,9 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstance(ct
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	if err := assertLinkedMonitoringParentWritable(ctx, tx, vpsID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, err
+	}
 
 	record, link, err := insertLinkedMonitoringInstance(ctx, tx, vpsID, input, linkNote)
 	if err != nil {
@@ -935,6 +952,9 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstanceIde
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("begin linked monitoring instance create transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertLinkedMonitoringParentWritable(ctx, tx, vpsID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
 
 	lockKey := createidempotency.NamespacedLockKey(linkedMonitoringInstanceCreateOperation, key)
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, lockKey); err != nil {
@@ -951,6 +971,9 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstanceIde
 	if err == nil {
 		if storedDigest != digest {
 			return monitoringinstances.Record{}, assetlinks.Record{}, false, createidempotency.ErrIdempotencyKeyReused
+		}
+		if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+			return monitoringinstances.Record{}, assetlinks.Record{}, false, err
 		}
 		record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 			select `+monitoringInstanceSelectColumns+`
@@ -1135,6 +1158,9 @@ func lockVPSForLinkedMonitoringInstanceCreate(ctx context.Context, tx pgx.Tx, vp
 }
 
 func lockVPSLifecycleForLinkedMonitoringInstanceCreate(ctx context.Context, tx pgx.Tx, vpsID string) error {
+	if err := assertLinkedMonitoringParentWritable(ctx, tx, vpsID); err != nil {
+		return err
+	}
 	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, vpsID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return assetlinks.ErrVPSMonitoringInstanceLinkNotFound
@@ -1169,6 +1195,12 @@ func insertLinkedMonitoringInstanceRows(
 	linkID, err := ids.New("vnl")
 	if err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("generate vps monitoring instance link id: %w", err)
+	}
+	if err := assertLinkedMonitoringParentWritable(ctx, tx, vpsID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, err
+	}
+	if err := assertSourceWritable(ctx, tx, "monitoring_instance", monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, err
 	}
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
@@ -1268,6 +1300,9 @@ func (r *PostgresMonitoringInstanceRepository) IssueMonitoringInstanceEnrollment
 		return monitoringinstances.EnrollmentTokenIssue{}, fmt.Errorf("begin issue enrollment token transaction for %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.EnrollmentTokenIssue{}, err
+	}
 
 	var issuedAt time.Time
 	if err := tx.QueryRow(ctx, `
@@ -1465,6 +1500,9 @@ func (r *PostgresMonitoringInstanceRepository) ConfirmMonitoringInstanceRebind(c
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		update monitoring_instances
@@ -1542,6 +1580,9 @@ func (r *PostgresMonitoringInstanceRepository) RejectPendingFingerprint(ctx cont
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		update monitoring_instances
@@ -1602,6 +1643,9 @@ func (r *PostgresMonitoringInstanceRepository) ResetMonitoringInstanceBinding(ct
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 
 	current, err := scanMonitoringInstance(tx.QueryRow(ctx, `select `+monitoringInstanceSelectColumns+` from monitoring_instances where monitoring_instance_id = $1 for update`, monitoringInstanceID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1896,6 +1940,9 @@ func (r *PostgresMonitoringInstanceRepository) setMonitoringControl(ctx context.
 		return monitoringinstances.Record{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, id); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 	current, err := scanMonitoringInstance(tx.QueryRow(ctx, `select `+monitoringInstanceSelectColumns+` from monitoring_instances where monitoring_instance_id=$1 for update`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
@@ -1957,6 +2004,9 @@ func (r *PostgresMonitoringInstanceRepository) IssueSyncToken(ctx context.Contex
 		return "", fmt.Errorf("begin issue sync token transaction for %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return "", err
+	}
 
 	tag, err := tx.Exec(ctx, `
 		update monitoring_instances
@@ -2120,6 +2170,9 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 	} else if err != nil {
 		return monitoringinstances.Record{}, "", fmt.Errorf("query monitoring instance by enrollment token for update: %w", err)
 	}
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return monitoringinstances.Record{}, "", err
+	}
 
 	next := resolveEnrollmentBindingTransition(monitoringinstances.Record{
 		BindingStatus:              bindingStatus,
@@ -2223,6 +2276,9 @@ func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats(ctx cont
 	if err := lockAssetGraphForSync(ctx, tx); err != nil {
 		return fmt.Errorf("lock asset graph for heartbeat: %w", err)
 	}
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return err
+	}
 
 	var (
 		bindingStatus       string
@@ -2266,6 +2322,11 @@ func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats(ctx cont
 	lastHeartbeatAt := writes[0].ObservedAt
 	lastSyncAt := writes[0].ReceivedAt
 	for _, write := range writes {
+		if write.MonitoringInstanceID != monitoringInstanceID {
+			if err := assertMonitoringSourceWritable(ctx, tx, write.MonitoringInstanceID); err != nil {
+				return err
+			}
+		}
 		if write.Fingerprint != bindingFingerprint {
 			return enrollment.ErrBindingNotAccepted
 		}
@@ -2350,6 +2411,9 @@ func (r *PostgresMonitoringInstanceRepository) RecordRejectedCommandAction(ctx c
 	if err := lockAssetGraphForSync(ctx, tx); err != nil {
 		return fmt.Errorf("lock asset graph for rejected command action audit: %w", err)
 	}
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return err
+	}
 	if err := insertCommandActionAudit(ctx, tx, commandActionAuditEvent{
 		MonitoringInstanceID: monitoringInstanceID,
 		CommandID:            input.CommandID,
@@ -2395,6 +2459,9 @@ func (r *PostgresMonitoringInstanceRepository) QueueCommandAction(ctx context.Co
 		return fmt.Errorf("begin queue command action transaction for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return err
+	}
 
 	tag, err := tx.Exec(ctx,
 		`UPDATE monitoring_instances SET pending_action_id = $1, pending_action_command_id = $2, last_action = $3, updated_at = now() WHERE monitoring_instance_id = $4 AND archived_at is null AND lifecycle_status = '已接入' AND monitoring_status <> '暂停' AND exists(select 1 from vps_assets v where v.vps_id=monitoring_instances.vps_id and v.lifecycle_status='active')`,
@@ -2449,6 +2516,9 @@ func (r *PostgresMonitoringInstanceRepository) ClearPendingAction(ctx context.Co
 		return fmt.Errorf("begin clear pending action transaction for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return err
+	}
 
 	tag, err := tx.Exec(ctx, `
 		update monitoring_instances
@@ -2478,6 +2548,9 @@ func (r *PostgresMonitoringInstanceRepository) StoreActionResult(ctx context.Con
 		return fmt.Errorf("begin store action result transaction for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertMonitoringSourceWritable(ctx, tx, monitoringInstanceID); err != nil {
+		return err
+	}
 
 	tag, err := tx.Exec(ctx, `
 		update monitoring_instances
@@ -2497,6 +2570,16 @@ func (r *PostgresMonitoringInstanceRepository) StoreActionResult(ctx context.Con
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit store action result for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	return nil
+}
+
+func assertLinkedMonitoringParentWritable(ctx context.Context, tx pgx.Tx, vpsID string) error {
+	if err := assertSourceWritable(ctx, tx, "vps", vpsID); err != nil {
+		if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+			return assetlinks.ErrVPSMonitoringInstanceLinkNotFound
+		}
+		return err
 	}
 	return nil
 }

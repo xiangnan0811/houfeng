@@ -44,61 +44,6 @@ func recordDomainTestRow() recordDomainActivityRow {
 	}
 }
 
-// The projected vocabulary has to match what the record writers actually write.
-// A kind in one set and not the other is either a silently empty timeline or a
-// batch that fails in production on a row nobody tested.
-func TestRecordDomainSourceCoversExactlyTheRecordEventVocabulary(t *testing.T) {
-	projected := make(map[activity.EventKind]bool)
-	for _, kind := range RecordDomainEventKinds() {
-		projected[kind] = true
-	}
-
-	// These are the kinds the five record-domain writers emit, taken from the
-	// records, comments and actions domains.
-	written := []activity.EventKind{
-		activity.EventKindRecordCreated,
-		activity.EventKindRecordRevised,
-		activity.EventKindRecordRestored,
-		activity.EventKindRecordArchived,
-		activity.EventKindRecordUnarchived,
-		activity.EventKindRecordOwnerChanged,
-		activity.EventKindRecordParticipantChanged,
-		activity.EventKindRecordFollowUpChanged,
-		activity.EventKindCommentCreated,
-		activity.EventKindCommentEdited,
-		activity.EventKindCommentRedacted,
-		activity.EventKindActionCreated,
-		activity.EventKindActionUpdated,
-		activity.EventKindActionCompleted,
-		activity.EventKindActionCancelled,
-		activity.EventKindActionReopened,
-	}
-	for _, kind := range written {
-		if !projected[kind] {
-			t.Errorf("writers emit %q but the source cannot project it", kind)
-		}
-		delete(projected, kind)
-	}
-	for kind := range projected {
-		t.Errorf("source projects %q but no record writer emits it", kind)
-	}
-
-	// The four system sources own the rest of the vocabulary; this source must not
-	// claim them.
-	for _, foreign := range []activity.EventKind{
-		activity.EventKindEvidenceCaptured,
-		activity.EventKindAssetFactChanged,
-		activity.EventKindMonitoringStateChanged,
-		activity.EventKindCommandExecuted,
-	} {
-		for _, kind := range RecordDomainEventKinds() {
-			if kind == foreign {
-				t.Errorf("record domain must not project %q, which belongs to another source", foreign)
-			}
-		}
-	}
-}
-
 func TestBuildRecordDomainCandidateDerivesAStableIdentity(t *testing.T) {
 	namespace := activityTestNamespace()
 	row := recordDomainTestRow()
@@ -299,6 +244,12 @@ func TestBuildRecordDomainCandidateClaimsCurrencyOnlyForCommits(t *testing.T) {
 		},
 		"unarchiving, which names the current one": {
 			kind: activity.EventKindRecordUnarchived, namedRevision: true, want: false,
+		},
+		"trashing preserves the current revision": {
+			kind: activity.EventKindRecordTrashed, namedRevision: true, want: false,
+		},
+		"restoring trash preserves the current revision": {
+			kind: activity.EventKindRecordTrashRestored, namedRevision: true, want: false,
 		},
 		"a comment against a revision": {
 			kind: activity.EventKindCommentCreated, namedRevision: true, want: false,

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/ids"
@@ -91,10 +93,14 @@ func (store *PostgresRecordSearchRebuildStore) ClaimRecordSearchRebuild(
 		return recordsearch.RebuildLease{}, fmt.Errorf("mint record search rebuild job id: %w", err)
 	}
 	var lease recordsearch.RebuildLease
-	err = store.platform.RunRecordPlatformTransaction(ctx, func(
+	err = store.platform.runSourceAuthorizedMutationTransaction(ctx, func(
 		ctx context.Context,
 		transaction *RecordPlatformTransaction,
 	) error {
+		lease = recordsearch.RebuildLease{}
+		if err := acquireSearchGenerationAuthority(ctx, transaction.tx, ""); err != nil {
+			return err
+		}
 		generation, found, err := lockBuildingSearchGeneration(ctx, transaction.tx)
 		if err != nil {
 			return err
@@ -147,16 +153,18 @@ func openSearchRebuildGeneration(
 	).Scan(&generation); err != nil {
 		return recordsearch.RebuildLease{}, fmt.Errorf("open building search generation: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	var expiresAt time.Time
+	if err := tx.QueryRow(ctx, `
 		insert into public.record_search_rebuild_jobs (
 		  job_id, generation, project_id, job_state, owner_id, lease_expires_at
-		) values ($1, $2, $3, 'running', $4, transaction_timestamp() + $5::interval)`,
+		) values ($1, $2, $3, 'running', $4, clock_timestamp() + $5::interval)
+		returning lease_expires_at`,
 		jobID, generation, recordplatform.ProjectIDDefault, claim.OwnerID,
 		searchRebuildInterval(claim.LeaseDuration),
-	); err != nil {
+	).Scan(&expiresAt); err != nil {
 		return recordsearch.RebuildLease{}, fmt.Errorf("open search rebuild job: %w", err)
 	}
-	return recordsearch.RebuildLease{JobID: jobID, Generation: uint64(generation)}, nil
+	return recordsearch.RebuildLease{JobID: jobID, Generation: uint64(generation), LeaseExpiresAt: expiresAt.UTC()}, nil
 }
 
 // takeOverSearchRebuildJob claims the running job on an existing building
@@ -176,10 +184,11 @@ func takeOverSearchRebuildJob(
 		leaseExpired  bool
 		resumeAfter   *string
 		processed     int64
+		expiresAt     time.Time
 	)
 	err := tx.QueryRow(ctx, `
 		select job_id, job_state, owner_id,
-		       lease_expires_at <= transaction_timestamp(), resume_after_record_id, processed_count
+		       lease_expires_at <= clock_timestamp(), resume_after_record_id, processed_count
 		from public.record_search_rebuild_jobs
 		where generation = $1 and project_id = $2
 		order by job_state = 'running' desc, started_at desc
@@ -187,16 +196,17 @@ func takeOverSearchRebuildJob(
 		for update`, generation, recordplatform.ProjectIDDefault,
 	).Scan(&existingJobID, &jobState, &ownerID, &leaseExpired, &resumeAfter, &processed)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if _, err := tx.Exec(ctx, `
+		if err := tx.QueryRow(ctx, `
 			insert into public.record_search_rebuild_jobs (
 			  job_id, generation, project_id, job_state, owner_id, lease_expires_at
-			) values ($1, $2, $3, 'running', $4, transaction_timestamp() + $5::interval)`,
+			) values ($1, $2, $3, 'running', $4, clock_timestamp() + $5::interval)
+			returning lease_expires_at`,
 			jobID, generation, recordplatform.ProjectIDDefault, claim.OwnerID,
 			searchRebuildInterval(claim.LeaseDuration),
-		); err != nil {
+		).Scan(&expiresAt); err != nil {
 			return recordsearch.RebuildLease{}, fmt.Errorf("open search rebuild job for orphan generation: %w", err)
 		}
-		return recordsearch.RebuildLease{JobID: jobID, Generation: uint64(generation)}, nil
+		return recordsearch.RebuildLease{JobID: jobID, Generation: uint64(generation), LeaseExpiresAt: expiresAt.UTC()}, nil
 	}
 	if err != nil {
 		return recordsearch.RebuildLease{}, fmt.Errorf("lock search rebuild job: %w", err)
@@ -210,29 +220,31 @@ func takeOverSearchRebuildJob(
 	if jobState != "running" {
 		// The previous job ended without publishing. Its checkpoint still describes
 		// the generation, so the replacement resumes rather than rescanning.
-		if _, err := tx.Exec(ctx, `
+		if err := tx.QueryRow(ctx, `
 			insert into public.record_search_rebuild_jobs (
 			  job_id, generation, project_id, job_state, owner_id, lease_expires_at,
 			  resume_after_record_id, processed_count
-			) values ($1, $2, $3, 'running', $4, transaction_timestamp() + $5::interval, $6, $7)`,
+			) values ($1, $2, $3, 'running', $4, clock_timestamp() + $5::interval, $6, $7)
+			returning lease_expires_at`,
 			jobID, generation, recordplatform.ProjectIDDefault, claim.OwnerID,
 			searchRebuildInterval(claim.LeaseDuration), resumeAfter, processed,
-		); err != nil {
+		).Scan(&expiresAt); err != nil {
 			return recordsearch.RebuildLease{}, fmt.Errorf("replace finished search rebuild job: %w", err)
 		}
 		existingJobID = jobID
-	} else if _, err := tx.Exec(ctx, `
+	} else if err := tx.QueryRow(ctx, `
 		update public.record_search_rebuild_jobs
 		set owner_id = $2,
-		    lease_expires_at = transaction_timestamp() + $3::interval,
-		    updated_at = transaction_timestamp()
-		where job_id = $1`,
+		    lease_expires_at = greatest(clock_timestamp() + $3::interval, lease_expires_at + interval '1 microsecond'),
+		    updated_at = clock_timestamp()
+		where job_id = $1
+		returning lease_expires_at`,
 		existingJobID, claim.OwnerID, searchRebuildInterval(claim.LeaseDuration),
-	); err != nil {
+	).Scan(&expiresAt); err != nil {
 		return recordsearch.RebuildLease{}, fmt.Errorf("renew search rebuild lease: %w", err)
 	}
 	lease := recordsearch.RebuildLease{
-		JobID: existingJobID, Generation: uint64(generation), Projected: uint64(processed),
+		JobID: existingJobID, Generation: uint64(generation), Projected: uint64(processed), LeaseExpiresAt: expiresAt.UTC(),
 	}
 	if resumeAfter != nil {
 		lease.ResumeAfter = *resumeAfter
@@ -249,24 +261,56 @@ func (store *PostgresRecordSearchRebuildStore) ProjectRecordSearchRebuildBatch(
 ) (recordsearch.RebuildBatchResult, error) {
 	if ctx == nil || store == nil || store.platform == nil || batch.JobID == "" ||
 		batch.Generation == 0 || batch.Generation > math.MaxInt64 || batch.OwnerID == "" ||
-		batch.Limit == 0 || batch.LeaseDuration <= 0 {
+		batch.Limit == 0 || batch.LeaseDuration <= 0 || batch.LeaseExpiresAt.IsZero() {
 		return recordsearch.RebuildBatchResult{}, fmt.Errorf("%w: batch", recordsearch.ErrInvalidRebuild)
 	}
 	var result recordsearch.RebuildBatchResult
-	err := store.platform.RunRecordPlatformTransaction(ctx, func(
+	err := store.platform.runSourceAuthorizedMutationTransaction(ctx, func(
 		ctx context.Context,
 		transaction *RecordPlatformTransaction,
 	) error {
-		if err := assertOwnedSearchRebuildJob(ctx, transaction.tx, batch); err != nil {
-			return err
-		}
+		result = recordsearch.RebuildBatchResult{}
 		candidates, err := listSearchRebuildCandidates(ctx, transaction.tx, batch)
 		if err != nil {
 			return err
 		}
+		observed, err := discoverSearchRebuildResources(ctx, transaction.tx, batch.JobID, candidates)
+		if err != nil {
+			return err
+		}
+		recordIDs := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			recordIDs = append(recordIDs, candidate.recordID)
+		}
+		if _, err := acquireEffectMutationResources(ctx, transaction.tx, recordIDs, nil, observed); err != nil {
+			if errors.Is(err, records.ErrRecordDeletionReserved) {
+				return &pgconn.PgError{Code: "40001", Message: "search candidate fenced; reselect batch"}
+			}
+			return err
+		}
+		current, err := listSearchRebuildCandidates(ctx, transaction.tx, batch)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(candidates, current) {
+			return &pgconn.PgError{Code: "40001", Message: "search candidate route changed; reselect batch"}
+		}
+		rechecked, err := discoverSearchRebuildResources(ctx, transaction.tx, batch.JobID, current)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(observed, rechecked) {
+			return &pgconn.PgError{Code: "40001", Message: "search job or projection route changed; reselect batch"}
+		}
+		if len(observed.SearchRebuildJobs) != 1 || observed.SearchRebuildJobs[0].ResumeAfterRecordID != batch.ResumeAfter {
+			return ErrRebuildLeaseHeld
+		}
+		if err := assertOwnedSearchRebuildJob(ctx, transaction.tx, batch); err != nil {
+			return err
+		}
 		if len(candidates) == 0 {
 			result = recordsearch.RebuildBatchResult{Drained: true}
-			return finishSearchRebuildBatch(ctx, transaction.tx, batch, result)
+			return finishSearchRebuildBatch(ctx, transaction.tx, batch, &result)
 		}
 		for _, candidate := range candidates {
 			projected, err := projectSearchRebuildRecord(ctx, transaction.tx, batch, candidate)
@@ -279,7 +323,7 @@ func (store *PostgresRecordSearchRebuildStore) ProjectRecordSearchRebuildBatch(
 			result.ResumeAfter = candidate.recordID
 		}
 		result.Drained = uint32(len(candidates)) < batch.Limit
-		return finishSearchRebuildBatch(ctx, transaction.tx, batch, result)
+		return finishSearchRebuildBatch(ctx, transaction.tx, batch, &result)
 	})
 	if err != nil {
 		return recordsearch.RebuildBatchResult{}, err
@@ -290,10 +334,11 @@ func (store *PostgresRecordSearchRebuildStore) ProjectRecordSearchRebuildBatch(
 func assertOwnedSearchRebuildJob(ctx context.Context, tx pgx.Tx, batch recordsearch.RebuildBatch) error {
 	var owned bool
 	err := tx.QueryRow(ctx, `
-		select job_state = 'running' and owner_id = $2 and lease_expires_at > transaction_timestamp()
+		select job_state = 'running' and owner_id = $2 and lease_expires_at = $4
+		       and lease_expires_at > clock_timestamp()
 		from public.record_search_rebuild_jobs
 		where job_id = $1 and generation = $3
-		for update`, batch.JobID, batch.OwnerID, int64(batch.Generation),
+		for update`, batch.JobID, batch.OwnerID, int64(batch.Generation), batch.LeaseExpiresAt,
 	).Scan(&owned)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrRebuildLeaseHeld
@@ -328,6 +373,11 @@ func listSearchRebuildCandidates(
 		where record.project_id = $1
 		  and record.current_revision_id is not null
 		  and ($2::text is null or record.record_id > $2::text)
+		  and not exists (select 1 from public.deletion_reservations as reservation
+		    where reservation.project_id = record.project_id and reservation.object_kind = 'record'
+		      and reservation.object_id = record.record_id and reservation.state in ('fenced', 'committed'))
+		  and not exists (select 1 from public.record_deletion_gates as gate
+		    where gate.project_id = record.project_id and gate.record_id = record.record_id)
 		order by record.record_id
 		limit $3`,
 		recordplatform.ProjectIDDefault, nullableRecordString(batch.ResumeAfter), int64(batch.Limit),
@@ -412,20 +462,27 @@ func finishSearchRebuildBatch(
 	ctx context.Context,
 	tx pgx.Tx,
 	batch recordsearch.RebuildBatch,
-	result recordsearch.RebuildBatchResult,
+	result *recordsearch.RebuildBatchResult,
 ) error {
-	if _, err := tx.Exec(ctx, `
+	err := tx.QueryRow(ctx, `
 		update public.record_search_rebuild_jobs
 		set resume_after_record_id = coalesce($2, resume_after_record_id),
 		    processed_count = processed_count + $3,
-		    lease_expires_at = transaction_timestamp() + $4::interval,
-		    updated_at = transaction_timestamp()
-		where job_id = $1`,
+		    lease_expires_at = greatest(clock_timestamp() + $4::interval, lease_expires_at + interval '1 microsecond'),
+		    updated_at = clock_timestamp()
+		where job_id = $1 and generation = $5 and job_state = 'running'
+		  and owner_id = $6 and lease_expires_at = $7 and lease_expires_at > clock_timestamp()
+		returning lease_expires_at`,
 		batch.JobID, nullableRecordString(result.ResumeAfter), int64(result.Projected),
-		searchRebuildInterval(batch.LeaseDuration),
-	); err != nil {
+		searchRebuildInterval(batch.LeaseDuration), int64(batch.Generation), batch.OwnerID, batch.LeaseExpiresAt,
+	).Scan(&result.LeaseExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrRebuildLeaseHeld
+	}
+	if err != nil {
 		return fmt.Errorf("advance search rebuild checkpoint: %w", err)
 	}
+	result.LeaseExpiresAt = result.LeaseExpiresAt.UTC()
 	return nil
 }
 
@@ -438,20 +495,19 @@ func (store *PostgresRecordSearchRebuildStore) PublishRecordSearchRebuild(
 	publish recordsearch.RebuildPublish,
 ) (recordsearch.RebuildCoverage, error) {
 	if ctx == nil || store == nil || store.platform == nil || publish.JobID == "" ||
-		publish.Generation == 0 || publish.Generation > math.MaxInt64 || publish.OwnerID == "" {
+		publish.Generation == 0 || publish.Generation > math.MaxInt64 || publish.OwnerID == "" || publish.LeaseExpiresAt.IsZero() {
 		return recordsearch.RebuildCoverage{}, fmt.Errorf("%w: publish", recordsearch.ErrInvalidRebuild)
 	}
 	var coverage recordsearch.RebuildCoverage
-	err := store.platform.RunRecordPlatformTransaction(ctx, func(
+	err := store.platform.runSourceAuthorizedMutationTransaction(ctx, func(
 		ctx context.Context,
 		transaction *RecordPlatformTransaction,
 	) error {
-		if err := assertOwnedSearchRebuildJob(ctx, transaction.tx, recordsearch.RebuildBatch{
-			JobID: publish.JobID, Generation: publish.Generation, OwnerID: publish.OwnerID,
-			Limit: 1, LeaseDuration: time.Minute,
-		}); err != nil {
+		coverage = recordsearch.RebuildCoverage{}
+		if err := acquireSearchGenerationAuthority(ctx, transaction.tx, publish.JobID); err != nil {
 			return err
 		}
+		// Search generation coordination is earlier than the rebuild job.
 		var state string
 		if err := transaction.tx.QueryRow(ctx, `
 			select generation_state
@@ -463,6 +519,12 @@ func (store *PostgresRecordSearchRebuildStore) PublishRecordSearchRebuild(
 		}
 		if state != "building" {
 			return fmt.Errorf("%w: generation state %q", recordsearch.ErrInvalidRebuild, state)
+		}
+		if err := assertOwnedSearchRebuildJob(ctx, transaction.tx, recordsearch.RebuildBatch{
+			JobID: publish.JobID, Generation: publish.Generation, OwnerID: publish.OwnerID,
+			LeaseExpiresAt: publish.LeaseExpiresAt,
+		}); err != nil {
+			return err
 		}
 		measured, err := measureSearchGenerationCoverage(ctx, transaction.tx, int64(publish.Generation))
 		if err != nil {
@@ -490,14 +552,19 @@ func (store *PostgresRecordSearchRebuildStore) PublishRecordSearchRebuild(
 		); err != nil {
 			return fmt.Errorf("publish search generation: %w", err)
 		}
-		if _, err := transaction.tx.Exec(ctx, `
+		command, err := transaction.tx.Exec(ctx, `
 			update public.record_search_rebuild_jobs
 			set job_state = 'completed',
-			    finished_at = transaction_timestamp(),
-			    updated_at = transaction_timestamp()
-			where job_id = $1`, publish.JobID,
-		); err != nil {
+			    finished_at = clock_timestamp(),
+			    updated_at = clock_timestamp()
+			where job_id = $1 and generation = $2 and job_state = 'running'
+			  and owner_id = $3 and lease_expires_at = $4 and lease_expires_at > clock_timestamp()`,
+			publish.JobID, int64(publish.Generation), publish.OwnerID, publish.LeaseExpiresAt)
+		if err != nil {
 			return fmt.Errorf("complete search rebuild job: %w", err)
+		}
+		if command.RowsAffected() != 1 {
+			return ErrRebuildLeaseHeld
 		}
 		coverage = measured
 		return nil
@@ -549,22 +616,45 @@ func (store *PostgresRecordSearchRebuildStore) FailRecordSearchRebuild(
 	failure recordsearch.RebuildFailure,
 ) error {
 	if ctx == nil || store == nil || store.platform == nil || failure.JobID == "" ||
-		failure.Generation == 0 || failure.Generation > math.MaxInt64 || failure.Reason == "" {
+		failure.Generation == 0 || failure.Generation > math.MaxInt64 || failure.OwnerID == "" || failure.LeaseExpiresAt.IsZero() || failure.Reason == "" {
 		return fmt.Errorf("%w: failure", recordsearch.ErrInvalidRebuild)
 	}
-	return store.platform.RunRecordPlatformTransaction(ctx, func(
+	return store.platform.runSourceAuthorizedMutationTransaction(ctx, func(
 		ctx context.Context,
 		transaction *RecordPlatformTransaction,
 	) error {
-		if _, err := transaction.tx.Exec(ctx, `
+		if err := acquireSearchGenerationAuthority(ctx, transaction.tx, failure.JobID); err != nil {
+			return err
+		}
+		var state string
+		if err := transaction.tx.QueryRow(ctx, `
+			select generation_state from public.record_search_generations
+			where generation = $1 and project_id = $2 for update`,
+			int64(failure.Generation), recordplatform.ProjectIDDefault,
+		).Scan(&state); err != nil {
+			return fmt.Errorf("lock search generation for failure: %w", err)
+		}
+		if state != "building" {
+			return ErrRebuildLeaseHeld
+		}
+		if err := assertOwnedSearchRebuildJob(ctx, transaction.tx, recordsearch.RebuildBatch{
+			JobID: failure.JobID, Generation: failure.Generation, OwnerID: failure.OwnerID,
+			LeaseExpiresAt: failure.LeaseExpiresAt,
+		}); err != nil {
+			return err
+		}
+		command, err := transaction.tx.Exec(ctx, `
 			update public.record_search_rebuild_jobs
-			set job_state = 'failed',
-			    failure_reason = $2,
-			    finished_at = transaction_timestamp(),
-			    updated_at = transaction_timestamp()
-			where job_id = $1 and job_state = 'running'`, failure.JobID, failure.Reason,
-		); err != nil {
+			set job_state = 'failed', failure_reason = $2,
+			    finished_at = clock_timestamp(), updated_at = clock_timestamp()
+			where job_id = $1 and generation = $3 and job_state = 'running'
+			  and owner_id = $4 and lease_expires_at = $5 and lease_expires_at > clock_timestamp()`,
+			failure.JobID, failure.Reason, int64(failure.Generation), failure.OwnerID, failure.LeaseExpiresAt)
+		if err != nil {
 			return fmt.Errorf("fail search rebuild job: %w", err)
+		}
+		if command.RowsAffected() != 1 {
+			return ErrRebuildLeaseHeld
 		}
 		if _, err := transaction.tx.Exec(ctx, `
 			update public.record_search_generations
@@ -578,6 +668,79 @@ func (store *PostgresRecordSearchRebuildStore) FailRecordSearchRebuild(
 		}
 		return nil
 	})
+}
+
+// Discover the entire bounded batch before taking any job or generation lock.
+// The same declaration is read again after acquisition to detect new routes.
+func discoverSearchRebuildResources(ctx context.Context, tx pgx.Tx, jobID string, candidates []searchRebuildCandidate) (records.RevisionMutationResources, error) {
+	resources := records.RevisionMutationResources{
+		Projects: []records.RevisionMutationProject{{ProjectID: string(recordplatform.ProjectIDDefault), Kind: records.RevisionMutationSearchCoordination}},
+	}
+	var err error
+	resources.Generations, err = readRevisionMutationRows[records.RevisionMutationGeneration](ctx, tx, `
+		select project_id,generation,generation_state from public.record_search_generations
+		where project_id=$1 and generation_state in ('published','building') order by generation`, recordplatform.ProjectIDDefault)
+	if err != nil {
+		return resources, err
+	}
+	if jobID == "" {
+		return records.CombineRevisionMutationResources(resources)
+	}
+	resources.SearchRebuildJobs, err = readRevisionMutationRows[records.RevisionMutationSearchRebuildJob](ctx, tx, `
+		select project_id,job_id,job_state,owner_id,coalesce(resume_after_record_id,''),generation,processed_count,lease_expires_at
+		from public.record_search_rebuild_jobs where project_id=$1 and job_id=$2`, recordplatform.ProjectIDDefault, jobID)
+	if err != nil {
+		return resources, err
+	}
+	if len(resources.SearchRebuildJobs) != 1 {
+		return resources, ErrRebuildLeaseHeld
+	}
+	generation := resources.SearchRebuildJobs[0].Generation
+	for _, candidate := range candidates {
+		resources.Documents = append(resources.Documents, records.RevisionMutationDocument{ProjectID: string(recordplatform.ProjectIDDefault), RecordID: candidate.recordID, Generation: generation})
+		oldSubjects, err := readRevisionMutationRows[records.RevisionMutationSearchSubject](ctx, tx, `
+			select $3::text,record_id,generation,subject_kind,source_id,relation_role
+			from public.record_search_subjects where record_id=$1 and generation=$2
+			order by subject_kind,source_id,relation_role`, candidate.recordID, generation, recordplatform.ProjectIDDefault)
+		if err != nil {
+			return resources, err
+		}
+		resources.SearchSubjects = append(resources.SearchSubjects, oldSubjects...)
+		newSubjects, err := readRevisionMutationRows[records.RevisionMutationSearchSubject](ctx, tx, `
+			select $3::text,$1::text,$4::bigint,subject_kind,source_id,relation_role
+			from public.record_revision_subjects where revision_id=$2 order by subject_kind,source_id,relation_role`,
+			candidate.recordID, candidate.currentRevisionID, recordplatform.ProjectIDDefault, generation)
+		if err != nil {
+			return resources, err
+		}
+		resources.SearchSubjects = append(resources.SearchSubjects, newSubjects...)
+		actions, err := readRevisionMutationRows[records.RevisionMutationAction](ctx, tx, `
+			select project_id,record_id,action_id,status,record_fence_epoch,coalesce(due_at,'0001-01-01 00:00:00+00'::timestamptz)
+			from public.record_actions where record_id=$1 order by action_id`, candidate.recordID)
+		if err != nil {
+			return resources, err
+		}
+		resources.Actions = append(resources.Actions, actions...)
+	}
+	return records.CombineRevisionMutationResources(resources)
+}
+
+func acquireSearchGenerationAuthority(ctx context.Context, tx pgx.Tx, jobID string) error {
+	observed, err := discoverSearchRebuildResources(ctx, tx, jobID, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := acquireEffectMutationResources(ctx, tx, nil, nil, observed); err != nil {
+		return err
+	}
+	rechecked, err := discoverSearchRebuildResources(ctx, tx, jobID, nil)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(observed, rechecked) {
+		return &pgconn.PgError{Code: "40001", Message: "search generation or job changed; restart transaction"}
+	}
+	return nil
 }
 
 func searchRebuildInterval(duration time.Duration) string {

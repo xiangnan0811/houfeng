@@ -14,6 +14,8 @@ import (
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -30,14 +32,17 @@ var (
 type DomainActivityKind string
 
 const (
-	DomainActivityRecordCreated    DomainActivityKind = "record_created"
-	DomainActivityRecordRevised    DomainActivityKind = "record_revised"
-	DomainActivityRecordRestored   DomainActivityKind = "record_restored"
-	DomainActivityRecordArchived   DomainActivityKind = "record_archived"
-	DomainActivityRecordUnarchived DomainActivityKind = "record_unarchived"
+	DomainActivityRecordCreated       DomainActivityKind = "record_created"
+	DomainActivityRecordRevised       DomainActivityKind = "record_revised"
+	DomainActivityRecordRestored      DomainActivityKind = "record_restored"
+	DomainActivityRecordArchived      DomainActivityKind = "record_archived"
+	DomainActivityRecordUnarchived    DomainActivityKind = "record_unarchived"
+	DomainActivityRecordTrashed       DomainActivityKind = "record_trashed"
+	DomainActivityRecordTrashRestored DomainActivityKind = "record_trash_restored"
 )
 
 type RevisionCommitCommand struct {
+	Actor               recordauth.ActorScope
 	RecordID            string
 	BaseRevisionID      string
 	LockVersion         uint64
@@ -50,6 +55,8 @@ type RevisionCommitCommand struct {
 	ActivityKind        DomainActivityKind
 	OutboxTTL           time.Duration
 	Idempotency         recordplatform.IdempotencyClaimInputV1
+	BirthRequest        recordbirth.Request
+	BirthPermit         recordbirth.Permit
 }
 
 type RevisionCommitResult struct {
@@ -62,6 +69,9 @@ type RevisionCommitResult struct {
 	Created            bool
 	Replayed           bool
 	CommittedAt        time.Time
+	// CertificationPending means a committed certifiable birth still needs
+	// confirmation; it is not evidence that the birth is verified.
+	CertificationPending bool
 }
 
 type RecordLifecycleCommand struct {
@@ -69,8 +79,9 @@ type RecordLifecycleCommand struct {
 	CurrentRevisionID  string
 	LockVersion        uint64
 	AuthorizationEpoch uint64
+	ExpectedLifecycle  Lifecycle
 	TargetLifecycle    Lifecycle
-	ActorID            string
+	Actor              recordauth.ActorScope
 	OutboxTTL          time.Duration
 	Idempotency        recordplatform.IdempotencyClaimInputV1
 }
@@ -108,7 +119,11 @@ type RevisionOutbox interface {
 }
 
 func (command RevisionCommitCommand) Validate() error {
-	if !validRecordRootID(command.RecordID) {
+	actor, err := recordauth.NormalizeActorScope(command.Actor)
+	if err != nil || actor.UserID != command.Input.AuthorID() {
+		return fmt.Errorf("%w: actor", ErrInvalidRevisionCommand)
+	}
+	if !recordidentity.IsValid(command.RecordID) {
 		return fmt.Errorf("%w: record id", ErrInvalidRevisionCommand)
 	}
 	switch command.Idempotency.Key.OperationKind {
@@ -149,6 +164,24 @@ func (command RevisionCommitCommand) Validate() error {
 	if err := command.Idempotency.Validate(); err != nil {
 		return fmt.Errorf("%w: idempotency: %w", ErrInvalidRevisionCommand, err)
 	}
+	hasBirth := command.BirthRequest != (recordbirth.Request{}) || command.BirthPermit.AllocationID != "" ||
+		command.BirthPermit.ReservationID != "" || command.BirthPermit.RecordID != "" ||
+		command.BirthPermit.Creation != (recordbirth.InitialCreation{}) || len(command.BirthPermit.PrepareReceipt) != 0
+	if hasBirth {
+		fingerprint, fingerprintErr := command.Idempotency.RequestFingerprint.PersistedBytes()
+		revisionID, revisionErr := command.RevisionID()
+		creation := command.BirthPermit.Creation
+		if command.Idempotency.Key.OperationKind != recordplatform.OperationKindRecordCreate ||
+			command.BirthRequest.Validate() != nil || command.BirthRequest.ProjectID != string(actor.ProjectID) ||
+			command.BirthRequest.ActorID != actor.UserID || command.BirthRequest.ActorScopeDigest != actor.CanonicalHash() ||
+			fingerprintErr != nil || revisionErr != nil || creation.Validate() != nil ||
+			command.BirthPermit.AllocationID == "" || command.BirthPermit.ReservationID != creation.ReservationID ||
+			command.BirthPermit.RecordID != command.RecordID || creation.RecordID != command.RecordID ||
+			creation.RevisionID != revisionID || creation.AuthorID != actor.UserID ||
+			creation.CanonicalHash != command.Input.CanonicalHash() || creation.RequestFingerprint != fingerprint {
+			return fmt.Errorf("%w: birth binding", ErrInvalidRevisionCommand)
+		}
+	}
 	if command.OutboxTTL.Microseconds() <= 0 {
 		return fmt.Errorf("%w: outbox ttl", ErrInvalidRevisionCommand)
 	}
@@ -188,14 +221,17 @@ func (command RevisionCommitCommand) ActivityID() (string, error) {
 }
 
 func (command RecordLifecycleCommand) Validate() error {
-	if !validRecordRootID(command.RecordID) || !validRevisionID(command.CurrentRevisionID) ||
+	if !recordidentity.IsValid(command.RecordID) || !validRevisionID(command.CurrentRevisionID) ||
 		command.LockVersion == 0 || command.AuthorizationEpoch == 0 {
 		return fmt.Errorf("%w: identity or versions", ErrInvalidRecordLifecycleCommand)
 	}
-	if err := ValidateLifecycle(command.TargetLifecycle); err != nil {
-		return fmt.Errorf("%w: lifecycle", ErrInvalidRecordLifecycleCommand)
+	if !((command.ExpectedLifecycle == LifecycleActive &&
+		(command.TargetLifecycle == LifecycleArchived || command.TargetLifecycle == LifecycleTrashed)) ||
+		((command.ExpectedLifecycle == LifecycleArchived || command.ExpectedLifecycle == LifecycleTrashed) &&
+			command.TargetLifecycle == LifecycleActive)) {
+		return fmt.Errorf("%w: lifecycle transition", ErrInvalidRecordLifecycleCommand)
 	}
-	if err := recordauth.ValidateActorUserID(command.ActorID); err != nil {
+	if _, err := recordauth.NormalizeActorScope(command.Actor); err != nil {
 		return fmt.Errorf("%w: actor", ErrInvalidRecordLifecycleCommand)
 	}
 	if command.Idempotency.Key.ProjectID != recordplatform.ProjectIDDefault ||
@@ -218,6 +254,12 @@ func (command RecordLifecycleCommand) ActivityKind() (DomainActivityKind, error)
 	if command.TargetLifecycle == LifecycleArchived {
 		return DomainActivityRecordArchived, nil
 	}
+	if command.TargetLifecycle == LifecycleTrashed {
+		return DomainActivityRecordTrashed, nil
+	}
+	if command.ExpectedLifecycle == LifecycleTrashed {
+		return DomainActivityRecordTrashRestored, nil
+	}
 	return DomainActivityRecordUnarchived, nil
 }
 
@@ -238,24 +280,6 @@ func deterministicRevisionIdentity(prefix string, fingerprint recordplatform.Req
 		return "", fmt.Errorf("%w: request fingerprint", ErrInvalidRevisionCommand)
 	}
 	return prefix + hex.EncodeToString(digest[:]), nil
-}
-
-// ValidRecordRootID exposes the record identity grammar to derived read models
-// that carry record identifiers without owning them.
-func ValidRecordRootID(value string) bool {
-	return validRecordRootID(value)
-}
-
-func validRecordRootID(value string) bool {
-	if len(value) < len("rec_")+1 || len(value) > len("rec_")+64 || value[:len("rec_")] != "rec_" {
-		return false
-	}
-	for _, character := range value[len("rec_"):] {
-		if (character < 'a' || character > 'z') && (character < '0' || character > '9') {
-			return false
-		}
-	}
-	return true
 }
 
 // ValidRevisionID exposes the revision identity grammar to derived read models
@@ -281,6 +305,9 @@ func validRevisionID(value string) bool {
 // not perform network or other external calls.
 type RevisionParticipant interface {
 	Name() string
+	// MutationResources performs only unlocked SELECTs/pure discovery on tx:
+	// no writes, explicit locks, external calls, or acquired-authority claims.
+	MutationResources(context.Context, pgx.Tx, RevisionCommitCommand) (RevisionMutationResources, error)
 	ApplyRevision(context.Context, pgx.Tx, RevisionCommitted) error
 }
 
@@ -315,6 +342,45 @@ func NewRevisionParticipantRegistry(participants []RevisionParticipant) (Revisio
 
 func (registry RevisionParticipantRegistry) Names() []string {
 	return append([]string(nil), registry.names...)
+}
+
+// MutationResources collects the closed participant declarations on the exact
+// caller transaction. It neither acquires nor authorizes the declared resources.
+func (registry RevisionParticipantRegistry) MutationResources(ctx context.Context, tx pgx.Tx, command RevisionCommitCommand) (RevisionMutationResources, error) {
+	if ctx == nil || tx == nil || reflect.ValueOf(tx).Kind() == reflect.Pointer && reflect.ValueOf(tx).IsNil() {
+		return RevisionMutationResources{}, ErrInvalidRevisionCommand
+	}
+	if err := ctx.Err(); err != nil {
+		return RevisionMutationResources{}, err
+	}
+	if err := command.Validate(); err != nil {
+		return RevisionMutationResources{}, err
+	}
+	sets := make([]RevisionMutationResources, 0, len(registry.participants))
+	for _, participant := range registry.participants {
+		resources, err := participant.MutationResources(ctx, tx, command)
+		if err != nil {
+			return RevisionMutationResources{}, fmt.Errorf("discover revision participant %q: %w", participant.Name(), err)
+		}
+		sets = append(sets, resources)
+	}
+	combined, err := CombineRevisionMutationResources(sets...)
+	if err != nil {
+		return RevisionMutationResources{}, err
+	}
+	if len(combined.NewRevisionEffects) > 0 {
+		revisionID, err := command.RevisionID()
+		if err != nil {
+			return RevisionMutationResources{}, err
+		}
+		for _, effect := range combined.NewRevisionEffects {
+			if effect.RecordID != command.RecordID || effect.RevisionID != revisionID ||
+				(effect.Kind == RevisionMutationNewRevisionRows && effect.EventKind != RevisionMutationEventKind(command.ActivityKind)) {
+				return RevisionMutationResources{}, fmt.Errorf("%w: new revision effect does not bind command", ErrInvalidRevisionMutationResources)
+			}
+		}
+	}
+	return combined, nil
 }
 
 func (registry RevisionParticipantRegistry) ApplyRevision(ctx context.Context, tx pgx.Tx, committed RevisionCommitted) error {

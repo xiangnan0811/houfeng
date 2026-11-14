@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordsearch"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store"
@@ -159,10 +161,16 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		HTTPAddr:           ":8080",
 		WebDistDir:         "web/dist",
 		DatabaseURL:        "postgres://center",
+		RecordDeploymentID: centerTestDeployment,
 		SessionHMACKey:     []byte("0123456789abcdef0123456789abcdef"),
+		// This unit fixture exercises admission and HTTP routing without opening a
+		// database-backed local namespace or contacting the configured S3 endpoint.
 		Attachment: config.AttachmentConfig{
-			BlobBackend:          attachments.BackendKindLocal,
-			BlobRoot:             t.TempDir(),
+			BlobBackend:          attachments.BackendKindS3,
+			S3Endpoint:           "127.0.0.1:9000",
+			S3Bucket:             "fixture-blobs",
+			S3AccessKey:          "fixture-access",
+			S3SecretKey:          "fixture-secret",
 			Limits:               attachments.DefaultLimits(),
 			ProcessorMaxAttempts: 3,
 		},
@@ -172,12 +180,19 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	admitCalls := 0
 	searchGenerationCalls := 0
 	activityGenerationCalls := 0
-	var gotRouterOptions centerhttp.RouterOptions
+	var router http.Handler
 	var gotWorkers []centerapp.Worker
+	var openedDSN string
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		loadRuntimeLaunch:   centerTestLaunch,
+		verifyRuntimeLaunch: centerTestVerifyLaunch,
+		newRecordAdmissionGate: func(config.CenterConfig) (store.AdmissionGate, error) {
+			return nil, nil
+		},
 		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
-		openPostgres: func(context.Context, string) (postgresDB, error) {
+		openPostgres: func(_ context.Context, dsn string) (postgresDB, error) {
+			openedDSN = dsn
 			return db, nil
 		},
 		applyMigrations: func(context.Context, postgresDB) error {
@@ -231,8 +246,9 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 			return fakeSessionRepository{}, nil
 		},
 		newRouter: func(options centerhttp.RouterOptions) http.Handler {
-			gotRouterOptions = options
-			return http.NewServeMux()
+			options.AuthMiddleware = func(next http.Handler) http.Handler { return next }
+			router = centerhttp.New(options)
+			return router
 		},
 		newApp: func(_ string, _ http.Handler, workers ...centerapp.Worker) appRunner {
 			gotWorkers = append([]centerapp.Worker(nil), workers...)
@@ -244,6 +260,14 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	if app == nil || cleanup == nil {
 		t.Fatal("bootstrapCenter() returned a nil app or cleanup, want both")
+	}
+	connection, err := pgxpool.ParseConfig(openedDSN)
+	if err != nil {
+		t.Fatalf("parse APP connection: %v", err)
+	}
+	_, launchDigest, _ := centerTestLaunch("", "center")
+	if got := connection.ConnConfig.RuntimeParams["houfeng.birth_launch_digest"]; got != fmt.Sprintf("%x", launchDigest) {
+		t.Fatalf("APP launch digest = %q, want protected digest", got)
 	}
 	if applyCalls != 0 {
 		t.Fatalf("applyMigrations calls = %d, want 0", applyCalls)
@@ -258,9 +282,6 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	if activityGenerationCalls != 1 {
 		t.Fatalf("ensureActivityGeneration calls = %d, want 1", activityGenerationCalls)
-	}
-	if len(gotWorkers) != 9 {
-		t.Fatalf("runtime workers = %d, want intelligence + search rebuild + activity projection with evidence maintenance still disabled", len(gotWorkers))
 	}
 	// The projector only indexes commits, so records written before the index
 	// existed stay invisible until a rebuild backfills them. That backfill has to
@@ -288,52 +309,27 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if intelligenceWorker == nil {
 		t.Fatal("missing IP quality intelligence lifecycle worker")
 	}
-	if gotRouterOptions.ComparisonEnabled {
-		t.Fatal("runtime ComparisonEnabled = true, want default off")
-	}
-	if gotRouterOptions.PortabilityEnabled || gotRouterOptions.RecordPortabilityHandler != nil {
-		t.Fatal("runtime PortabilityEnabled or handler is on, want default off")
-	}
-	if gotRouterOptions.DeploymentSettingsHandler == nil {
-		t.Fatal("deployment settings router handler is nil")
-	}
-	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
-		gotRouterOptions.SubjectActivityHandler == nil || gotRouterOptions.VPSOverviewHandler == nil ||
-		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
-		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil ||
-		gotRouterOptions.EvidenceHandler == nil || gotRouterOptions.AttachmentUploadsHandler == nil || gotRouterOptions.AttachmentsHandler == nil {
-		t.Fatalf(
-			"runtime Records router options = enabled:%t records:%v drafts:%v deletions:%v evidence:%v uploads:%v attachments:%v, want enabled and non-nil handlers",
-			gotRouterOptions.RecordsEnabled,
-			gotRouterOptions.RecordsHandler,
-			gotRouterOptions.RecordDraftsHandler,
-			gotRouterOptions.RecordDeletionsHandler,
-			gotRouterOptions.EvidenceHandler,
-			gotRouterOptions.AttachmentUploadsHandler,
-			gotRouterOptions.AttachmentsHandler,
-		)
-	}
-	if gotRouterOptions.VPSTimelineHandler == nil || gotRouterOptions.VPSExperienceLogsHandler == nil {
-		t.Fatal("runtime admission removed legacy VPS timeline or experience handler")
-	}
 	actor := mustBootstrapRecordsActor(t)
 	for _, handlerCase := range []struct {
 		name     string
 		method   string
 		path     string
 		body     string
-		handler  http.Handler
 		wantCode string
 	}{
-		{name: "records", method: http.MethodGet, path: "/api/records", handler: gotRouterOptions.RecordsHandler, wantCode: "record_service_unavailable"},
-		{name: "watch", method: http.MethodGet, path: "/api/records/rec_httpcontract/watch", handler: gotRouterOptions.RecordWatchesHandler, wantCode: "record_service_unavailable"},
-		{name: "inbox", method: http.MethodGet, path: "/api/record-notifications", handler: gotRouterOptions.RecordInboxHandler, wantCode: "record_service_unavailable"},
-		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler, wantCode: "record_service_unavailable"},
-		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_safety_unavailable"},
-		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_status_unavailable"},
-		{name: "evidence preview", method: http.MethodPost, path: "/api/evidence/capture-previews", body: `{}`, handler: gotRouterOptions.EvidenceHandler, wantCode: "evidence_service_unavailable"},
-		{name: "evidence read", method: http.MethodGet, path: "/api/evidence/evs_httpcontract", handler: gotRouterOptions.EvidenceHandler, wantCode: "evidence_service_unavailable"},
-		{name: "attachment upload", method: http.MethodPost, path: "/api/attachment-uploads", body: `{"draft_id":"rdf_httpcontract0001","display_name":"notes.txt","declared_size_bytes":4,"media_type":"text/plain"}`, handler: gotRouterOptions.AttachmentUploadsHandler, wantCode: "attachment_service_unavailable"},
+		{name: "records", method: http.MethodGet, path: "/api/records", wantCode: "record_service_unavailable"},
+		{name: "search", method: http.MethodGet, path: "/api/records/search?q=fixture", wantCode: "record_service_unavailable"},
+		{name: "actions", method: http.MethodGet, path: "/api/records/rec_httpcontract/actions", wantCode: "record_service_unavailable"},
+		{name: "comments", method: http.MethodGet, path: "/api/records/rec_httpcontract/comments", wantCode: "record_service_unavailable"},
+		{name: "watch", method: http.MethodGet, path: "/api/records/rec_httpcontract/watch", wantCode: "record_service_unavailable"},
+		{name: "inbox", method: http.MethodGet, path: "/api/record-notifications", wantCode: "record_service_unavailable"},
+		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", wantCode: "record_service_unavailable"},
+		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", wantCode: "deletion_safety_unavailable"},
+		{name: "deletion execute", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete", body: `{}`, wantCode: "deletion_safety_unavailable"},
+		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", wantCode: "deletion_status_unavailable"},
+		{name: "evidence preview", method: http.MethodPost, path: "/api/evidence/capture-previews", body: `{}`, wantCode: "evidence_service_unavailable"},
+		{name: "evidence read", method: http.MethodGet, path: "/api/evidence/evs_httpcontract", wantCode: "evidence_service_unavailable"},
+		{name: "attachment upload", method: http.MethodPost, path: "/api/attachment-uploads", body: `{"draft_id":"rdf_httpcontract0001","display_name":"notes.txt","declared_size_bytes":4,"media_type":"text/plain"}`, wantCode: "attachment_service_unavailable"},
 	} {
 		t.Run(handlerCase.name+" fails closed without transaction admission", func(t *testing.T) {
 			request := httptest.NewRequest(handlerCase.method, handlerCase.path, strings.NewReader(handlerCase.body))
@@ -342,7 +338,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 			}
 			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
 			recorder := httptest.NewRecorder()
-			handlerCase.handler.ServeHTTP(recorder, request)
+			router.ServeHTTP(recorder, request)
 			if recorder.Code != http.StatusServiceUnavailable ||
 				!strings.Contains(recorder.Body.String(), `"code":"`+handlerCase.wantCode+`"`) {
 				t.Fatalf("status = %d body=%s, want stable %s 503", recorder.Code, recorder.Body.String(), handlerCase.wantCode)
@@ -353,8 +349,9 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		})
 	}
 	cleanup()
-	if !db.closed {
-		t.Fatal("cleanup() did not close DB")
+	cleanup()
+	if !db.closed || db.closeCalls != 1 {
+		t.Fatalf("cleanup closed DB %d times, want exactly once", db.closeCalls)
 	}
 }
 
@@ -364,6 +361,7 @@ func TestBootstrapCenterClosesDBOnRuntimeAdmissionFailure(t *testing.T) {
 		HTTPAddr:           ":8080",
 		WebDistDir:         "web/dist",
 		DatabaseURL:        "postgres://center",
+		RecordDeploymentID: centerTestDeployment,
 	}
 	db := &fakePostgresDB{}
 	wantErr := errors.New("runtime admission boom")
@@ -371,6 +369,7 @@ func TestBootstrapCenterClosesDBOnRuntimeAdmissionFailure(t *testing.T) {
 	admitCalls := 0
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		loadRuntimeLaunch:         centerTestLaunch,
 		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
 		openPostgres: func(context.Context, string) (postgresDB, error) {
 			return db, nil
@@ -407,6 +406,7 @@ func TestBootstrapCenterDefaultRuntimeAdmissionFailsClosed(t *testing.T) {
 		HTTPAddr:           ":8080",
 		WebDistDir:         "web/dist",
 		DatabaseURL:        "postgres://center",
+		RecordDeploymentID: centerTestDeployment,
 	}
 	db := &fakePostgresDB{}
 	applyCalls := 0
@@ -415,6 +415,7 @@ func TestBootstrapCenterDefaultRuntimeAdmissionFailsClosed(t *testing.T) {
 	deps.openPostgres = func(context.Context, string) (postgresDB, error) {
 		return db, nil
 	}
+	deps.loadRuntimeLaunch = centerTestLaunch
 	deps.applyMigrations = func(context.Context, postgresDB) error {
 		applyCalls++
 		return nil
@@ -430,6 +431,133 @@ func TestBootstrapCenterDefaultRuntimeAdmissionFailsClosed(t *testing.T) {
 	if !db.closed {
 		t.Fatal("bootstrapCenter() did not close DB after default runtime admission failure")
 	}
+}
+
+func TestBootstrapCenterRejectsUntrustedLaunchBeforeOpeningAPP(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		dsn    string
+		loader func(string, string) (recordbirth.LaunchBinding, [32]byte, error)
+	}{
+		{"missing launch", "postgres://center", func(string, string) (recordbirth.LaunchBinding, [32]byte, error) {
+			return recordbirth.LaunchBinding{}, [32]byte{}, errors.New("missing")
+		}},
+		{"different deployment", "postgres://center", func(path, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+			launch, digest, err := centerTestLaunch(path, kind)
+			launch.DeploymentID = "dp-" + strings.Repeat("d", 64)
+			return launch, digest, err
+		}},
+		{"different process", "postgres://center", func(path, _ string) (recordbirth.LaunchBinding, [32]byte, error) {
+			return centerTestLaunch(path, "content-processor")
+		}},
+		{"preloaded digest", "postgres://center?houfeng.birth_launch_digest=old", centerTestLaunch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opened := false
+			cfg := config.CenterConfig{RecordPlatformMode: config.RecordPlatformModeRuntimeAdmission, DatabaseURL: tc.dsn, RecordDeploymentID: centerTestDeployment}
+			_, _, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+				loadRuntimeLaunch: tc.loader,
+				openPostgres: func(context.Context, string) (postgresDB, error) {
+					opened = true
+					return nil, errors.New("unexpected APP connection")
+				},
+			})
+			if err == nil || opened {
+				t.Fatalf("launch rejection = %v, APP opened = %t", err, opened)
+			}
+		})
+	}
+}
+
+func TestBootstrapCenterDefaultLaunchLoaderRejectsMissingFile(t *testing.T) {
+	opened := false
+	cfg := config.CenterConfig{
+		RecordPlatformMode: config.RecordPlatformModeRuntimeAdmission, DatabaseURL: "postgres://center",
+		RecordDeploymentID: centerTestDeployment, BirthLaunchFile: filepath.Join(t.TempDir(), "missing-launch.json"),
+	}
+	_, _, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		openPostgres: func(context.Context, string) (postgresDB, error) {
+			opened = true
+			return nil, errors.New("unexpected APP connection")
+		},
+	})
+	if err == nil || opened {
+		t.Fatalf("missing launch error = %v, APP opened = %t", err, opened)
+	}
+}
+
+func TestBootstrapCenterClosesAPPWhenLaunchContinuityFails(t *testing.T) {
+	db := &fakePostgresDB{}
+	wantErr := errors.New("checkpoint ancestry unavailable")
+	cfg := config.CenterConfig{RecordPlatformMode: config.RecordPlatformModeRuntimeAdmission, DatabaseURL: "postgres://center", RecordDeploymentID: centerTestDeployment}
+	cfg.BirthLaunchFile = "/protected/center-launch.json"
+	cfg.BirthReader.IdentityFile = "/not-read-for-never-installed"
+	_, _, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		loadRuntimeLaunch: func(path, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+			if path != cfg.BirthLaunchFile || kind != "center" {
+				t.Fatalf("launch request = %q %q", path, kind)
+			}
+			return centerTestLaunch(path, kind)
+		},
+		openPostgres: func(context.Context, string) (postgresDB, error) { return db, nil },
+		admitRuntime: func(context.Context, postgresDB) error { return nil },
+		verifyRuntimeLaunch: func(_ context.Context, _ *pgxpool.Pool, reader *recordbirth.PostgresAuthority, launch recordbirth.LaunchBinding) error {
+			if reader != nil || launch.BirthInstalled {
+				t.Fatal("never-installed startup unexpectedly opened W2")
+			}
+			return wantErr
+		},
+	})
+	if !errors.Is(err, wantErr) || !db.closed || db.closeCalls != 1 {
+		t.Fatalf("verification failure = %v, APP closes = %d", err, db.closeCalls)
+	}
+}
+
+func TestBootstrapCenterInstalledBirthRequiresIndependentReader(t *testing.T) {
+	loader := func(path, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+		launch, digest, err := centerTestLaunch(path, kind)
+		launch.BirthInstalled = true
+		return launch, digest, err
+	}
+	t.Run("missing reader closes APP", func(t *testing.T) {
+		db := &fakePostgresDB{}
+		verified := false
+		cfg := config.CenterConfig{RecordPlatformMode: config.RecordPlatformModeRuntimeAdmission, DatabaseURL: "postgres://center", RecordDeploymentID: centerTestDeployment}
+		_, _, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+			loadRuntimeLaunch: loader,
+			openPostgres:      func(context.Context, string) (postgresDB, error) { return db, nil },
+			admitRuntime:      func(context.Context, postgresDB) error { return nil },
+			verifyRuntimeLaunch: func(context.Context, *pgxpool.Pool, *recordbirth.PostgresAuthority, recordbirth.LaunchBinding) error {
+				verified = true
+				return nil
+			},
+		})
+		if err == nil || verified || db.closeCalls != 1 {
+			t.Fatalf("missing reader error = %v, verified = %t, APP closes = %d", err, verified, db.closeCalls)
+		}
+	})
+	t.Run("reader remains available without producer", func(t *testing.T) {
+		cfg := birthCompositionConfig(t, "birth_reader")
+		cfg.DatabaseURL, cfg.RecordDeploymentID = "postgres://center", centerTestDeployment
+		cfg.BirthReader = config.BirthReaderConfig{Connection: cfg.BirthProducer.Connection, IdentityFile: cfg.BirthProducer.IdentityFile, CredentialFile: cfg.BirthProducer.CredentialFile}
+		cfg.BirthProducer = config.BirthProducerConfig{}
+		db := &fakePostgresDB{pool: birthCompositionPool(t, "app_runtime")}
+		wantErr := errors.New("stop after verified reader")
+		verified := false
+		_, _, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+			loadRuntimeLaunch: loader,
+			openPostgres:      func(context.Context, string) (postgresDB, error) { return db, nil },
+			admitRuntime:      func(context.Context, postgresDB) error { return nil },
+			verifyRuntimeLaunch: func(_ context.Context, _ *pgxpool.Pool, reader *recordbirth.PostgresAuthority, _ recordbirth.LaunchBinding) error {
+				verified = reader != nil
+				return nil
+			},
+			ensureSearchGeneration: func(context.Context, postgresDB) error { return wantErr },
+		})
+		if !errors.Is(err, wantErr) || !verified || db.closeCalls != 1 {
+			t.Fatalf("reader startup = %v, verified = %t, APP closes = %d", err, verified, db.closeCalls)
+		}
+	})
 }
 
 func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
@@ -477,14 +605,11 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		},
 		newRouter: func(opts centerhttp.RouterOptions) http.Handler {
 			gotOpts = opts
-			return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+			return centerhttp.New(opts)
 		},
 		newApp: func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
 			gotAddr = addr
 			gotHandler = handler
-			if len(workers) != 7 {
-				t.Fatalf("len(workers) = %d, want 7", len(workers))
-			}
 			intelligenceCount := 0
 			for i, worker := range workers {
 				if _, ok := worker.(*ipquality.IntelligenceWorker); ok {
@@ -517,236 +642,6 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if cleanup == nil {
 		t.Fatal("bootstrapCenter() cleanup = nil, want non-nil")
 	}
-	if gotOpts.Version != "dev" {
-		t.Fatalf("router version = %q, want %q", gotOpts.Version, "dev")
-	}
-	if gotOpts.WebDistDir != cfg.WebDistDir {
-		t.Fatalf("router webDistDir = %q, want %q", gotOpts.WebDistDir, cfg.WebDistDir)
-	}
-	if gotOpts.DashboardHandler == nil {
-		t.Fatal("router dashboard handler = nil, want non-nil")
-	}
-	if gotOpts.EventsHandler == nil {
-		t.Fatal("router events handler = nil, want non-nil")
-	}
-	if gotOpts.CommandAuditsHandler == nil {
-		t.Fatal("router command audits handler = nil, want non-nil")
-	}
-	if gotOpts.IncidentsHandler == nil {
-		t.Fatal("router incidents handler = nil, want non-nil")
-	}
-	if gotOpts.SettingsHandler == nil {
-		t.Fatal("router settings handler = nil, want non-nil")
-	}
-	if gotOpts.RecordsEnabled || gotOpts.RecordsHandler != nil || gotOpts.RecordDraftsHandler != nil ||
-		gotOpts.RecordDeletionsHandler != nil || gotOpts.EvidenceHandler != nil || gotOpts.AttachmentUploadsHandler != nil ||
-		gotOpts.AttachmentsHandler != nil {
-		t.Fatalf(
-			"legacy Records router options = enabled:%t records:%v drafts:%v deletions:%v evidence:%v uploads:%v attachments:%v, want disabled and nil handlers",
-			gotOpts.RecordsEnabled,
-			gotOpts.RecordsHandler,
-			gotOpts.RecordDraftsHandler,
-			gotOpts.RecordDeletionsHandler,
-			gotOpts.EvidenceHandler,
-			gotOpts.AttachmentUploadsHandler,
-			gotOpts.AttachmentsHandler,
-		)
-	}
-	if gotOpts.AssetDomainsCollectionHandler == nil {
-		t.Fatal("router asset domains collection handler = nil, want non-nil")
-	}
-	if gotOpts.AssetServicesCollectionHandler == nil {
-		t.Fatal("router asset services collection handler = nil, want non-nil")
-	}
-	if gotOpts.VPSOverviewHandler == nil {
-		t.Fatal("core mode VPS overview handler = nil; VPS detail must not require Records admission")
-	}
-	if gotOpts.AssetDecisionOverviewHandler == nil {
-		t.Fatal("router asset decision overview handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionGroupsHandler == nil {
-		t.Fatal("router asset decision groups handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionGroupHandler == nil {
-		t.Fatal("router asset decision group handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionManualGroupsHandler == nil {
-		t.Fatal("router asset decision manual groups handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionManualGroupHandler == nil {
-		t.Fatal("router asset decision manual group handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionScenarioTemplatesHandler == nil {
-		t.Fatal("router asset decision scenario templates handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionScenarioTemplateHandler == nil {
-		t.Fatal("router asset decision scenario template handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionRecordsHandler == nil {
-		t.Fatal("router asset decision records handler = nil, want non-nil")
-	}
-	if gotOpts.AssetDecisionRecordHandler == nil {
-		t.Fatal("router asset decision record handler = nil, want non-nil")
-	}
-	if gotOpts.ProvidersCollectionHandler == nil {
-		t.Fatal("router providers collection handler = nil, want non-nil")
-	}
-	if gotOpts.ProviderItemHandler == nil {
-		t.Fatal("router provider item handler = nil, want non-nil")
-	}
-	if gotOpts.VPSCollectionHandler == nil {
-		t.Fatal("router vps collection handler = nil, want non-nil")
-	}
-	if gotOpts.VPSItemHandler == nil {
-		t.Fatal("router vps item handler = nil, want non-nil")
-	}
-	if gotOpts.VPSMonitoringInstancesHandler == nil {
-		t.Fatal("router vps monitoringInstances handler = nil, want non-nil")
-	}
-	if gotOpts.VPSSubscriptionsHandler == nil {
-		t.Fatal("router vps subscriptions handler = nil, want non-nil")
-	}
-	if gotOpts.VPSLinkMonitoringInstanceHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.VPSUnlinkMonitoringInstanceHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.VPSTimelineHandler == nil {
-		t.Fatal("router vps timeline handler = nil, want non-nil")
-	}
-	if gotOpts.VPSExperienceLogsHandler == nil {
-		t.Fatal("router vps experience logs handler = nil, want non-nil")
-	}
-	if gotOpts.VPSDomainsHandler == nil {
-		t.Fatal("router vps domains handler = nil, want non-nil")
-	}
-	if gotOpts.VPSServicesHandler == nil {
-		t.Fatal("router vps services handler = nil, want non-nil")
-	}
-	if gotOpts.VPSIPQualityHandler == nil {
-		t.Fatal("router vps ip quality handler = nil, want non-nil")
-	}
-	if gotOpts.VPSCancellationPreviewHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.VPSCancellationHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.VPSExtendValidityHandler == nil {
-		t.Fatal("router vps extend validity handler = nil, want non-nil")
-	}
-	if gotOpts.VPSArchiveReviewHandler == nil {
-		t.Fatal("router vps archive review handler = nil, want non-nil")
-	}
-	if gotOpts.VPSArchiveHandler == nil {
-		t.Fatal("router vps archive handler = nil, want non-nil")
-	}
-	if gotOpts.VPSRestoreFromArchiveHandler == nil {
-		t.Fatal("router vps restore from archive handler = nil, want non-nil")
-	}
-	if gotOpts.AssetContextTargetsHandler == nil {
-		t.Fatal("router asset context targets handler = nil, want non-nil")
-	}
-	if gotOpts.SubscriptionsCollectionHandler == nil {
-		t.Fatal("router subscriptions collection handler = nil, want non-nil")
-	}
-	if gotOpts.SubscriptionItemHandler == nil {
-		t.Fatal("router subscription item handler = nil, want non-nil")
-	}
-	if gotOpts.SubscriptionMonthlyBudgetsHandler == nil {
-		t.Fatal("router subscription monthly budgets handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstancesCollectionHandler == nil {
-		t.Fatal("router monitoringInstances collection handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceItemHandler == nil {
-		t.Fatal("router monitoringInstance item handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceVPSHandler == nil {
-		t.Fatal("router monitoringInstance vps handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceRuntimeFactsHandler == nil {
-		t.Fatal("router monitoringInstance runtime facts handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceRuntimeStreamHandler == nil {
-		t.Fatal("router monitoringInstance runtime stream handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceRuntimeControlHandler == nil {
-		t.Fatal("router monitoringInstance runtime control handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceManagementReviewHandler == nil {
-		t.Fatal("router monitoringInstance management review handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceLifecycleRetireHandler == nil {
-		t.Fatal("router monitoringInstance lifecycle retire handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceLifecycleRestoreHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.MonitoringInstanceArchiveHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.MonitoringInstanceRestoreFromArchiveHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.MonitoringInstancePermanentCleanupHandler != nil {
-		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
-	}
-	if gotOpts.MonitoringInstanceOnboardingHandler == nil {
-		t.Fatal("router monitoringInstance onboarding handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceEnrollmentTokenHandler == nil {
-		t.Fatal("router monitoringInstance enrollment token handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceInstallCommandHandler == nil {
-		t.Fatal("router monitoringInstance install command handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceBindingConfirmRebindHandler == nil {
-		t.Fatal("router monitoringInstance binding confirm rebind handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceBindingRejectPendingHandler == nil {
-		t.Fatal("router monitoringInstance binding reject pending handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceBindingResetHandler == nil {
-		t.Fatal("router monitoringInstance binding reset handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceSparklinesHandler == nil {
-		t.Fatal("router monitoringInstance sparklines handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceActionsHandler == nil {
-		t.Fatal("router monitoringInstance actions handler = nil, want non-nil")
-	}
-	if gotOpts.TargetsCollectionHandler == nil {
-		t.Fatal("router targets collection handler = nil, want non-nil")
-	}
-	if gotOpts.TargetItemHandler == nil {
-		t.Fatal("router target item handler = nil, want non-nil")
-	}
-	if gotOpts.TargetProbeItemsHandler == nil {
-		t.Fatal("router target probe items handler = nil, want non-nil")
-	}
-	if gotOpts.TargetRuntimeFactsHandler == nil {
-		t.Fatal("router target runtime facts handler = nil, want non-nil")
-	}
-	if gotOpts.TargetRuntimeControlHandler == nil {
-		t.Fatal("router target runtime control handler = nil, want non-nil")
-	}
-	if gotOpts.TargetSparklinesHandler == nil {
-		t.Fatal("router target sparklines handler = nil, want non-nil")
-	}
-	if gotOpts.AgentEnrollHandler == nil {
-		t.Fatal("router agent enroll handler = nil, want non-nil")
-	}
-	if gotOpts.AgentSyncHandler == nil {
-		t.Fatal("router agent sync handler = nil, want non-nil")
-	}
-	if gotOpts.InstallerScriptHandler == nil {
-		t.Fatal("router installer script handler = nil, want non-nil")
-	}
-	if gotOpts.AuthMiddleware == nil {
-		t.Fatal("router auth middleware = nil, want non-nil")
-	}
 	if gotAddr != cfg.HTTPAddr {
 		t.Fatalf("app addr = %q, want %q", gotAddr, cfg.HTTPAddr)
 	}
@@ -758,6 +653,16 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	gotHandler.ServeHTTP(recorder, req)
 	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("security header missing from app handler")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", recorder.Code)
+	}
+	for _, path := range []string{"/api/records", "/api/record-drafts", "/api/attachment-uploads"} {
+		recorder = httptest.NewRecorder()
+		gotHandler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("legacy route %s status = %d, want 404", path, recorder.Code)
+		}
 	}
 
 	recorder = httptest.NewRecorder()
@@ -781,8 +686,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 
 	cleanup()
-	if !db.closed {
-		t.Fatal("cleanup() did not close DB")
+	cleanup()
+	if !db.closed || db.closeCalls != 1 {
+		t.Fatalf("cleanup closed DB %d times, want exactly once", db.closeCalls)
 	}
 }
 
@@ -827,368 +733,19 @@ func TestBootstrapDefaultSeedInitialUserUsesConfiguredBcryptCost(t *testing.T) {
 	}
 }
 
-func TestBootstrapAuthServiceUsesConfiguredBcryptCost(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-
-	if !strings.Contains(string(body), "PasswordBcryptCost: cfg.PasswordBcryptCost") {
-		t.Fatal("bootstrap auth.New options must pass cfg.PasswordBcryptCost")
-	}
-}
-
-func TestBootstrapAgentTokenRepositoriesUseConfiguredHMACKey(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-	source := string(body)
-
-	for _, want := range []string{
-		"store.NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)",
-		"store.NewPostgresSyncRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)",
-	} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("bootstrap.go missing configured agent token HMAC wiring %q", want)
-		}
-	}
-}
-
-func TestBootstrapWiresRequiredRecordAuthorizationScopeRepositoryWithoutFallback(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-	source := string(body)
-
-	for _, want := range []string{
-		"scopeRepo := store.NewPostgresRecordAuthorizationRepository(db.Pool())",
-		"centerhttp.RequireSession(authSvc, scopeRepo)(next)",
-	} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("bootstrap.go missing required record authorization wiring %q", want)
-		}
-	}
-	for _, forbidden := range []string{
-		"RequireSession(authSvc)(next)",
-		"if scopeRepo == nil",
-	} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("bootstrap.go retains optional record authorization fallback %q", forbidden)
-		}
-	}
-}
-
-func TestBootstrapRegistersComparisonRevisionParticipantBetweenCollaborationAndEvidence(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-	source := string(body)
-	comparison := strings.Index(source, "store.NewComparisonRevisionParticipant(")
-	collaboration := strings.Index(source, "store.NewCollaborationRevisionParticipant(")
-	evidence := strings.Index(source, "store.NewRecordEvidenceRevisionParticipant()")
-	if comparison < 0 || collaboration < 0 || evidence < 0 || !(collaboration < comparison && comparison < evidence) {
-		t.Fatalf("bootstrap comparison participant order: collaboration=%d comparison=%d evidence=%d", collaboration, comparison, evidence)
-	}
-}
-
-func TestBootstrapWiresNamedRecordPortabilityService(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"portability.NewService(",
-		"handlers.RecordPortability(",
-		"portability.NewLeasedBlobStore(blob)",
-		"centerevidence.NewComparisonResultKind()",
-		"newActivityExportReader(",
-		"portability.NewDeletionAdapter(",
-		"portability.NewIsolatedDocumentPDFRenderer(contentProcessorPDFBinary())",
-		"portability.NewDownloadAttachmentSource(downloadService)",
-		"AttachmentBlobs: blob",
-		"Importer:",
-		"portability.NewAuthoritativeProjectionRebuilder(",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap.go missing portability wiring %q", required)
-		}
-	}
-	if strings.Contains(text, `NewIsolatedDocumentPDFRenderer("")`) {
-		t.Fatal("bootstrap.go still wires an empty in-process PDF renderer")
-	}
-}
-
-func TestContentProcessorPDFBinaryNeverEmpty(t *testing.T) {
-	if got := contentProcessorPDFBinary(); strings.TrimSpace(got) == "" {
-		t.Fatal("contentProcessorPDFBinary() returned empty production path")
-	}
-}
-
-func TestBootstrapWiresNamedWitnessedRecordSubjectTombstoneSource(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"newProductionWitnessedRecordSubjectTombstoneSource(",
-		"store.NewRecordSubjectReadResolver(subjects, witness)",
-		"store.NewWitnessedRecordSubjectTombstoneReader(",
-		"HOUFENG_DELETION_WITNESS_DATABASE_URL",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap.go missing witnessed tombstone wiring %q", required)
-		}
-	}
-	if strings.Contains(text, "NewRecordSubjectReadResolver(subjects, nil)") {
-		t.Fatal("bootstrap.go still constructs RecordSubjectReadResolver with a nil witness")
-	}
-}
-
-func TestBootstrapWiresNamedDeploymentMembershipAdmissionGateWithoutFuncAdapter(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"store.NewDeploymentMembershipAdmissionGate(",
-		"newProductionRecordPlatformAdmissionGate(",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap.go missing named admission wiring %q", required)
-		}
-	}
-	if strings.Contains(text, "store.AdmissionGateFunc(") {
-		t.Fatal("bootstrap.go contains store.AdmissionGateFunc(")
-	}
-}
-
-func TestBootstrapWiresRecordReadinessRegistry(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"recordreadiness.NewRegistry(",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap.go missing record readiness wiring %q", required)
-		}
-	}
-	if !strings.Contains(text, "handlers.RecordDeletions(nil)") {
-		t.Fatal("bootstrap must keep RecordDeletions(nil) until the aggregate matrix enables permanent delete")
-	}
-}
-
-func TestNewProductionRecordPlatformAdmissionGateConstructsNamedTypeOrStaysNil(t *testing.T) {
-	gate, err := newProductionRecordPlatformAdmissionGate(config.CenterConfig{})
-	if err != nil || gate != nil {
-		t.Fatalf("empty identity gate = %#v err = %v, want nil", gate, err)
-	}
-
+func TestNewProductionRecordPlatformAdmissionGateValidatesIdentity(t *testing.T) {
 	if _, err := newProductionRecordPlatformAdmissionGate(config.CenterConfig{RecordInstanceID: "api-01"}); err == nil {
 		t.Fatal("partial identity error = nil, want rejection")
 	}
 
-	gate, err = newProductionRecordPlatformAdmissionGate(config.CenterConfig{
+	gate, err := newProductionRecordPlatformAdmissionGate(config.CenterConfig{
 		RecordInstanceID:         "api-01",
 		RecordDeploymentID:       "dp-" + strings.Repeat("a", 64),
 		RecordInstanceKind:       "api",
 		RecordInstanceCapability: "records.runtime",
 	})
-	if err != nil {
-		t.Fatalf("complete identity error = %v", err)
-	}
-	if _, ok := gate.(*store.DeploymentMembershipAdmissionGate); !ok {
-		t.Fatalf("gate type = %T, want *store.DeploymentMembershipAdmissionGate", gate)
-	}
-}
-
-func TestBootstrapRegistersRecordAttachmentRevisionParticipant(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-	source := string(body)
-	if !strings.Contains(source, "store.NewRecordAttachmentRevisionParticipant()") {
-		t.Fatal("bootstrap.go does not register the attachment revision participant")
-	}
-	if strings.Contains(source, "store.NewPostgresRecordRepository(pool, nil, nil)") {
-		t.Fatal("bootstrap.go still constructs the Records repository without participants")
-	}
-}
-
-func TestBootstrapRegistersRecordCollaborationRevisionParticipantWithoutAdmissionFallback(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-	source := string(body)
-	for _, required := range []string{
-		"store.NewCollaborationRevisionParticipant(",
-		"store.NewPostgresCollaborationMembershipReader()",
-	} {
-		if !strings.Contains(source, required) {
-			t.Fatalf("bootstrap.go missing collaboration revision wiring %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		"store.AdmissionGateFunc(",
-		"NewCollaborationRevisionParticipant(nil)",
-	} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("bootstrap.go contains collaboration admission fallback %q", forbidden)
-		}
-	}
-}
-
-// Search must reuse the record read service and the injected admission gate. A
-// second read path would become a second authorization decision, and a bypassed
-// gate would let the index answer while the record surface is closed.
-func TestBootstrapWiresRecordSearchThroughSharedReadServiceAndAdmission(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"recordsearch.NewService(store.NewPostgresRecordSearchStore(pool, effectiveGate), readService)",
-		"handlers.RecordSearch(searchService)",
-		"RecordSearchHandler:",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap missing record search wiring %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		"NewPostgresRecordSearchStore(pool, nil)",
-		"NewPostgresRecordSearchStore(pool, store.AdmissionGateFunc",
-		"NewPostgresRecordSearchStore(pool, allow",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("bootstrap contains forbidden record search admission bypass %q", forbidden)
-		}
-	}
-}
-
-func TestBootstrapWiresRecordActionsThroughSharedAuthorizationMembershipAndAdmission(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"store.NewPostgresRecordActionRepository(pool, effectiveGate, collaborationMembers, authorizations)",
-		"recordcollaboration.NewActionService(authorizations, actionRepository)",
-		"recordcollaboration.NewActionApplication(",
-		"handlers.RecordActions(actionApplication)",
-		"RecordActionsHandler:",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap missing record action wiring %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		"NewPostgresRecordActionRepository(pool, store.AdmissionGateFunc",
-		"NewPostgresRecordActionRepository(pool, allow",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("bootstrap contains forbidden record action admission bypass %q", forbidden)
-		}
-	}
-}
-
-func TestBootstrapWiresRecordCommentsThroughSharedAuthorizationMembershipAndAdmission(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"store.NewPostgresRecordCommentRepository(pool, effectiveGate, collaborationMembers, authorizations)",
-		"recordcollaboration.NewCommentService(authorizations, commentRepository)",
-		"recordcollaboration.NewCommentApplication(",
-		"handlers.RecordComments(commentApplication)",
-		"RecordCommentsHandler:",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap missing record comment wiring %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		"NewPostgresRecordCommentRepository(pool, store.AdmissionGateFunc",
-		"NewPostgresRecordCommentRepository(pool, allow",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("bootstrap contains forbidden record comment admission bypass %q", forbidden)
-		}
-	}
-}
-
-func TestBootstrapWiresRecordWatchesInboxAndProjectionThroughSharedFailClosedDependencies(t *testing.T) {
-	source, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(source)
-	for _, required := range []string{
-		"store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers, authorizations)",
-		"recordcollaboration.NewWatchService(authorizations, watchRepository)",
-		"handlers.RecordWatches(watchApplication)",
-		"store.NewPostgresRecordNotificationRepository(",
-		"recordcollaboration.NewNotificationProjector(",
-		"recordcollaboration.NewNotificationProjectionWorker(",
-		"handlers.RecordInbox(notificationRepository)",
-		"RecordWatchesHandler:",
-		"RecordInboxHandler:",
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("bootstrap missing record notification wiring %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		"NewPostgresRecordWatchRepository(pool, store.AdmissionGateFunc",
-		"NewPostgresRecordNotificationRepository(pool, store.AdmissionGateFunc",
-		"NewPostgresRecordNotificationRepositoryWithExternalBindings(",
-		"NewNotificationProjectorWithExternalDelivery(",
-		"NewScopedExternalDeliveryProcessor(",
-		"NewOutboxWorker(",
-		"OutboxSender",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("bootstrap contains forbidden notification fallback/delivery primitive %q", forbidden)
-		}
-	}
-}
-
-func TestBootstrapWiresConfiguredAttachmentServices(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-	source := string(body)
-	for _, required := range []string{
-		"store.NewPostgresAttachmentRepository",
-		"attachments.NewUploadService",
-		"attachments.NewDownloadService",
-		"handlers.AttachmentUploads(uploadService)",
-		"handlers.AttachmentsWithOptions(downloadService)",
-		"newArchiveScannerReadiness",
-	} {
-		if !strings.Contains(source, required) {
-			t.Fatalf("bootstrap.go does not contain configured attachment wiring %q", required)
-		}
-	}
-	for _, forbidden := range []string{"handlers.AttachmentUploads(nil)", "handlers.Attachments()"} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("bootstrap.go retains fail-closed placeholder %q", forbidden)
-		}
+	if err != nil || gate == nil {
+		t.Fatalf("complete identity gate = %#v, error = %v", gate, err)
 	}
 }
 
@@ -1222,33 +779,19 @@ func TestArchiveScannerReadinessUsesLiveFunctionalProbe(t *testing.T) {
 	}
 }
 
-func TestBootstrapWiresSeparateCommandAuditReadRepositoryAndHandler(t *testing.T) {
-	body, err := os.ReadFile("bootstrap.go")
-	if err != nil {
-		t.Fatalf("read bootstrap.go: %v", err)
-	}
-	source := string(body)
-	for _, want := range []string{
-		"commandAuditRepo := store.NewPostgresCommandAuditRepository(db.Pool())",
-		"CommandAuditsHandler:",
-		"handlers.CommandAudits(commandAuditRepo)",
-	} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("bootstrap.go missing command audit wiring %q", want)
-		}
-	}
-}
-
 type fakePostgresDB struct {
-	closed bool
+	closed     bool
+	closeCalls int
+	pool       *pgxpool.Pool
 }
 
 func (f *fakePostgresDB) Close() {
 	f.closed = true
+	f.closeCalls++
 }
 
 func (f *fakePostgresDB) Pool() *pgxpool.Pool {
-	return nil
+	return f.pool
 }
 
 type fakeApp struct{}

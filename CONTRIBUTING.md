@@ -16,7 +16,7 @@
 - `make verify-web`：独立于调用者 NODE_ENV 安装依赖，lint、覆盖率测试、build、bundle 和 CSS 检查。
 - `make verify`：保留 docs → Go → Web，调用 `scripts/verify.sh`；不包含真实数据库、浏览器或镜像门禁。
 - `make verify-ci`：完整 CI 对齐入口，顺序执行 docs → Go → 三版本 PG16 catalog → business PostgreSQL → Web → 完整 Chromium suite → image build，首个失败立即停止。
-- `make test-ci-tools`：Node 标准库行为测试，覆盖分类、manifest、候选身份及 required 聚合；不启动重门禁。
+- `make test-ci-tools`：Node 标准库行为测试，覆盖分类、manifest、候选身份及 required 聚合；随后运行 `make test-g2-layout`（Python 标准库，核 `scripts/g2/` 源码/运行数据分离及 HTTP smoke run root 预检，无需历史资产、Docker 或 Btrfs）。不启动重门禁。
 - `bash scripts/test-business-postgres.sh`：真实隔离 PostgreSQL 业务门禁，固定执行认证、设置、
   归档、维护和附件/租约 anchor；每个顶层测试与包必须通过，任何 skip/fail 或遗漏都失败。
   需要 Docker、bash、jq、ss 和 setsid；临时状态保存在 checkout 的 `tmp/` 下。

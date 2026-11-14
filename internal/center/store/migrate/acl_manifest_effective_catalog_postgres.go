@@ -105,11 +105,33 @@ func readAppACLEffectiveCatalogSnapshotInTx(
 	if err := verifyAppACLEffectiveCatalogPGCryptoExtensionR1(snapshot.PGCryptoExtension); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("verify app ACL pgcrypto extension placement: %w", err)
 	}
-	roleNames := []string{
-		input.Contract.RoleBindings[0].CatalogRole,
-		input.Contract.RoleBindings[1].CatalogRole,
-		input.MigratorRole,
+	roleNames := make([]string, 0, len(input.Contract.RoleBindings)+1+len(input.Contract.AuxiliaryPrivileges))
+	for _, binding := range input.Contract.RoleBindings {
+		roleNames = append(roleNames, binding.CatalogRole)
+		if binding.Subject == AppACLSubjectRecordDeletionWorker {
+			// Owner authority is not limited to the managed relation inventory:
+			// types, extensions and objects in other databases also confer it.
+			// Keep this check in the admission's same read-only snapshot.
+			var ownsObject bool
+			if err := tx.QueryRow(ctx, `
+				select exists (
+					select 1
+					from pg_catalog.pg_shdepend dependency
+					join pg_catalog.pg_roles role on role.oid = dependency.refobjid
+					where dependency.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+					  and dependency.deptype = 'o'
+					  and role.rolname = $1
+				)
+			`, binding.CatalogRole).Scan(&ownsObject); err != nil {
+				return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("read deletion worker object ownership: %w", err)
+			}
+			if ownsObject {
+				return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("deletion worker role %q owns a catalog object", binding.CatalogRole)
+			}
+		}
 	}
+	boundRoleCount := len(roleNames)
+	roleNames = append(roleNames, input.MigratorRole)
 	auxiliaryRoleNames := make(map[string]struct{})
 	for _, privilege := range input.Contract.AuxiliaryPrivileges {
 		if _, seen := auxiliaryRoleNames[privilege.CatalogRole]; seen {
@@ -130,7 +152,7 @@ func readAppACLEffectiveCatalogSnapshotInTx(
 	if snapshot.DirectPrivileges, err = readAppACLEffectiveCatalogDirectPrivilegesR1(ctx, tx, snapshot.DatabaseName, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	effectiveRoleNames := append([]string(nil), roleNames[:2]...)
+	effectiveRoleNames := append([]string(nil), roleNames[:boundRoleCount]...)
 	for _, role := range snapshot.Roles {
 		if _, auxiliary := auxiliaryRoleNames[role.Name]; auxiliary {
 			effectiveRoleNames = append(effectiveRoleNames, role.Name)
@@ -150,6 +172,11 @@ func readAppACLEffectiveCatalogSnapshotInTx(
 	}
 	if err := verifyAppACLPublicProjectorStructureR1(ctx, tx, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
+	}
+	if requiresComparisonInputTriggers(input) {
+		if err := verifyComparisonInputTriggerCatalog(ctx, tx, input.MigratorRole); err != nil {
+			return AppACLEffectiveCatalogSnapshotR1{}, err
+		}
 	}
 	if err := verifyAppACLOpaqueExtensionMemberReachabilityForScope(ctx, tx, effectiveRoleNames, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err

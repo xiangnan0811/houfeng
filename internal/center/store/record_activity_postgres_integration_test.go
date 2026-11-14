@@ -11,7 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
-	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/attachments"
+	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store/migrate"
 )
@@ -20,43 +21,43 @@ func activityTestNamespace() activity.Namespace {
 	return activity.Namespace{ProjectID: "default"}
 }
 
-func newActivityCandidate(t *testing.T, eventID string, eventAt time.Time) activity.CandidateEvent {
+// Generic projection tests use a persisted asset-history fact, so they do not
+// impersonate a record-domain event without its record and revision route.
+func newActivityCandidate(t *testing.T, pool *pgxpool.Pool, eventID string, eventAt time.Time) activity.CandidateEvent {
 	t.Helper()
-	source := activity.SourceIdentity{
-		Kind:    activity.SourceKindRecordDomain,
-		EventID: eventID,
-		Version: 1,
+	return newActivityCandidateForVPS(t, pool, eventID, testEvidenceVPSSourceID, eventAt)
+}
+
+func newActivityCandidateForVPS(t *testing.T, pool *pgxpool.Pool, eventID, vpsID string, eventAt time.Time) activity.CandidateEvent {
+	t.Helper()
+	ctx := context.Background()
+	eventAt = eventAt.UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `
+		insert into public.vps_assets (vps_id, display_name, lifecycle_status, usage_status)
+		values ($1, 'hk-edge-01', 'active', 'in_use') on conflict (vps_id) do nothing`, vpsID); err != nil {
+		t.Fatalf("seed activity VPS: %v", err)
 	}
-	activityID, err := activity.NewActivityID(activityTestNamespace(), source, activity.EventKindRecordRevised)
+	if _, err := pool.Exec(ctx, `
+		insert into public.renewal_decisions
+		  (decision_id, vps_id, from_decision, to_decision, reason, decided_at, created_at)
+		values ($1, $2, 'unreviewed', 'keep', 'activity fixture', $3, $3)`, eventID, vpsID, eventAt); err != nil {
+		t.Fatalf("seed activity asset-history fact %q: %v", eventID, err)
+	}
+	source, err := NewAssetHistoryActivitySource(pool, activityTestNamespace())
 	if err != nil {
-		t.Fatalf("mint activity id for %q: %v", eventID, err)
+		t.Fatalf("new asset-history source: %v", err)
 	}
-	authScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	candidates, err := source.ScanAfter(ctx, activity.ScanWindow{From: eventAt.Add(-time.Microsecond), Through: eventAt}, 100)
 	if err != nil {
-		t.Fatalf("ProjectAuthScope() error = %v", err)
+		t.Fatalf("scan activity asset-history fact %q: %v", eventID, err)
 	}
-	candidate := activity.CandidateEvent{
-		ActivityID: activityID,
-		Source:     source,
-		EventKind:  activity.EventKindRecordRevised,
-		EventAt:    eventAt.UTC(),
-		RecordedAt: eventAt.UTC(),
-		Severity:   "info",
-		Presentation: activity.Presentation{
-			Version: activity.PresentationVersionV1,
-			Title:   "记录已修订",
-		},
-		Subjects: []activity.SubjectSnapshot{{
-			Kind:     records.SubjectKindVPS,
-			SourceID: "vps_7c2a4e18b09d5f31",
-			Role:     records.RelationRoleAffected,
-			Primary:  true,
-			Identity: map[string]string{"display_name": "hk-edge-01"},
-		}},
-		AuthScope: authScope,
+	for _, candidate := range candidates {
+		if candidate.Source.EventID == assetHistoryEventID(assetFactRenewalDecision, eventID) {
+			return candidate
+		}
 	}
-	candidate.CanonicalHash = candidate.ComputeCanonicalHash()
-	return candidate
+	t.Fatalf("asset-history fact %q not returned by source", eventID)
+	return activity.CandidateEvent{}
 }
 
 // The published watermark is what a reader may page through. Allocating inside
@@ -68,12 +69,12 @@ func TestPostgresIntegrationActivityBatchPublishesAContiguousRange(t *testing.T)
 
 	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
 	candidates := []activity.CandidateEvent{
-		newActivityCandidate(t, "rac_a1", base),
-		newActivityCandidate(t, "rac_a2", base.Add(time.Minute)),
-		newActivityCandidate(t, "rac_a3", base.Add(2*time.Minute)),
+		newActivityCandidate(t, pool, "rac_a1", base),
+		newActivityCandidate(t, pool, "rac_a2", base.Add(time.Minute)),
+		newActivityCandidate(t, pool, "rac_a3", base.Add(2*time.Minute)),
 	}
 
-	result, err := PublishActivityBatch(ctx, pool, 1, candidates)
+	result, err := publishActivityTestBatch(t, ctx, pool, 1, candidates)
 	if err != nil {
 		t.Fatalf("PublishActivityBatch() error = %v", err)
 	}
@@ -97,14 +98,14 @@ func TestPostgresIntegrationActivityRetryConsumesNoSequenceNumbers(t *testing.T)
 
 	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
 	first := []activity.CandidateEvent{
-		newActivityCandidate(t, "rac_b1", base),
-		newActivityCandidate(t, "rac_b2", base.Add(time.Minute)),
+		newActivityCandidate(t, pool, "rac_b1", base),
+		newActivityCandidate(t, pool, "rac_b2", base.Add(time.Minute)),
 	}
-	if _, err := PublishActivityBatch(ctx, pool, 1, first); err != nil {
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, first); err != nil {
 		t.Fatalf("first publish: %v", err)
 	}
 
-	repeat, err := PublishActivityBatch(ctx, pool, 1, first)
+	repeat, err := publishActivityTestBatch(t, ctx, pool, 1, first)
 	if err != nil {
 		t.Fatalf("exact repeat publish: %v", err)
 	}
@@ -116,8 +117,8 @@ func TestPostgresIntegrationActivityRetryConsumesNoSequenceNumbers(t *testing.T)
 	}
 
 	// A partly overlapping batch numbers only what is genuinely new.
-	partial := append(append([]activity.CandidateEvent{}, first...), newActivityCandidate(t, "rac_b3", base.Add(2*time.Minute)))
-	mixed, err := PublishActivityBatch(ctx, pool, 1, partial)
+	partial := append(append([]activity.CandidateEvent{}, first...), newActivityCandidate(t, pool, "rac_b3", base.Add(2*time.Minute)))
+	mixed, err := publishActivityTestBatch(t, ctx, pool, 1, partial)
 	if err != nil {
 		t.Fatalf("partial repeat publish: %v", err)
 	}
@@ -138,8 +139,8 @@ func TestPostgresIntegrationActivityRefusesADifferentHashForTheSameSourceEvent(t
 	pool := openActivityTestPool(t, ctx)
 
 	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
-	original := newActivityCandidate(t, "rac_c1", base)
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{original}); err != nil {
+	original := newActivityCandidate(t, pool, "rac_c1", base)
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{original}); err != nil {
 		t.Fatalf("first publish: %v", err)
 	}
 
@@ -147,7 +148,7 @@ func TestPostgresIntegrationActivityRefusesADifferentHashForTheSameSourceEvent(t
 	drifted.Presentation.Title = "标题被改写了"
 	drifted.CanonicalHash = drifted.ComputeCanonicalHash()
 
-	_, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{drifted})
+	_, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{drifted})
 	if !errors.Is(err, ErrActivitySourceHashMismatch) {
 		t.Fatalf("publish with drifted hash error = %v, want ErrActivitySourceHashMismatch", err)
 	}
@@ -161,8 +162,8 @@ func TestPostgresIntegrationActivityRefusesADifferentHashForTheSameSourceEvent(t
 	`, original.ActivityID).Scan(&storedTitle); err != nil {
 		t.Fatalf("read stored presentation: %v", err)
 	}
-	if storedTitle != "记录已修订" {
-		t.Fatalf("stored title = %q, want the original to be preserved", storedTitle)
+	if storedTitle != original.Presentation.Title {
+		t.Fatalf("stored title = %q, want the original %q to be preserved", storedTitle, original.Presentation.Title)
 	}
 }
 
@@ -174,6 +175,13 @@ func TestPostgresIntegrationActivityHeadLockKeepsPublishedRangeContiguousUnderCo
 	ctx := context.Background()
 	pool := openActivityTestPool(t, ctx)
 	base := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+	lease := activityLeaseForTest(t, ctx, pool, 1, activity.SourceKindAssetHistory)
+	lowRange := []activity.CandidateEvent{
+		newActivityCandidate(t, pool, "rac_d1", base),
+		newActivityCandidate(t, pool, "rac_d2", base.Add(time.Minute)),
+	}
+	// Distinct VPS rows avoid blocking on the source lock before the head lock.
+	contender := newActivityCandidateForVPS(t, pool, "rac_d3", "vps_0000000000000001", base.Add(2*time.Minute))
 
 	holder, err := pool.Begin(ctx)
 	if err != nil {
@@ -181,11 +189,7 @@ func TestPostgresIntegrationActivityHeadLockKeepsPublishedRangeContiguousUnderCo
 	}
 	defer func() { _ = holder.Rollback(ctx) }()
 
-	lowRange := []activity.CandidateEvent{
-		newActivityCandidate(t, "rac_d1", base),
-		newActivityCandidate(t, "rac_d2", base.Add(time.Minute)),
-	}
-	held, err := publishActivityBatchInTx(ctx, holder, 1, lowRange)
+	held, err := publishActivityBatchInTx(ctx, holder, lease, lowRange)
 	if err != nil {
 		t.Fatalf("publish inside holding transaction: %v", err)
 	}
@@ -200,8 +204,8 @@ func TestPostgresIntegrationActivityHeadLockKeepsPublishedRangeContiguousUnderCo
 	}
 	outcomes := make(chan publishOutcome, 1)
 	go func() {
-		result, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-			newActivityCandidate(t, "rac_d3", base.Add(2*time.Minute)),
+		result, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{
+			contender,
 		})
 		outcomes <- publishOutcome{result: result, err: err}
 	}()
@@ -238,6 +242,7 @@ func TestPostgresIntegrationActivityHeadLockKeepsPublishedRangeContiguousUnderCo
 func TestPostgresIntegrationActivityRefusesPublishingIntoARetiredGeneration(t *testing.T) {
 	ctx := context.Background()
 	pool := openActivityTestPool(t, ctx)
+	lease := activityLeaseForTest(t, ctx, pool, 1, activity.SourceKindAssetHistory)
 
 	if _, err := pool.Exec(ctx, `
 		update public.record_activity_projection_heads
@@ -247,8 +252,8 @@ func TestPostgresIntegrationActivityRefusesPublishingIntoARetiredGeneration(t *t
 		t.Fatalf("retire generation: %v", err)
 	}
 
-	_, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		newActivityCandidate(t, "rac_e1", time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)),
+	_, err := PublishActivityBatch(ctx, pool, lease, []activity.CandidateEvent{
+		newActivityCandidate(t, pool, "rac_e1", time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)),
 	})
 	if !errors.Is(err, ErrActivityGenerationInactive) {
 		t.Fatalf("publish into retired generation error = %v, want ErrActivityGenerationInactive", err)
@@ -319,11 +324,11 @@ func TestPostgresIntegrationRecordActivitySubjectPageKeepsFixedWatermark(t *test
 
 	base := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
 	first := []activity.CandidateEvent{
-		newActivityCandidate(t, "rac_wm1", base),
-		newActivityCandidate(t, "rac_wm2", base.Add(2*time.Minute)),
-		newActivityCandidate(t, "rac_wm3", base.Add(4*time.Minute)),
+		newActivityCandidate(t, pool, "rac_wm1", base),
+		newActivityCandidate(t, pool, "rac_wm2", base.Add(2*time.Minute)),
+		newActivityCandidate(t, pool, "rac_wm3", base.Add(4*time.Minute)),
 	}
-	if _, err := PublishActivityBatch(ctx, pool, 1, first); err != nil {
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, first); err != nil {
 		t.Fatalf("publish first page: %v", err)
 	}
 	head, err := repository.LoadPublishedHead(ctx)
@@ -358,13 +363,11 @@ func TestPostgresIntegrationRecordActivitySubjectPageKeepsFixedWatermark(t *test
 	}
 	firstIDs := []string{pageOne.Events[0].ActivityID, pageOne.Events[1].ActivityID, pageOne.Events[2].ActivityID}
 
-	// Insert a live row that sorts between the first two events, and a backfilled
-	// older row. Neither may appear on a page still bound to the old as-of.
-	late := newActivityCandidate(t, "rac_wm_late", base.Add(time.Minute))
-	backfill := newActivityCandidate(t, "rac_wm_old", base.Add(-time.Hour))
-	backfill.Backfilled = true
-	backfill.CanonicalHash = backfill.ComputeCanonicalHash()
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{late, backfill}); err != nil {
+	// Insert one live row that sorts in the middle and one older event after the
+	// watermark. Neither may appear on a page still bound to the old as-of.
+	late := newActivityCandidate(t, pool, "rac_wm_late", base.Add(time.Minute))
+	backfill := newActivityCandidate(t, pool, "rac_wm_old", base.Add(-time.Hour))
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{late, backfill}); err != nil {
 		t.Fatalf("publish after watermark: %v", err)
 	}
 
@@ -411,83 +414,47 @@ func TestPostgresIntegrationRecordActivitySubjectPageKeepsFixedWatermark(t *test
 
 func TestPostgresIntegrationActivityListHydratesPersistedRouteReferences(t *testing.T) {
 	ctx := context.Background()
-	pool := openActivityTestPool(t, ctx)
-	base := time.Date(2026, 8, 19, 14, 0, 0, 0, time.UTC)
+	// Evidence predates C81 in this fixture and is seeded in the real
+	// predecessor migration transaction before the successor is applied.
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	legacy := newImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false,
+		func(ctx context.Context, conn *pgx.Conn, _ recordplatform.DeploymentID) error {
+			return seedEvidenceActivityFixture(ctx, conn, base)
+		})
+	if _, err := legacy.platform.db.Exec(ctx, `
+		insert into public.vps_assets (vps_id, display_name, lifecycle_status, usage_status)
+		values ($1, 'Additional VPS', 'active', 'in_use') on conflict (vps_id) do nothing`, testEvidenceVPSSourceID); err != nil {
+		t.Fatalf("seed route-reference VPS: %v", err)
+	}
+	fixture := makeActivityRecordFixture(t, ctx, legacy.platform.db, legacy.Runtime, legacy.Gate)
+	pool := fixture.runtime
+	results := fixture.commitRevisions(t, ctx, "activity-route-refs",
+		activityRecordInput(t, "First", ""), activityRecordInput(t, "Revised", testEvidenceVPSSourceID))
+	recordCandidate := fixture.revisionCandidates(t, ctx, results)[1]
 
-	projectScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	evidenceSource, err := NewEvidenceActivitySource(pool, activityTestNamespace())
 	if err != nil {
-		t.Fatalf("ProjectAuthScope() error = %v", err)
+		t.Fatalf("new evidence source: %v", err)
 	}
-	subject := activity.SubjectSnapshot{
-		Kind:     records.SubjectKindVPS,
-		SourceID: "vps_7c2a4e18b09d5f31",
-		Role:     records.RelationRoleAffected,
-		Primary:  true,
-		Identity: map[string]string{"display_name": "hk-edge-01"},
-	}
-
-	recordSource := activity.SourceIdentity{
-		Kind:    activity.SourceKindRecordDomain,
-		EventID: "rac_refs_record",
-		Version: 1,
-	}
-	recordActivityID, err := activity.NewActivityID(
-		activityTestNamespace(), recordSource, activity.EventKindRecordRevised,
-	)
+	evidenceCandidates, err := evidenceSource.ScanAfter(ctx, activity.ScanWindow{Through: base.Add(5 * time.Minute)}, 50)
 	if err != nil {
-		t.Fatalf("mint record activity id: %v", err)
+		t.Fatalf("scan evidence source: %v", err)
 	}
-	recordCandidate := activity.CandidateEvent{
-		ActivityID: recordActivityID,
-		Source:     recordSource,
-		EventKind:  activity.EventKindRecordRevised,
-		EventAt:    base,
-		RecordedAt: base,
-		Subjects:   []activity.SubjectSnapshot{subject},
-		Presentation: activity.Presentation{
-			Version: activity.PresentationVersionV1,
-			Title:   "记录已修订",
-		},
-		Severity:   "info",
-		RecordID:   "rec_activityrefs",
-		RevisionID: "rrv_activityrefs",
-		AuthScope:  projectScope,
+	var evidenceCandidate activity.CandidateEvent
+	for _, candidate := range evidenceCandidates {
+		if candidate.EvidenceID == "evs_vpswindow01" {
+			evidenceCandidate = candidate
+		}
 	}
-	recordCandidate.CanonicalHash = recordCandidate.ComputeCanonicalHash()
+	if evidenceCandidate.EvidenceID == "" || evidenceCandidate.SourceRecordID != "rec_evidencesrc" {
+		t.Fatalf("missing predecessor evidence route: %+v", evidenceCandidate)
+	}
 
-	evidenceSource := activity.SourceIdentity{
-		Kind:    activity.SourceKindEvidenceSnapshot,
-		EventID: "evs_refs_evidence",
-		Version: 1,
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{recordCandidate}); err != nil {
+		t.Fatalf("publish record route-reference candidate: %v", err)
 	}
-	evidenceActivityID, err := activity.NewActivityID(
-		activityTestNamespace(), evidenceSource, activity.EventKindEvidenceCaptured,
-	)
-	if err != nil {
-		t.Fatalf("mint evidence activity id: %v", err)
-	}
-	evidenceCandidate := activity.CandidateEvent{
-		ActivityID: evidenceActivityID,
-		Source:     evidenceSource,
-		EventKind:  activity.EventKindEvidenceCaptured,
-		EventAt:    base.Add(time.Minute),
-		RecordedAt: base.Add(time.Minute),
-		Subjects:   []activity.SubjectSnapshot{subject},
-		Presentation: activity.Presentation{
-			Version: activity.PresentationVersionV1,
-			Title:   "证据已捕获",
-			Summary: "monitoring.host.v1",
-		},
-		Severity:   "info",
-		EvidenceID: "evs_activityrefs",
-		AuthScope:  projectScope,
-	}
-	evidenceCandidate.CanonicalHash = evidenceCandidate.ComputeCanonicalHash()
-
-	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
-		recordCandidate, evidenceCandidate,
-	}); err != nil {
-		t.Fatalf("publish route-reference candidates: %v", err)
+	if _, err := publishActivityTestBatch(t, ctx, pool, 1, []activity.CandidateEvent{evidenceCandidate}); err != nil {
+		t.Fatalf("publish evidence route-reference candidate: %v", err)
 	}
 	repository, err := NewActivityProjectionRepository(pool)
 	if err != nil {
@@ -499,7 +466,7 @@ func TestPostgresIntegrationActivityListHydratesPersistedRouteReferences(t *test
 	}
 	query, err := activity.NormalizeQuery(activity.Query{
 		Subject: activity.SubjectRef{
-			Kind: records.SubjectKindVPS, SourceID: subject.SourceID,
+			Kind: records.SubjectKindVPS, SourceID: testEvidenceVPSSourceID,
 		},
 		View:  activity.ViewActivity,
 		Limit: 50,

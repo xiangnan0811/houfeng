@@ -645,6 +645,14 @@ func appACLCurrentCatalogTestBindings() []AppACLRoleBinding {
 	}
 }
 
+func appACLCurrentCatalogTestBindingsV2() []AppACLRoleBinding {
+	return []AppACLRoleBinding{
+		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		{Subject: AppACLSubjectRecordDeletionWorker, CatalogRole: "houfeng_record_deletion_worker"},
+	}
+}
+
 func appACLCurrentCatalogTestContract(t *testing.T) appACLEffectiveCatalogContract {
 	t.Helper()
 	newTable, newFunction, privilege, function := appACLCurrentCatalogTestExtension()

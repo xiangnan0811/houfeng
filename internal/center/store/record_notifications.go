@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/recordauth"
@@ -19,7 +21,7 @@ import (
 type PostgresRecordNotificationRepository struct {
 	platform      *PostgresRecordPlatformRepository
 	members       CollaborationMembershipReader
-	authorization *PostgresCurrentRecordAuthorizationSource
+	authorization currentRecordAuthorizationPrefetcher
 	retention     time.Duration
 	bindings      ScopedTransportBindingSource
 }
@@ -77,7 +79,7 @@ func newPostgresRecordNotificationRepository(
 
 func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1) (recordcollaboration.NotificationProjectionResult, error) {
 	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
-		repository.authorization == nil || nilRecordSubjectDependency(repository.authorization.resolver) ||
+		nilRecordSubjectDependency(repository.authorization) ||
 		repository.retention.Microseconds() <= 0 || claim.Validate() != nil {
 		return recordcollaboration.NotificationProjectionResult{}, recordcollaboration.ErrInvalidNotificationProjector
 	}
@@ -85,12 +87,20 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 	if !supported {
 		return recordcollaboration.NotificationProjectionResult{}, recordcollaboration.ErrNotificationSourceMissing
 	}
+	authorization, preparedRecordID, err := repository.prepareNotificationAuthorization(ctx, claim.Event, kind)
+	if err != nil {
+		return recordcollaboration.NotificationProjectionResult{}, err
+	}
 	var result recordcollaboration.NotificationProjectionResult
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		result = recordcollaboration.NotificationProjectionResult{}
+		if err := acquireNotificationMutationResources(ctx, transaction, claim.Event, kind, preparedRecordID); err != nil {
+			return err
+		}
 		if err := transaction.AssertOutboxClaim(ctx, claim); err != nil {
 			return err
 		}
-		facts, allowed, err := repository.loadCurrentNotificationRecipients(ctx, transaction.tx, claim.Event, kind)
+		facts, allowed, err := repository.loadCurrentNotificationRecipients(ctx, transaction.tx, authorization, claim.Event, kind)
 		if err != nil {
 			return err
 		}
@@ -119,6 +129,7 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 func (repository *PostgresRecordNotificationRepository) loadCurrentNotificationRecipients(
 	ctx context.Context,
 	tx pgx.Tx,
+	authorization currentRecordAuthorizationTransactionResolver,
 	event recordplatform.OutboxEvent,
 	kind recordcollaboration.NotificationEventKind,
 ) (recordcollaboration.NotificationEventFacts, []recordcollaboration.NotificationRecipientFacts, error) {
@@ -157,7 +168,7 @@ func (repository *PostgresRecordNotificationRepository) loadCurrentNotificationR
 		if err != nil {
 			return recordcollaboration.NotificationEventFacts{}, nil, err
 		}
-		current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, facts.RecordID)
+		current, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, facts.RecordID)
 		if err != nil {
 			return recordcollaboration.NotificationEventFacts{}, nil, err
 		}
@@ -185,11 +196,18 @@ func (repository *PostgresRecordNotificationRepository) scheduleExternalNotifica
 		claim.Validate() != nil || notificationID == "" || repository.retention.Microseconds() <= 0 {
 		return recordcollaboration.ErrInvalidNotificationProjector
 	}
-	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	authorization, preparedRecordID, err := repository.prepareNotificationAuthorization(ctx, claim.Event, kind)
+	if err != nil {
+		return err
+	}
+	return repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := acquireNotificationMutationResources(ctx, transaction, claim.Event, kind, preparedRecordID); err != nil {
+			return err
+		}
 		if err := transaction.AssertOutboxClaim(ctx, claim); err != nil {
 			return err
 		}
-		facts, recipients, err := repository.loadCurrentNotificationRecipients(ctx, transaction.tx, claim.Event, kind)
+		facts, recipients, err := repository.loadCurrentNotificationRecipients(ctx, transaction.tx, authorization, claim.Event, kind)
 		if err != nil {
 			return err
 		}
@@ -280,26 +298,89 @@ func scheduleExternalNotificationDelivery(
 	return nil
 }
 
-func (source *PostgresCurrentRecordAuthorizationSource) resolveCurrentAuthorizationInTransaction(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, recordID string) (records.CurrentRecordAuthorization, error) {
-	loader := &PostgresCurrentRecordAuthorizationSource{db: tx}
-	snapshot, err := loader.loadCurrentRecordAuthorizationSnapshot(ctx, recordID)
-	if err != nil {
-		return records.CurrentRecordAuthorization{}, err
+// Discover routing under a completed APP transaction before contacting W2.
+// The effect transaction reloads all source facts and current recipients.
+func (repository *PostgresRecordNotificationRepository) prepareNotificationAuthorization(
+	ctx context.Context, event recordplatform.OutboxEvent, kind recordcollaboration.NotificationEventKind,
+) (currentRecordAuthorizationTransactionResolver, string, error) {
+	if nilRecordSubjectDependency(repository.authorization) {
+		return nil, "", ErrRecordSubjectUnavailable
 	}
-	normalized, err := normalizeCurrentRecordAuthorizationSnapshot(recordID, actor.ProjectID, snapshot)
+	var recordID string
+	err := repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		recordID = ""
+		facts, _, err := loadNotificationSourceFacts(ctx, transaction.tx, event, kind)
+		if err != nil {
+			return err
+		}
+		recordID = facts.RecordID
+		return nil
+	})
 	if err != nil {
-		return records.CurrentRecordAuthorization{}, err
+		return nil, "", err
 	}
-	sources, err := source.resolveRecordAuthorizationSubjects(ctx, actor, normalized.projectID, normalized.subjects)
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{recordID})
+	return authorization, recordID, err
+}
+
+type notificationMutationDiscovery struct {
+	facts      recordcollaboration.NotificationEventFacts
+	direct     []recordcollaboration.NotificationRecipientCandidate
+	followers  []recordcollaboration.FollowerFacts
+	recipients []recordcollaboration.NotificationRecipientFacts
+	resources  records.RevisionMutationResources
+}
+
+func discoverNotificationMutation(ctx context.Context, tx pgx.Tx, event recordplatform.OutboxEvent, kind recordcollaboration.NotificationEventKind) (notificationMutationDiscovery, error) {
+	var discovered notificationMutationDiscovery
+	var err error
+	discovered.facts, discovered.direct, err = loadNotificationSourceFacts(ctx, tx, event, kind)
 	if err != nil {
-		return records.CurrentRecordAuthorization{}, err
+		return discovered, err
 	}
-	return records.CurrentRecordAuthorization{
-		RecordID: normalized.recordID, CurrentRevisionID: normalized.currentRevisionID,
-		LockVersion: normalized.lockVersion, AuthorizationEpoch: normalized.authorizationEpoch,
-		Lifecycle: normalized.lifecycle,
-		Evidence:  records.RecordAuthorizationEvidence{ProjectID: normalized.projectID, Visibility: normalized.visibility, Sources: sources},
-	}, nil
+	discovered.followers, err = loadNotificationFollowers(ctx, tx, discovered.facts.RecordID, discovered.facts.RecordFenceEpoch)
+	if err != nil {
+		return discovered, err
+	}
+	discovered.recipients, err = recordcollaboration.NormalizeNotificationRecipients(discovered.facts, discovered.followers, discovered.direct)
+	if err != nil {
+		return discovered, err
+	}
+	discovered.resources.Followers, err = readRevisionMutationRows[records.RevisionMutationFollower](ctx, tx, `
+		select project_id,record_id,user_id,record_fence_epoch,manual_preference,
+		       follows_author,follows_owner,follows_participant,follows_comment,follows_mention,follows_action,
+		       coalesce(encode(preference_result_fingerprint,'hex'),'')
+		from public.record_followers where record_id=$1 order by user_id`, discovered.facts.RecordID)
+	return discovered, err
+}
+
+func acquireNotificationMutationResources(ctx context.Context, transaction *RecordPlatformTransaction, event recordplatform.OutboxEvent, kind recordcollaboration.NotificationEventKind, preparedRecordID string) error {
+	tx := transaction.tx
+	before, err := discoverNotificationMutation(ctx, tx, event, kind)
+	if err != nil {
+		return err
+	}
+	if before.facts.RecordID != preparedRecordID {
+		return &pgconn.PgError{Code: "40001", Message: "notification source route changed; restart transaction"}
+	}
+	users := make([]string, 0, len(before.recipients)+1)
+	users = append(users, before.facts.ActorID)
+	for _, recipient := range before.recipients {
+		users = append(users, recipient.UserID)
+	}
+	acquired, err := acquireEffectMutationResources(ctx, tx, []string{before.facts.RecordID}, users, before.resources)
+	if err != nil {
+		return err
+	}
+	after, err := discoverNotificationMutation(ctx, tx, event, kind)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(before, after) {
+		return &pgconn.PgError{Code: "40001", Message: "notification source or recipients changed; restart transaction"}
+	}
+	transaction.registerAcquiredRecordMutationResources(acquired)
+	return nil
 }
 
 func loadNotificationSourceFacts(ctx context.Context, tx pgx.Tx, event recordplatform.OutboxEvent, kind recordcollaboration.NotificationEventKind) (recordcollaboration.NotificationEventFacts, []recordcollaboration.NotificationRecipientCandidate, error) {
@@ -568,11 +649,12 @@ type inboxRecordAuthorization struct {
 }
 
 type inboxAuthorizationCache struct {
-	memberLoaded bool
-	member       recordauth.ActorScope
-	memberErr    error
-	records      map[string]inboxRecordAuthorization
-	followers    map[string][]recordcollaboration.FollowerFacts
+	authorization currentRecordAuthorizationTransactionResolver
+	memberLoaded  bool
+	member        recordauth.ActorScope
+	memberErr     error
+	records       map[string]inboxRecordAuthorization
+	followers     map[string][]recordcollaboration.FollowerFacts
 }
 
 const (
@@ -592,19 +674,70 @@ type inboxQueryCursor struct {
 	NotificationID string
 }
 
-func newInboxAuthorizationCache() *inboxAuthorizationCache {
+func newInboxAuthorizationCache(authorization currentRecordAuthorizationTransactionResolver) *inboxAuthorizationCache {
 	return &inboxAuthorizationCache{
-		records: make(map[string]inboxRecordAuthorization), followers: make(map[string][]recordcollaboration.FollowerFacts),
+		authorization: authorization,
+		records:       make(map[string]inboxRecordAuthorization), followers: make(map[string][]recordcollaboration.FollowerFacts),
 	}
+}
+
+// Discovery is bounded by the same pagination budget as the eventual read.
+// New routes appearing afterward are not authorized by this prepared set.
+func (repository *PostgresRecordNotificationRepository) prepareInboxAuthorization(
+	ctx context.Context, userID string, kind inboxQueryKind, notificationID string,
+) (currentRecordAuthorizationTransactionResolver, error) {
+	if nilRecordSubjectDependency(repository.authorization) {
+		return nil, ErrRecordSubjectUnavailable
+	}
+	var recordIDs []string
+	err := repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if notificationID != "" {
+			candidate, err := queryInboxCandidate(ctx, transaction.tx, userID, notificationID, false)
+			if err != nil {
+				return err
+			}
+			recordIDs = append(recordIDs, candidate.item.RecordID)
+			return nil
+		}
+		cursor := inboxQueryCursor{}
+		for scanned := 0; scanned < inboxScanBudget; {
+			pageLimit := min(inboxScanPageSize, inboxScanBudget-scanned)
+			candidates, err := queryInboxCandidatePage(ctx, transaction.tx, userID, kind, cursor, pageLimit)
+			if err != nil {
+				return err
+			}
+			if len(candidates) == 0 {
+				break
+			}
+			for _, candidate := range candidates {
+				recordIDs = append(recordIDs, candidate.item.RecordID)
+			}
+			scanned += len(candidates)
+			last := candidates[len(candidates)-1].item
+			cursor = inboxQueryCursor{EventAt: last.EventAt, NotificationID: last.NotificationID}
+			if len(candidates) < pageLimit {
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return repository.authorization.prepareCurrentAuthorization(ctx, recordIDs)
 }
 
 func (repository *PostgresRecordNotificationRepository) ListInbox(ctx context.Context, request recordcollaboration.InboxListRequest) ([]recordcollaboration.InboxItem, error) {
 	if ctx == nil || repository == nil || repository.platform == nil || request.Validate() != nil {
 		return nil, recordcollaboration.ErrInvalidInboxRequest
 	}
+	authorization, err := repository.prepareInboxAuthorization(ctx, request.Actor.UserID, inboxQueryActive, "")
+	if err != nil {
+		return nil, err
+	}
 	result := make([]recordcollaboration.InboxItem, 0)
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		cache := newInboxAuthorizationCache()
+	err = repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		cache := newInboxAuthorizationCache(authorization)
 		cursor := inboxQueryCursor{}
 		for scanned := 0; scanned < inboxScanBudget && len(result) < request.Limit; {
 			pageLimit := min(inboxScanPageSize, inboxScanBudget-scanned)
@@ -647,9 +780,13 @@ func (repository *PostgresRecordNotificationRepository) GetInboxItem(ctx context
 	if ctx == nil || repository == nil || repository.platform == nil || request.Validate() != nil {
 		return recordcollaboration.InboxItem{}, recordcollaboration.ErrInvalidInboxRequest
 	}
+	authorization, err := repository.prepareInboxAuthorization(ctx, request.Actor.UserID, inboxQueryActive, request.NotificationID)
+	if err != nil {
+		return recordcollaboration.InboxItem{}, err
+	}
 	var result recordcollaboration.InboxItem
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		cache := newInboxAuthorizationCache()
+	err = repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		cache := newInboxAuthorizationCache(authorization)
 		candidate, err := queryInboxCandidate(ctx, transaction.tx, request.Actor.UserID, request.NotificationID, false)
 		if err != nil {
 			return err
@@ -679,16 +816,54 @@ func (repository *PostgresRecordNotificationRepository) GetInboxDeepLink(ctx con
 	return target, nil
 }
 
+func (repository *PostgresRecordNotificationRepository) prepareInboxMutationAuthorization(ctx context.Context, userID, notificationID string) (currentRecordAuthorizationTransactionResolver, string, error) {
+	var recordID string
+	err := repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		recordID = ""
+		candidate, err := queryInboxCandidate(ctx, transaction.tx, userID, notificationID, false)
+		if err == nil {
+			recordID = candidate.item.RecordID
+		}
+		return err
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if nilRecordSubjectDependency(repository.authorization) {
+		return nil, "", ErrRecordSubjectUnavailable
+	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{recordID})
+	return authorization, recordID, err
+}
+
 func (repository *PostgresRecordNotificationRepository) TransitionInbox(ctx context.Context, request recordcollaboration.InboxTransitionRequest) (recordcollaboration.InboxItem, error) {
 	if ctx == nil || repository == nil || repository.platform == nil || request.Validate() != nil {
 		return recordcollaboration.InboxItem{}, recordcollaboration.ErrInvalidInboxRequest
 	}
+	authorization, preparedRecordID, err := repository.prepareInboxMutationAuthorization(ctx, request.Actor.UserID, request.NotificationID)
+	if err != nil {
+		return recordcollaboration.InboxItem{}, err
+	}
 	var result recordcollaboration.InboxItem
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		cache := newInboxAuthorizationCache()
+	err = repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		result = recordcollaboration.InboxItem{}
+		observed, err := queryInboxCandidate(ctx, transaction.tx, request.Actor.UserID, request.NotificationID, false)
+		if err != nil {
+			return err
+		}
+		if observed.item.RecordID != preparedRecordID {
+			return &pgconn.PgError{Code: "40001", Message: "inbox record route changed; restart transaction"}
+		}
+		if _, err := acquireEffectMutationResources(ctx, transaction.tx, []string{observed.item.RecordID}, []string{request.Actor.UserID}, records.RevisionMutationResources{}); err != nil {
+			return err
+		}
+		cache := newInboxAuthorizationCache(authorization)
 		candidate, err := queryInboxCandidate(ctx, transaction.tx, request.Actor.UserID, request.NotificationID, true)
 		if err != nil {
 			return err
+		}
+		if !reflect.DeepEqual(observed, candidate) {
+			return &pgconn.PgError{Code: "40001", Message: "inbox recipient route changed; restart transaction"}
 		}
 		candidate, err = repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate, cache)
 		if err != nil {
@@ -726,9 +901,13 @@ func (repository *PostgresRecordNotificationRepository) CountUnreadInbox(ctx con
 	if ctx == nil || repository == nil || repository.platform == nil || request.Validate() != nil {
 		return 0, recordcollaboration.ErrInvalidInboxRequest
 	}
+	authorization, err := repository.prepareInboxAuthorization(ctx, request.Actor.UserID, inboxQueryUnread, "")
+	if err != nil {
+		return 0, err
+	}
 	count := 0
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		cache := newInboxAuthorizationCache()
+	err = repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		cache := newInboxAuthorizationCache(authorization)
 		cursor := inboxQueryCursor{}
 		for scanned := 0; scanned < inboxScanBudget && count < request.Limit; {
 			pageLimit := min(inboxScanPageSize, inboxScanBudget-scanned)
@@ -884,7 +1063,7 @@ func (repository *PostgresRecordNotificationRepository) authorizeInboxCandidate(
 	candidate inboxCandidate,
 	cache *inboxAuthorizationCache,
 ) (inboxCandidate, error) {
-	if cache == nil {
+	if cache == nil || nilRecordSubjectDependency(cache.authorization) {
 		return inboxCandidate{}, recordcollaboration.ErrInvalidInboxRequest
 	}
 	if !cache.memberLoaded {
@@ -902,7 +1081,7 @@ func (repository *PostgresRecordNotificationRepository) authorizeInboxCandidate(
 	}
 	access, ok := cache.records[candidate.item.RecordID]
 	if !ok {
-		access = repository.loadInboxRecordAuthorization(ctx, tx, cache.member, candidate.item.RecordID)
+		access = repository.loadInboxRecordAuthorization(ctx, tx, cache.authorization, cache.member, candidate.item.RecordID)
 		cache.records[candidate.item.RecordID] = access
 	}
 	if access.err != nil {
@@ -954,7 +1133,7 @@ func (repository *PostgresRecordNotificationRepository) authorizeInboxCandidate(
 	return inboxCandidate{}, recordcollaboration.ErrInboxNotFound
 }
 
-func (repository *PostgresRecordNotificationRepository) loadInboxRecordAuthorization(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, recordID string) inboxRecordAuthorization {
+func (repository *PostgresRecordNotificationRepository) loadInboxRecordAuthorization(ctx context.Context, tx pgx.Tx, authorization currentRecordAuthorizationTransactionResolver, actor recordauth.ActorScope, recordID string) inboxRecordAuthorization {
 	access := inboxRecordAuthorization{}
 	if err := assertRecordReadFence(ctx, tx, recordID); err != nil {
 		if errors.Is(err, records.ErrRecordDeletionReserved) || errors.Is(err, records.ErrRecordNotFound) {
@@ -969,7 +1148,7 @@ func (repository *PostgresRecordNotificationRepository) loadInboxRecordAuthoriza
 		access.err = err
 		return access
 	}
-	current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
+	current, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
 	if err != nil {
 		access.err = err
 		return access

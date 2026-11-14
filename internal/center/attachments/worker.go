@@ -31,6 +31,7 @@ const (
 )
 
 type ProcessorWorkerConfig struct {
+	Writer             BlobWriter
 	OwnerID            string
 	OwnerLeaseDuration time.Duration
 	Limits             Limits
@@ -52,7 +53,7 @@ type ProcessorWorker struct {
 }
 
 func NewProcessorWorker(repository ProcessorRepository, blob BlobStore, workspace processorWorkspaceRunner, config ProcessorWorkerConfig) (*ProcessorWorker, error) {
-	if repository == nil || blob == nil || workspace == nil || !validProcessorOwnerID(config.OwnerID) ||
+	if repository == nil || blob == nil || nilUploadServiceDependency(config.Writer) || workspace == nil || !validProcessorOwnerID(config.OwnerID) ||
 		config.OwnerLeaseDuration < time.Microsecond || config.OwnerLeaseDuration > maxProcessorOwnerLeaseDuration ||
 		config.Limits.Validate() != nil ||
 		(config.PreviewBackendKind != BackendKindLocal && config.PreviewBackendKind != BackendKindS3) {
@@ -285,18 +286,38 @@ func (worker *ProcessorWorker) processClaim(
 		if err != nil {
 			return ProcessorResult{}, BlobPublicationIntent{}, err
 		}
-		version, err := worker.blob.Put(processCtx, PutRequest{ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(artifact.Bytes)), TemporaryKey: "temporary/" + hexDigest(temporaryDigest)}, bytes.NewReader(artifact.Bytes))
-		if err != nil {
-			return ProcessorResult{}, BlobPublicationIntent{}, err
+		var written WrittenBlob
+		if publicationIntent.State == BlobPublicationStatePublished {
+			object, ok := publicationIntent.Object()
+			if !ok {
+				return ProcessorResult{}, BlobPublicationIntent{}, ErrAttachmentConflict
+			}
+			written = WrittenBlob{Version: objectVersionFromPublicationObject(object), NamespaceID: publicationIntent.NamespaceID, ObligationID: publicationIntent.ObligationID}
+			if _, err := worker.blob.Stat(processCtx, written.Version); err != nil {
+				return ProcessorResult{}, BlobPublicationIntent{}, err
+			}
+		} else {
+			written, err = worker.config.Writer.Put(processCtx, WriteRequest{
+				Content:   PutRequest{ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(artifact.Bytes)), TemporaryKey: "temporary/" + hexDigest(temporaryDigest)},
+				ProjectID: claim.ProjectID, Origin: WriteOrigin{Kind: "processor_preview", ID: claim.ProcessorJobID, Generation: claim.OwnerGeneration,
+					OwnerID: &claim.OwnerID, OwnerGeneration: &claim.OwnerGeneration, OwnerExpiresAt: &claim.LeaseExpiresAt, DraftID: &claim.DraftID, PublicationID: &publicationIntent.PublicationID},
+			}, bytes.NewReader(artifact.Bytes))
+			if err != nil {
+				return ProcessorResult{}, BlobPublicationIntent{}, err
+			}
 		}
+		if written.NamespaceID != publicationIntent.NamespaceID || (worker.config.PreviewBackendKind == BackendKindLocal && written.ObligationID == "") {
+			return ProcessorResult{}, BlobPublicationIntent{}, ErrAttachmentConflict
+		}
+		version := written.Version
 		if version.Validate() != nil || version.SHA256 != digest || version.SizeBytes != int64(len(artifact.Bytes)) {
 			return ProcessorResult{}, BlobPublicationIntent{}, ErrInvalidProcessorResult
 		}
-		publicationIntent, err = worker.recordPreviewPublicationVersion(processCtx, publicationIntent, version)
+		publicationIntent, err = worker.recordPreviewPublicationVersion(processCtx, publicationIntent, version, written.ObligationID)
 		if err != nil {
 			return ProcessorResult{}, BlobPublicationIntent{}, err
 		}
-		result.Preview = ManagedPreview{Blob: BlobObject{Key: version.Key, ObjectVersion: version.VersionID, SHA256: version.SHA256, SizeBytes: version.SizeBytes, BackendKind: worker.config.PreviewBackendKind}, MediaType: artifact.MediaType}
+		result.Preview = ManagedPreview{Blob: BlobObject{Key: version.Key, ObjectVersion: version.VersionID, SHA256: version.SHA256, SizeBytes: version.SizeBytes, BackendKind: worker.config.PreviewBackendKind, NamespaceID: written.NamespaceID}, MediaType: artifact.MediaType}
 		return result, publicationIntent, nil
 	}
 	return result, BlobPublicationIntent{}, nil
@@ -314,7 +335,9 @@ func (worker *ProcessorWorker) preparePreviewPublication(
 	}
 	request := BlobPublicationPrepareRequest{
 		ProjectID: claim.ProjectID, OwnerKind: BlobPublicationOwnerProcessorPreview,
-		OwnerID: claim.ProcessorJobID, OwnerGeneration: claim.OwnerGeneration,
+		NamespaceID: worker.config.Writer.NamespaceID(),
+		OwnerID:     claim.ProcessorJobID, OwnerGeneration: claim.OwnerGeneration,
+		ClaimOwnerID: claim.OwnerID, ClaimExpiresAt: claim.LeaseExpiresAt,
 		Target: target, PublishExpiresAt: claim.ExpiresAt.UTC(),
 	}
 	intent, err := worker.repository.PrepareBlobPublication(ctx, request)
@@ -323,6 +346,7 @@ func (worker *ProcessorWorker) preparePreviewPublication(
 	}
 	if intent.Validate() != nil || intent.ProjectID != request.ProjectID ||
 		intent.OwnerKind != request.OwnerKind || intent.OwnerID != request.OwnerID ||
+		intent.NamespaceID != request.NamespaceID ||
 		intent.OwnerGeneration != request.OwnerGeneration || intent.Target != target ||
 		!intent.PublishExpiresAt.Equal(request.PublishExpiresAt) ||
 		(intent.State != BlobPublicationStatePrepared && intent.State != BlobPublicationStatePublished) {
@@ -335,9 +359,10 @@ func (worker *ProcessorWorker) recordPreviewPublicationVersion(
 	ctx context.Context,
 	intent BlobPublicationIntent,
 	object ObjectVersion,
+	obligationID string,
 ) (BlobPublicationIntent, error) {
 	if intent.State == BlobPublicationStatePublished {
-		if intent.ObjectVersion != object.VersionID || !blobPublicationObjectMatchesTarget(object, intent.Target) {
+		if intent.ObjectVersion != object.VersionID || intent.ObligationID != obligationID || !blobPublicationObjectMatchesTarget(object, intent.Target) {
 			return BlobPublicationIntent{}, ErrAttachmentConflict
 		}
 		return intent, nil
@@ -346,13 +371,14 @@ func (worker *ProcessorWorker) recordPreviewPublicationVersion(
 		return BlobPublicationIntent{}, ErrAttachmentConflict
 	}
 	published, err := worker.repository.RecordBlobPublicationVersion(ctx, BlobPublicationVersionRequest{
-		Intent: intent, Object: object,
+		Intent: intent, Object: object, ObligationID: obligationID,
 	})
 	if err != nil {
 		return BlobPublicationIntent{}, err
 	}
 	if published.Validate() != nil || published.State != BlobPublicationStatePublished ||
 		published.PublicationID != intent.PublicationID || published.ProjectID != intent.ProjectID ||
+		published.NamespaceID != intent.NamespaceID || published.ObligationID != obligationID ||
 		published.OwnerKind != intent.OwnerKind || published.OwnerID != intent.OwnerID ||
 		published.OwnerGeneration != intent.OwnerGeneration || published.Target != intent.Target ||
 		published.ObjectVersion != object.VersionID || !published.PublishExpiresAt.Equal(intent.PublishExpiresAt) {

@@ -3,6 +3,7 @@ package recorddeletion
 import (
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -70,7 +71,10 @@ func TestRecordAttachmentsSurfaceNamesAreClosedOrderedAndDefensivelyCopied(t *te
 func TestNewAdapterDescriptorNormalizesAndProtectsOwnedSurfaces(t *testing.T) {
 	t.Parallel()
 
-	input := []SurfaceName{"fixture.surface_z", "fixture.surface_a"}
+	input := RecordMarkdownClientSurfaceNames()
+	for left, right := 0, len(input)-1; left < right; left, right = left+1, right-1 {
+		input[left], input[right] = input[right], input[left]
+	}
 	descriptor, err := NewAdapterDescriptor(AdapterNameRecordMarkdownClient, input)
 	if err != nil {
 		t.Fatalf("NewAdapterDescriptor() error = %v", err)
@@ -78,7 +82,7 @@ func TestNewAdapterDescriptorNormalizesAndProtectsOwnedSurfaces(t *testing.T) {
 	if descriptor.Name() != AdapterNameRecordMarkdownClient {
 		t.Fatalf("descriptor.Name() = %q, want %q", descriptor.Name(), AdapterNameRecordMarkdownClient)
 	}
-	wantSurfaces := []SurfaceName{"fixture.surface_a", "fixture.surface_z"}
+	wantSurfaces := RecordMarkdownClientSurfaceNames()
 	if got := descriptor.Surfaces(); !reflect.DeepEqual(got, wantSurfaces) {
 		t.Fatalf("descriptor.Surfaces() = %#v, want %#v", got, wantSurfaces)
 	}
@@ -105,6 +109,10 @@ func TestNewAdapterDescriptorRejectsUnknownEmptyInvalidAndDuplicateSurfaces(t *t
 		{name: "uppercase surface", adapter: AdapterNameRecordAttachments, surfaces: []SurfaceName{"Fixture.Surface"}},
 		{name: "path surface", adapter: AdapterNameRecordAttachments, surfaces: []SurfaceName{"fixture/surface"}},
 		{name: "duplicate surface", adapter: AdapterNameRecordAttachments, surfaces: []SurfaceName{"fixture.surface", "fixture.surface"}},
+		{name: "missing markdown surface", adapter: AdapterNameRecordMarkdownClient, surfaces: RecordMarkdownClientSurfaceNames()[1:]},
+		{name: "extra markdown surface", adapter: AdapterNameRecordMarkdownClient, surfaces: append(RecordMarkdownClientSurfaceNames(), "unowned.surface")},
+		{name: "missing comparison surface", adapter: AdapterNameRecordComparison, surfaces: RecordComparisonSurfaceNames()[1:]},
+		{name: "extra comparison surface", adapter: AdapterNameRecordComparison, surfaces: append(RecordComparisonSurfaceNames(), "unowned.surface")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -175,6 +183,7 @@ func TestRecordCollaborationDescriptorRequiresExactOwnedTables(t *testing.T) {
 		"record_notification_audit_summaries",
 		"record_notification_deliveries",
 		"record_notification_delivery_attempts",
+		"record_notification_delivery_starts",
 		"record_notification_recipients",
 		"record_notifications",
 	}
@@ -187,6 +196,16 @@ func TestRecordCollaborationDescriptorRequiresExactOwnedTables(t *testing.T) {
 	}
 	if got := RecordCollaborationSurfaceDigest(); got == ([sha256.Size]byte{}) || got != digestAdapterSurfaces(descriptor) {
 		t.Fatalf("RecordCollaborationSurfaceDigest() = %x", got)
+	}
+	if got := fmt.Sprintf("%x", RecordCollaborationSurfaceDigestV1()); got != "0ec43f91ba1d5df5d95dbdd90378afeb5e95901eec2f4c4d31bab06f0be83a07" {
+		t.Fatalf("historical collaboration surface digest = %s", got)
+	}
+	if got := fmt.Sprintf("%x", RecordCollaborationSurfaceDigest()); got != "03498615d38f1445dc2414657d4efe45fb4c8b564430d79f40220e209c9802e8" {
+		t.Fatalf("successor collaboration surface digest = %s", got)
+	}
+	legacy := append(append([]SurfaceName(nil), want[:12]...), want[13:]...)
+	if _, err := NewAdapterDescriptor(AdapterNameRecordCollaboration, legacy); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+		t.Fatalf("historical collaboration surfaces accepted as current: %v", err)
 	}
 	if _, err := NewAdapterDescriptor(AdapterNameRecordCollaboration, want[1:]); !errors.Is(err, ErrInvalidAdapterDescriptor) {
 		t.Fatalf("missing collaboration surface error = %v", err)

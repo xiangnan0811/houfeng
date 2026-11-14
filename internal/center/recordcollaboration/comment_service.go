@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -75,7 +76,7 @@ type CommentCommand struct {
 }
 
 func (command CommentCommand) Validate() error {
-	if !validCommentMutationKind(command.Kind) || !validRecordID(command.RecordID) ||
+	if !validCommentMutationKind(command.Kind) || !recordidentity.IsValid(command.RecordID) ||
 		ValidateCommentID(command.CommentID) != nil || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
 		command.RecordLockVersion == 0 || command.AuthorizationEpoch == 0 || command.Actor.ProjectID != recordauth.ProjectIDDefault ||
 		command.Idempotency.Key.ProjectID != recordplatform.ProjectIDDefault ||
@@ -120,7 +121,7 @@ type CommentReadCommand struct {
 }
 
 func (command CommentReadCommand) Validate() error {
-	if !validRecordID(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
+	if !recordidentity.IsValid(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
 		command.RecordLockVersion == 0 || command.AuthorizationEpoch == 0 || command.Limit == 0 || command.Limit > 200 {
 		return ErrInvalidCommentRequest
 	}
@@ -267,7 +268,7 @@ func (service *CommentService) commit(
 }
 
 func (service *CommentService) resolveCurrent(ctx context.Context, actorInput recordauth.ActorScope, recordID string, capability recordauth.Capability) (recordauth.ActorScope, records.CurrentRecordAuthorization, error) {
-	if ctx == nil || service == nil || nilCommentDependency(service.current) || nilCommentDependency(service.store) || !validRecordID(recordID) {
+	if ctx == nil || service == nil || nilCommentDependency(service.current) || nilCommentDependency(service.store) || !recordidentity.IsValid(recordID) {
 		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, ErrInvalidCommentRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(actorInput)

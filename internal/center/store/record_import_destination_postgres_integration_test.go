@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -21,15 +19,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/portability"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
-	storemigrate "houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
@@ -38,7 +35,7 @@ func TestPostgresIntegrationImportDestinationSubjectsFinishWithServerSnapshots(t
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	fixture := newImportDestinationPostgresFixture(t, ctx)
-	workflow := newImportDestinationWorkflow(t, ctx, fixture.db)
+	workflow := newImportDestinationWorkflow(t, ctx, fixture)
 	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
 
 	vps, err := workflow.vps.CreateVPSAsset(ctx, vpsassets.CreateInput{
@@ -107,7 +104,7 @@ func TestPostgresIntegrationImportDestinationSubjectsFinishWithServerSnapshots(t
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			archive := importDestinationArchive(t, "rec_source_"+test.name, "client identity must not be persisted")
+			archive := importDestinationArchive(t, "rec_source"+strings.ReplaceAll(test.name, "_", ""), "client identity must not be persisted")
 			preview, err := workflow.service.DryRun(ctx, portability.DryRunRequest{
 				Actor: actor, IdempotencyKey: "destination-snapshot-" + test.name,
 				Archive: archive, DestinationSubject: test.destination,
@@ -149,10 +146,10 @@ func TestPostgresIntegrationImportDestinationClaimCASAndConcurrentReplay(t *test
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	fixture := newImportDestinationPostgresFixture(t, ctx)
-	repository := store.NewPostgresRecordPortabilityRepository(fixture.db, importDestinationAdmissionGate())
+	repository := store.NewPostgresRecordPortabilityRepository(fixture.db, importDestinationAdmissionGate(), importDestinationWitness(t, fixture.db), nil)
 	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
-	destination := importDestinationReference(records.SubjectKindTarget, "tg_0123456789abcdef")
-	archive := importDestinationArchive(t, "rec_source_cas", "CAS archive")
+	destination := importDestinationReference(records.SubjectKindVPS, "vps_0123456789abcdef")
+	archive := importDestinationArchive(t, "rec_sourcecas", "CAS archive")
 	digest := sha256.Sum256(archive)
 	expiresAt := time.Now().UTC().Add(time.Hour)
 
@@ -163,11 +160,14 @@ func TestPostgresIntegrationImportDestinationClaimCASAndConcurrentReplay(t *test
 	if err != nil {
 		t.Fatalf("ClaimImportJob(first) error = %v", err)
 	}
+	allocation := reserveImportFixture(t, ctx, fixture.db, importDestinationAdmissionGate(), actor, first, "rec_sourcecas")
 	plan, err := repository.SaveImportPlan(ctx, store.SaveRecordImportPlanInput{
 		ImportJobID: first.ImportJobID, PlanDigest: sha256.Sum256([]byte("destination-cas-plan")),
+		Actor: actor, ArchiveDigest: digest,
 		ObjectCount: 1, RemapCount: 1,
-		Remaps:             []store.ImportRemap{{EntityKind: "record", SourceID: "rec_source_cas", TargetID: "rec_import_cas"}},
-		Documents:          []store.ImportDocumentPlan{{SourceID: "rec_source_cas", TargetID: "rec_import_cas", Title: "CAS archive", Body: "# CAS archive\n"}},
+		Remaps:             []store.ImportRemap{{EntityKind: "record", SourceID: "rec_sourcecas", TargetID: allocation.RecordID, BirthAllocationID: allocation.AllocationID}},
+		Allocations:        []recordbirth.Allocation{allocation},
+		Documents:          []store.ImportDocumentPlan{{SourceID: "rec_sourcecas", TargetID: allocation.RecordID, Title: "CAS archive", Body: "# CAS archive\n"}},
 		DestinationSubject: destination, ExpiresAt: expiresAt,
 	})
 	if err != nil {
@@ -192,11 +192,11 @@ func TestPostgresIntegrationImportDestinationClaimCASAndConcurrentReplay(t *test
 
 	if _, err := repository.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{
 		ActorID: actor.UserID, IdempotencyKey: "destination-cas-replay", ArchiveDigest: digest,
-		DestinationSubject: importDestinationReference(records.SubjectKindVPS, "vps_0123456789abcdef"), ExpiresAt: expiresAt,
+		DestinationSubject: importDestinationReference(records.SubjectKindTarget, "tg_0123456789abcdef"), ExpiresAt: expiresAt,
 	}); !errors.Is(err, store.ErrRecordImportCASConflict) {
 		t.Fatalf("ClaimImportJob(different tuple) error = %v, want CAS conflict", err)
 	}
-	otherArchive := importDestinationArchive(t, "rec_source_cas_other", "different archive")
+	otherArchive := importDestinationArchive(t, "rec_sourcecasother", "different archive")
 	otherDigest := sha256.Sum256(otherArchive)
 	if _, err := repository.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{
 		ActorID: actor.UserID, IdempotencyKey: "destination-cas-replay", ArchiveDigest: otherDigest,
@@ -205,7 +205,7 @@ func TestPostgresIntegrationImportDestinationClaimCASAndConcurrentReplay(t *test
 		t.Fatalf("ClaimImportJob(different archive) error = %v, want CAS conflict", err)
 	}
 
-	concurrentArchive := importDestinationArchive(t, "rec_source_concurrent_cas", "concurrent CAS archive")
+	concurrentArchive := importDestinationArchive(t, "rec_sourceconcurrentcas", "concurrent CAS archive")
 	concurrentDigest := sha256.Sum256(concurrentArchive)
 	left := importDestinationReference(records.SubjectKindTarget, "tg_0123456789abcdea")
 	right := importDestinationReference(records.SubjectKindVPS, "vps_0123456789abcdea")
@@ -246,14 +246,116 @@ func TestPostgresIntegrationImportDestinationClaimCASAndConcurrentReplay(t *test
 	}
 }
 
+func TestPostgresIntegrationImportPlanBindsReservationOwnerAndArchive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	fixture := newImportDestinationPostgresFixture(t, ctx)
+	gate := importDestinationAdmissionGate()
+	repository := store.NewPostgresRecordPortabilityRepository(fixture.db, gate, importDestinationWitness(t, fixture.db), nil)
+	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
+	other := actor.Clone()
+	other.UserID = "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
+	destination := importDestinationReference(records.SubjectKindVPS, "vps_0123456789abcdef")
+	digest := sha256.Sum256(importDestinationArchive(t, "rec_binding", "binding"))
+	expires := time.Now().UTC().Add(time.Hour)
+	job, err := repository.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{ActorID: actor.UserID, IdempotencyKey: "reservation-binding", ArchiveDigest: digest, DestinationSubject: destination, ExpiresAt: expires})
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := reserveImportFixture(t, ctx, fixture.db, gate, actor, job, "rec_binding")
+	wrongOwner := reserveImportFixture(t, ctx, fixture.db, gate, other, job, "rec_binding")
+	otherJob, err := repository.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{ActorID: actor.UserID, IdempotencyKey: "different-import-job", ArchiveDigest: digest, DestinationSubject: destination, ExpiresAt: expires})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongJob := reserveImportFixture(t, ctx, fixture.db, gate, actor, otherJob, "rec_binding")
+	input := store.SaveRecordImportPlanInput{
+		ImportJobID: job.ImportJobID, Actor: actor, ArchiveDigest: digest, PlanDigest: sha256.Sum256([]byte("binding plan")),
+		ObjectCount: 1, RemapCount: 1, DestinationSubject: destination, ExpiresAt: expires,
+		Remaps:      []store.ImportRemap{{EntityKind: "record", SourceID: "rec_binding", TargetID: wrongOwner.RecordID, BirthAllocationID: wrongOwner.AllocationID}},
+		Allocations: []recordbirth.Allocation{wrongOwner},
+		Documents:   []store.ImportDocumentPlan{{SourceID: "rec_binding", TargetID: wrongOwner.RecordID, Title: "binding", Body: "binding"}},
+	}
+	if _, err := repository.SaveImportPlan(ctx, input); err == nil {
+		t.Fatal("foreign actor reservation was accepted")
+	}
+	input.Remaps[0].TargetID, input.Remaps[0].BirthAllocationID = wrongJob.RecordID, wrongJob.AllocationID
+	input.Allocations[0] = wrongJob
+	input.Documents[0].TargetID = wrongJob.RecordID
+	if _, err := repository.SaveImportPlan(ctx, input); err == nil {
+		t.Fatal("another job's reservation was accepted")
+	}
+	input.Remaps[0].TargetID, input.Remaps[0].BirthAllocationID = good.RecordID, good.AllocationID
+	input.Allocations[0] = good
+	input.Documents[0].TargetID = good.RecordID
+	input.ArchiveDigest = sha256.Sum256([]byte("different archive"))
+	if _, err := repository.SaveImportPlan(ctx, input); !errors.Is(err, store.ErrRecordImportCASConflict) {
+		t.Fatalf("changed archive accepted: %v", err)
+	}
+	input.ArchiveDigest = digest
+	plan, err := repository.SaveImportPlan(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repository.LoadImportPlan(ctx, plan.ImportPlanID)
+	if err != nil || len(loaded.Remaps) != 1 || loaded.Remaps[0].TargetID != good.RecordID || loaded.Remaps[0].BirthAllocationID != good.AllocationID {
+		t.Fatalf("persisted reservation = %+v, %v", loaded.Remaps, err)
+	}
+	var roots int
+	if err := fixture.db.QueryRow(ctx, `select count(*) from public.records where record_id=any($1::text[])`, []string{good.RecordID, wrongOwner.RecordID, wrongJob.RecordID}).Scan(&roots); err != nil || roots != 0 {
+		t.Fatalf("planning created roots: %d, %v", roots, err)
+	}
+}
+
+func TestPostgresIntegrationImportPlanRejectsRemovedDestination(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	fixture := newImportDestinationPostgresFixture(t, ctx)
+	gate := importDestinationAdmissionGate()
+	repository := store.NewPostgresRecordPortabilityRepository(fixture.db, gate, importDestinationWitness(t, fixture.db), nil)
+	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
+	target, err := store.NewPostgresTargetRepository(fixture.db).CreateTarget(ctx, targets.CreateTargetInput{
+		Name: "removed import destination", TargetType: targets.TargetTypeService, Host: "removed-import.example.test",
+		ExecutionMonitoringInstanceLabels: []string{}, Labels: []string{}, RunStatus: targets.RunStatusEnabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := importDestinationReference(records.SubjectKindTarget, target.TargetID)
+	digest := sha256.Sum256(importDestinationArchive(t, "rec_removed", "removed destination"))
+	expires := time.Now().UTC().Add(time.Hour)
+	job, err := repository.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{ActorID: actor.UserID, IdempotencyKey: "removed-import-destination", ArchiveDigest: digest, DestinationSubject: destination, ExpiresAt: expires})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocation := reserveImportFixture(t, ctx, fixture.db, gate, actor, job, "rec_removed")
+	if err := fixture.DeleteTarget(ctx, target.TargetID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repository.SaveImportPlan(ctx, store.SaveRecordImportPlanInput{
+		ImportJobID: job.ImportJobID, Actor: actor, ArchiveDigest: digest, PlanDigest: sha256.Sum256([]byte("removed source plan")),
+		ObjectCount: 1, RemapCount: 1, DestinationSubject: destination, ExpiresAt: expires,
+		Remaps:      []store.ImportRemap{{EntityKind: "record", SourceID: "rec_removed", TargetID: allocation.RecordID, BirthAllocationID: allocation.AllocationID}},
+		Allocations: []recordbirth.Allocation{allocation},
+		Documents:   []store.ImportDocumentPlan{{SourceID: "rec_removed", TargetID: allocation.RecordID, Title: "removed", Body: "removed"}},
+	})
+	if err == nil {
+		t.Fatal("planning accepted a removed destination")
+	}
+	var plans, roots int
+	if err := fixture.db.QueryRow(ctx, `select (select count(*) from public.record_import_plans where import_job_id=$1), (select count(*) from public.records where record_id=$2)`, job.ImportJobID, allocation.RecordID).Scan(&plans, &roots); err != nil || plans != 0 || roots != 0 {
+		t.Fatalf("removed destination left plans=%d roots=%d: %v", plans, roots, err)
+	}
+}
+
 func TestPostgresIntegrationImportDestinationLegacyNullFailsClosed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	fixture := newImportDestinationPostgresFixture(t, ctx)
-	repository := store.NewPostgresRecordPortabilityRepository(fixture.db, importDestinationAdmissionGate())
+	repository := store.NewPostgresRecordPortabilityRepository(fixture.db, importDestinationAdmissionGate(), importDestinationWitness(t, fixture.db), nil)
 	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
-	destination := importDestinationReference(records.SubjectKindTarget, "tg_0123456789abcdef")
-	archive := importDestinationArchive(t, "rec_source_legacy", "legacy destination")
+	destination := importDestinationReference(records.SubjectKindVPS, "vps_0123456789abcdef")
+	archive := importDestinationArchive(t, "rec_sourcelegacy", "legacy destination")
 	digest := sha256.Sum256(archive)
 	job, err := repository.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{
 		ActorID: actor.UserID, IdempotencyKey: "destination-legacy-null", ArchiveDigest: digest,
@@ -262,19 +364,19 @@ func TestPostgresIntegrationImportDestinationLegacyNullFailsClosed(t *testing.T)
 	if err != nil {
 		t.Fatalf("ClaimImportJob() error = %v", err)
 	}
+	allocation := reserveImportFixture(t, ctx, fixture.db, importDestinationAdmissionGate(), actor, job, "rec_sourcelegacy")
 	plan, err := repository.SaveImportPlan(ctx, store.SaveRecordImportPlanInput{
 		ImportJobID: job.ImportJobID, PlanDigest: sha256.Sum256([]byte("legacy-plan")), ObjectCount: 1, RemapCount: 1,
-		Remaps:             []store.ImportRemap{{EntityKind: "record", SourceID: "rec_source_legacy", TargetID: "rec_import_legacy"}},
-		Documents:          []store.ImportDocumentPlan{{SourceID: "rec_source_legacy", TargetID: "rec_import_legacy", Title: "legacy", Body: "# legacy\n"}},
+		Actor: actor, ArchiveDigest: digest,
+		Remaps:             []store.ImportRemap{{EntityKind: "record", SourceID: "rec_sourcelegacy", TargetID: allocation.RecordID, BirthAllocationID: allocation.AllocationID}},
+		Allocations:        []recordbirth.Allocation{allocation},
+		Documents:          []store.ImportDocumentPlan{{SourceID: "rec_sourcelegacy", TargetID: allocation.RecordID, Title: "legacy", Body: "# legacy\n"}},
 		DestinationSubject: destination, ExpiresAt: job.ExpiresAt,
 	})
 	if err != nil {
 		t.Fatalf("SaveImportPlan() error = %v", err)
 	}
-	if _, err := fixture.db.Exec(ctx, `
-		update public.record_import_jobs
-		set destination_subject_kind = null, destination_subject_source_id = null
-		where import_job_id = $1`, job.ImportJobID); err != nil {
+	if err := fixture.ClearLegacyDestination(ctx, job.ImportJobID); err != nil {
 		t.Fatalf("clear legacy destination columns: %v", err)
 	}
 	if _, err := repository.LoadImportJob(ctx, job.ImportJobID); !errors.Is(err, store.ErrRecordImportCASConflict) {
@@ -304,7 +406,7 @@ func TestPostgresIntegrationImportDestinationAuthorizationRevokedNoEffects(t *te
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			fixture := newImportDestinationPostgresFixture(t, ctx)
-			workflow := newImportDestinationWorkflow(t, ctx, fixture.db)
+			workflow := newImportDestinationWorkflow(t, ctx, fixture)
 			admin := importDestinationActor(t, recordauth.RoleProjectAdmin)
 			target, err := workflow.targets.CreateTarget(ctx, targets.CreateTargetInput{
 				Name:                              "revocable import target",
@@ -318,7 +420,7 @@ func TestPostgresIntegrationImportDestinationAuthorizationRevokedNoEffects(t *te
 				t.Fatalf("CreateTarget() error = %v", err)
 			}
 			destination := importDestinationReference(records.SubjectKindTarget, target.TargetID)
-			archive := importDestinationArchive(t, "rec_source_revocable", "revocable import")
+			archive := importDestinationArchive(t, "rec_sourcerevocable", "revocable import")
 			preview, err := workflow.service.DryRun(ctx, portability.DryRunRequest{
 				Actor: admin, IdempotencyKey: "destination-revocable", Archive: archive, DestinationSubject: destination,
 			})
@@ -326,7 +428,7 @@ func TestPostgresIntegrationImportDestinationAuthorizationRevokedNoEffects(t *te
 				t.Fatalf("DryRun() error = %v", err)
 			}
 			if test.remove {
-				if _, err := fixture.db.Exec(ctx, `delete from public.targets where target_id = $1`, target.TargetID); err != nil {
+				if err := fixture.DeleteTarget(ctx, target.TargetID); err != nil {
 					t.Fatalf("delete destination target: %v", err)
 				}
 			}
@@ -365,22 +467,17 @@ func TestPostgresIntegrationImportDestinationFinalRevisionRecheckMapsAndRollsBac
 		t.Fatalf("CreateTarget() error = %v", err)
 	}
 	destination := importDestinationReference(records.SubjectKindTarget, target.TargetID)
-	subjectAdapter := newFinalRecheckPostgresSubjectAdapter(t, actor, destination, []error{
-		store.ErrRecordSubjectNotFound,
-		store.ErrRecordSubjectUnavailable,
-		recordauth.ErrDenied,
-		records.ErrInvalidResolvedSubject,
-	})
+	subjectAdapter := newFinalRecheckPostgresSubjectAdapter(t, actor, destination)
 	subjects, err := records.NewSubjectAdapterRegistry([]records.SubjectSourceAdapter{subjectAdapter})
 	if err != nil {
 		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
 	}
 	workflow := newImportDestinationWorkflowWithSubjects(
-		t, ctx, fixture.db, vps, monitoring, targetsRepository, subjects,
+		t, ctx, fixture, vps, monitoring, targetsRepository, subjects, func() { subjectAdapter.armed = true },
 	)
 	handler := handlers.RecordPortability(workflow.service)
 
-	invalidQueryArchive := importDestinationArchive(t, "rec_source_invalid_query", "invalid destination query")
+	invalidQueryArchive := importDestinationArchive(t, "rec_sourceinvalidquery", "invalid destination query")
 	invalidQuery := httptest.NewRequest(
 		http.MethodPost,
 		"/api/record-imports/dry-run?destination_subject_kind=target&destination_subject_id="+target.TargetID+"&unexpected=x",
@@ -395,17 +492,18 @@ func TestPostgresIntegrationImportDestinationFinalRevisionRecheckMapsAndRollsBac
 
 	tests := []struct {
 		name       string
+		failure    error
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "missing", wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
-		{name: "unavailable", wantStatus: http.StatusServiceUnavailable, wantCode: "export_unavailable"},
-		{name: "denied", wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
-		{name: "invalid resolved", wantStatus: http.StatusServiceUnavailable, wantCode: "export_unavailable"},
+		{name: "missing", failure: store.ErrRecordSubjectNotFound, wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
+		{name: "unavailable", failure: store.ErrRecordSubjectUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "export_unavailable"},
+		{name: "denied", failure: recordauth.ErrDenied, wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
+		{name: "invalid resolved", failure: records.ErrInvalidResolvedSubject, wantStatus: http.StatusServiceUnavailable, wantCode: "export_unavailable"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			archive := importDestinationArchive(t, "rec_source_final_"+strings.ReplaceAll(test.name, " ", "_"), "final recheck "+test.name)
+			archive := importDestinationArchive(t, "rec_sourcefinal"+strings.ReplaceAll(test.name, " ", ""), "final recheck "+test.name)
 			preview, err := workflow.service.DryRun(ctx, portability.DryRunRequest{
 				Actor: actor, IdempotencyKey: "final-recheck-" + strings.ReplaceAll(test.name, " ", "-"),
 				Archive: archive, DestinationSubject: destination,
@@ -413,6 +511,8 @@ func TestPostgresIntegrationImportDestinationFinalRevisionRecheckMapsAndRollsBac
 			if err != nil {
 				t.Fatalf("DryRun() error = %v", err)
 			}
+			subjectAdapter.failure = test.failure
+			beforeFailures := subjectAdapter.failures
 			applyRequest := httptest.NewRequest(
 				http.MethodPost,
 				"/api/record-imports/"+preview.PlanID+"/apply",
@@ -422,6 +522,9 @@ func TestPostgresIntegrationImportDestinationFinalRevisionRecheckMapsAndRollsBac
 			applyRequest = applyRequest.WithContext(sessionctx.WithActorScope(applyRequest.Context(), actor))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, applyRequest)
+			if subjectAdapter.failures != beforeFailures+1 {
+				t.Fatal("final revision did not recheck the destination")
+			}
 			assertImportDestinationHTTPError(t, response, test.wantStatus, test.wantCode)
 			if test.wantStatus == http.StatusNotFound && strings.Contains(response.Body.String(), "record subject") {
 				t.Fatalf("opaque 404 leaked subject resolution detail: %s", response.Body.String())
@@ -432,16 +535,13 @@ func TestPostgresIntegrationImportDestinationFinalRevisionRecheckMapsAndRollsBac
 			)
 		})
 	}
-	if subjectAdapter.calls != len(tests)*3 {
-		t.Fatalf("subject Resolve calls = %d, want %d dry-run/apply/final calls", subjectAdapter.calls, len(tests)*3)
-	}
 }
 
 func TestPostgresIntegrationImportDestinationConcurrentApplyCommitsOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	fixture := newImportDestinationPostgresFixture(t, ctx)
-	workflow := newImportDestinationWorkflow(t, ctx, fixture.db)
+	workflow := newImportDestinationWorkflow(t, ctx, fixture)
 	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
 	target, err := workflow.targets.CreateTarget(ctx, targets.CreateTargetInput{
 		Name:                              "concurrent apply target",
@@ -454,7 +554,7 @@ func TestPostgresIntegrationImportDestinationConcurrentApplyCommitsOnce(t *testi
 	if err != nil {
 		t.Fatalf("CreateTarget() error = %v", err)
 	}
-	archive := importDestinationArchive(t, "rec_source_concurrent_apply", "concurrent apply")
+	archive := importDestinationArchive(t, "rec_sourceconcurrentapply", "concurrent apply")
 	preview, err := workflow.service.DryRun(ctx, portability.DryRunRequest{
 		Actor: actor, IdempotencyKey: "destination-concurrent-apply", Archive: archive,
 		DestinationSubject: importDestinationReference(records.SubjectKindTarget, target.TargetID),
@@ -482,6 +582,9 @@ func TestPostgresIntegrationImportDestinationConcurrentApplyCommitsOnce(t *testi
 	for range 2 {
 		outcome := <-outcomes
 		if outcome.err == nil {
+			if success != 0 && (len(winner.RecordIDs) != 1 || len(outcome.result.RecordIDs) != 1 || winner.RecordIDs[0] != outcome.result.RecordIDs[0]) {
+				t.Fatalf("concurrent successful applies returned different records: %+v %+v", winner, outcome.result)
+			}
 			success++
 			winner = outcome.result
 		} else {
@@ -491,7 +594,7 @@ func TestPostgresIntegrationImportDestinationConcurrentApplyCommitsOnce(t *testi
 			}
 		}
 	}
-	if success != 1 || failure != 1 || len(winner.RecordIDs) != 1 {
+	if success < 1 || success+failure != 2 || len(winner.RecordIDs) != 1 {
 		t.Fatalf("concurrent Apply() success/failure=%d/%d winner=%#v", success, failure, winner)
 	}
 	if replay, err := workflow.service.Apply(ctx, request); err != nil || len(replay.RecordIDs) != 1 || replay.RecordIDs[0] != winner.RecordIDs[0] {
@@ -500,11 +603,11 @@ func TestPostgresIntegrationImportDestinationConcurrentApplyCommitsOnce(t *testi
 	assertImportDestinationAppliedCounts(t, ctx, fixture.db, winner.RecordIDs[0], sha256.Sum256(archive), preview.PlanID, actor.UserID)
 }
 
-func TestPostgresIntegrationImportDestinationMultiDocumentRollback(t *testing.T) {
+func TestPostgresIntegrationImportDestinationConsumedReservationBlocksBatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	fixture := newImportDestinationPostgresFixture(t, ctx)
-	workflow := newImportDestinationWorkflow(t, ctx, fixture.db)
+	workflow := newImportDestinationWorkflow(t, ctx, fixture)
 	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
 	target, err := workflow.targets.CreateTarget(ctx, targets.CreateTargetInput{
 		Name:                              "multi-document target",
@@ -518,7 +621,7 @@ func TestPostgresIntegrationImportDestinationMultiDocumentRollback(t *testing.T)
 		t.Fatalf("CreateTarget() error = %v", err)
 	}
 	destination := importDestinationReference(records.SubjectKindTarget, target.TargetID)
-	archive := importDestinationArchive(t, "rec_source_multi_a", "first imported document", "rec_source_multi_b", "second imported document")
+	archive := importDestinationArchive(t, "rec_sourcemultia", "first imported document", "rec_sourcemultib", "second imported document")
 	preview, err := workflow.service.DryRun(ctx, portability.DryRunRequest{
 		Actor: actor, IdempotencyKey: "destination-multi-document", Archive: archive, DestinationSubject: destination,
 	})
@@ -529,19 +632,29 @@ func TestPostgresIntegrationImportDestinationMultiDocumentRollback(t *testing.T)
 		t.Fatalf("DryRun remaps = %#v, want two documents", preview.Remaps)
 	}
 	collisionID := preview.Remaps[1].TargetID
-	values, err := records.ImportedRevisionValues(actor, "existing collision", "# existing collision\n")
+	persisted, err := store.NewPostgresRecordPortabilityRepository(fixture.db, importDestinationAdmissionGate(), importDestinationWitness(t, fixture.db), nil).LoadImportPlan(ctx, preview.PlanID)
 	if err != nil {
-		t.Fatalf("ImportedRevisionValues() error = %v", err)
+		t.Fatal(err)
 	}
-	if _, err := workflow.application.CreateRecord(ctx, records.RecordCreateRequest{
-		Actor: actor, RecordID: collisionID, Values: values,
+	var allocationID string
+	for _, remap := range persisted.Remaps {
+		if remap.EntityKind == "record" && remap.TargetID == collisionID {
+			allocationID = remap.BirthAllocationID
+		}
+	}
+	allocation, err := store.NewPostgresRecordBirthRepository(fixture.db, importDestinationAdmissionGate(), nil).GetAllocation(ctx, actor, allocationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.application.ImportDocument(ctx, records.ImportDocumentRequest{
+		Actor: actor, RecordID: collisionID, Allocation: &allocation, Title: "existing collision", BodyMarkdown: "# existing collision\n",
 		SubjectReferences: []records.SubjectReference{destination}, IdempotencyKey: "destination-collision-seed",
 	}); err != nil {
-		t.Fatalf("CreateRecord(collision seed) error = %v", err)
+		t.Fatalf("ImportDocument(collision seed) error = %v", err)
 	}
 
 	if _, err := workflow.service.Apply(ctx, portability.ApplyRequest{Actor: actor, PlanID: preview.PlanID, LockVersion: preview.LockVersion}); err == nil {
-		t.Fatal("Apply(multi-document duplicate) error = nil, want transaction failure")
+		t.Fatal("Apply accepted a consumed reservation")
 	}
 	firstImportedID := preview.Remaps[0].TargetID
 	assertImportDestinationNoEffects(t, ctx, fixture.db, firstImportedID, sha256.Sum256(archive), preview.PlanID, actor.UserID)
@@ -556,56 +669,16 @@ func TestPostgresIntegrationImportDestinationMultiDocumentRollback(t *testing.T)
 
 type importDestinationPostgresFixture struct {
 	db *pgxpool.Pool
+	store.ImportDestinationFixture
 }
 
 func newImportDestinationPostgresFixture(t *testing.T, ctx context.Context) importDestinationPostgresFixture {
 	t.Helper()
-	if os.Getenv("HOUFENG_POSTGRES_INTEGRATION") != "1" {
-		t.Skip("HOUFENG_POSTGRES_INTEGRATION=1 is required for import destination PostgreSQL integration tests")
-	}
-	databaseURL := strings.TrimSpace(os.Getenv("HOUFENG_DATABASE_URL"))
-	if databaseURL == "" {
-		t.Skip("HOUFENG_DATABASE_URL is required for import destination PostgreSQL integration tests")
-	}
-	adminConfig, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		t.Fatalf("parse HOUFENG_DATABASE_URL: %v", err)
-	}
-	databaseName := fmt.Sprintf("houfeng_import_destination_%d_%d", time.Now().UnixNano(), os.Getpid())
-	if !regexp.MustCompile(`^[a-z_][a-z0-9_]*$`).MatchString(databaseName) {
-		t.Fatalf("unsafe generated database name %q", databaseName)
-	}
-	adminPool, err := pgxpool.NewWithConfig(ctx, adminConfig)
-	if err != nil {
-		t.Fatalf("open postgres admin pool: %v", err)
-	}
-	t.Cleanup(adminPool.Close)
-	quotedDatabase := pgx.Identifier{databaseName}.Sanitize()
-	if _, err := adminPool.Exec(ctx, `create database `+quotedDatabase); err != nil {
-		t.Fatalf("create temporary postgres database %q: %v", databaseName, err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		if _, err := adminPool.Exec(cleanupCtx, `drop database if exists `+quotedDatabase+` with (force)`); err != nil {
-			t.Errorf("drop temporary postgres database %q: %v", databaseName, err)
-		}
-	})
-	testConfig := adminConfig.Copy()
-	testConfig.ConnConfig.Database = databaseName
-	testPool, err := pgxpool.NewWithConfig(ctx, testConfig)
-	if err != nil {
-		t.Fatalf("open temporary postgres database %q: %v", databaseName, err)
-	}
-	t.Cleanup(testPool.Close)
-	if err := storemigrate.Apply(ctx, testPool); err != nil {
-		t.Fatalf("apply migrations: %v", err)
-	}
-	return importDestinationPostgresFixture{db: testPool}
+	fixture := store.NewImportDestinationFixture(t, ctx)
+	return importDestinationPostgresFixture{db: fixture.Runtime, ImportDestinationFixture: fixture}
 }
 
 type importDestinationWorkflow struct {
-	db          *pgxpool.Pool
 	vps         *store.PostgresVPSAssetRepository
 	monitoring  *store.PostgresMonitoringInstanceRepository
 	targets     *store.PostgresTargetRepository
@@ -613,8 +686,9 @@ type importDestinationWorkflow struct {
 	application *records.Application
 }
 
-func newImportDestinationWorkflow(t *testing.T, ctx context.Context, db *pgxpool.Pool) importDestinationWorkflow {
+func newImportDestinationWorkflow(t *testing.T, ctx context.Context, fixture importDestinationPostgresFixture) importDestinationWorkflow {
 	t.Helper()
+	db := fixture.db
 	vps := store.NewPostgresVPSAssetRepository(db)
 	monitoring := store.NewPostgresMonitoringInstanceRepository(db)
 	targetsRepository := store.NewPostgresTargetRepository(db)
@@ -627,28 +701,39 @@ func newImportDestinationWorkflow(t *testing.T, ctx context.Context, db *pgxpool
 		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
 	}
 	return newImportDestinationWorkflowWithSubjects(
-		t, ctx, db, vps, monitoring, targetsRepository, subjects,
+		t, ctx, fixture, vps, monitoring, targetsRepository, subjects, nil,
 	)
 }
 
 func newImportDestinationWorkflowWithSubjects(
 	t *testing.T,
 	ctx context.Context,
-	db *pgxpool.Pool,
+	fixture importDestinationPostgresFixture,
 	vps *store.PostgresVPSAssetRepository,
 	monitoring *store.PostgresMonitoringInstanceRepository,
 	targetsRepository *store.PostgresTargetRepository,
 	subjects records.SubjectAdapterRegistry,
+	beforeImport func(),
 ) importDestinationWorkflow {
 	t.Helper()
+	db := fixture.db
 	gate := importDestinationAdmissionGate()
-	readResolver := store.NewRecordSubjectReadResolver(subjects, nil)
+	tombstones, err := store.NewWitnessedRecordSubjectTombstoneReader("", recordauth.ProjectIDDefault, nil, db)
+	if err != nil {
+		t.Fatalf("NewWitnessedRecordSubjectTombstoneReader() error = %v", err)
+	}
+	readResolver := store.NewRecordSubjectReadResolver(subjects, tombstones)
 	current := store.NewPostgresCurrentRecordAuthorizationSource(db, readResolver, gate)
-	revisionStore, err := store.NewPostgresRecordRepository(db, gate, nil)
+	revisionStore, err := store.NewPostgresRecordRepository(db, gate, nil, current, nil)
 	if err != nil {
 		t.Fatalf("NewPostgresRecordRepository() error = %v", err)
 	}
-	revisionService, err := records.NewRevisionService(subjects, current, revisionStore)
+	birthRepository := store.NewPostgresRecordBirthRepository(db, gate, nil)
+	birth, err := recordbirth.NewCoordinator(birthRepository, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionService, err := records.NewRevisionService(subjects, current, revisionStore, birth)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}
@@ -664,40 +749,88 @@ func newImportDestinationWorkflowWithSubjects(
 	if err != nil {
 		t.Fatalf("NewApplication() error = %v", err)
 	}
-	imports := store.NewPostgresRecordPortabilityRepository(db, gate)
-	blobStore, err := attachments.NewLocalBlobStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewLocalBlobStore() error = %v", err)
+	var importer portability.DocumentImporter = application
+	if beforeImport != nil {
+		importer = finalRecheckDocumentImporter{DocumentImporter: application, beforeImport: beforeImport}
 	}
+	imports := store.NewPostgresRecordPortabilityRepository(db, gate, tombstones, nil)
 	service, err := portability.NewService(portability.Options{
-		Enabled:     true,
-		BackendKind: "local",
-		Documents:   importDestinationDocumentSource{},
-		Jobs:        imports,
-		Imports:     imports,
-		Importer:    application,
-		Subjects:    subjects,
-		Staging:     portability.NewLeasedBlobStore(blobStore),
-		Rebuilder:   portability.NewAuthoritativeProjectionRebuilder(),
+		Enabled:             true,
+		BackendKind:         "local",
+		Documents:           importDestinationDocumentSource{},
+		Jobs:                imports,
+		Imports:             imports,
+		Importer:            importer,
+		BirthCoordinator:    birth,
+		BirthAllocations:    birthRepository,
+		ImportAuthorization: current,
+		Subjects:            subjects,
+		Staging:             portability.NewLeasedBlobStore(fixture.Blobs, fixture.Writer),
+		Rebuilder:           portability.NewAuthoritativeProjectionRebuilder(),
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	return importDestinationWorkflow{
-		db: db, vps: vps, monitoring: monitoring, targets: targetsRepository,
+		vps: vps, monitoring: monitoring, targets: targetsRepository,
 		service: service, application: application,
 	}
+}
+
+func importDestinationWitness(t *testing.T, db *pgxpool.Pool) *store.WitnessedRecordSubjectTombstoneReader {
+	t.Helper()
+	witness, err := store.NewWitnessedRecordSubjectTombstoneReader("", recordauth.ProjectIDDefault, nil, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return witness
 }
 
 func importDestinationAdmissionGate() store.AdmissionGate {
 	return store.AdmissionGateFunc(func(context.Context, pgx.Tx) error { return nil })
 }
 
+func reserveImportFixture(t *testing.T, ctx context.Context, db *pgxpool.Pool, gate store.AdmissionGate, actor recordauth.ActorScope, job store.RecordImportJob, sourceID string) recordbirth.Allocation {
+	t.Helper()
+	coordinator, err := recordbirth.NewCoordinator(store.NewPostgresRecordBirthRepository(db, gate, nil), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := json.Marshal(struct {
+		Domain   string
+		JobID    string
+		SourceID string
+	}{"houfeng.record-import-allocation-key.v1", job.ImportJobID, sourceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := sha256.Sum256(identity)
+	bound, err := json.Marshal(struct {
+		Domain        string
+		JobID         string
+		ArchiveDigest [32]byte
+		SourceID      string
+		Destination   records.SubjectReference
+	}{"houfeng.record-import-allocation.v1", job.ImportJobID, job.ArchiveDigest, sourceID, job.DestinationSubject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := sha256.Sum256(bound)
+	allocation, err := coordinator.Reserve(ctx, recordbirth.Request{
+		ProjectID: string(actor.ProjectID), ActorID: actor.UserID, ActorScopeDigest: actor.CanonicalHash(),
+		Purpose: recordbirth.PurposeImport, IdempotencyKey: "import-" + hex.EncodeToString(key[:]), RequestFingerprint: fingerprint,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return allocation
+}
+
 func importDestinationActor(t *testing.T, role recordauth.Role) recordauth.ActorScope {
 	t.Helper()
 	actor, err := recordauth.NormalizeActorScope(recordauth.ActorScope{
 		UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Role: role,
-		ProjectID: recordauth.ProjectIDDefault, GroupIDs: []string{"rag_records"},
+		ProjectID: recordauth.ProjectIDDefault,
 	})
 	if err != nil {
 		t.Fatalf("NormalizeActorScope() error = %v", err)
@@ -960,6 +1093,10 @@ func (importDestinationLifecycleStub) ChangeLifecycle(context.Context, records.R
 	return records.RecordLifecycleResult{}, records.ErrInvalidApplicationRequest
 }
 
+func (importDestinationLifecycleStub) ChangeTrashState(context.Context, records.RecordTrashStateRequest) (records.RecordLifecycleResult, error) {
+	return records.RecordLifecycleResult{}, records.ErrInvalidApplicationRequest
+}
+
 type importDestinationDraftStub struct{}
 
 func (importDestinationDraftStub) ReadDraft(context.Context, records.DraftReadRequest) (records.Draft, error) {
@@ -984,15 +1121,15 @@ func (importDestinationDraftStub) PreparePublish(context.Context, records.DraftP
 type finalRecheckPostgresSubjectAdapter struct {
 	reference records.SubjectReference
 	resolved  records.ResolvedSubject
-	outcomes  []error
-	calls     int
+	failure   error
+	armed     bool
+	failures  int
 }
 
 func newFinalRecheckPostgresSubjectAdapter(
 	t *testing.T,
 	actor recordauth.ActorScope,
 	reference records.SubjectReference,
-	outcomes []error,
 ) *finalRecheckPostgresSubjectAdapter {
 	t.Helper()
 	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
@@ -1031,7 +1168,6 @@ func newFinalRecheckPostgresSubjectAdapter(
 			LiveRoute:            "/targets/" + reference.SourceID,
 			CaptureAuthorization: authorization,
 		},
-		outcomes: append([]error(nil), outcomes...),
 	}
 }
 
@@ -1044,13 +1180,23 @@ func (adapter *finalRecheckPostgresSubjectAdapter) Resolve(
 	_ recordauth.ActorScope,
 	reference records.SubjectReference,
 ) (records.ResolvedSubject, error) {
-	call := adapter.calls
-	adapter.calls++
 	if reference != adapter.reference {
 		return records.ResolvedSubject{}, records.ErrInvalidSubjectReference
 	}
-	if call%3 == 2 {
-		return records.ResolvedSubject{}, adapter.outcomes[call/3]
+	if adapter.armed {
+		adapter.armed = false
+		adapter.failures++
+		return records.ResolvedSubject{}, adapter.failure
 	}
 	return adapter.resolved, nil
+}
+
+type finalRecheckDocumentImporter struct {
+	portability.DocumentImporter
+	beforeImport func()
+}
+
+func (importer finalRecheckDocumentImporter) ImportDocumentsFinishing(ctx context.Context, requests []records.ImportDocumentRequest, finish records.RevisionCommitFinish) ([]records.ImportedDocument, error) {
+	importer.beforeImport()
+	return importer.DocumentImporter.ImportDocumentsFinishing(ctx, requests, finish)
 }

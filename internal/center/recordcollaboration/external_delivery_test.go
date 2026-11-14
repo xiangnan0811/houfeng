@@ -2,7 +2,9 @@ package recordcollaboration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -44,6 +46,13 @@ type deadlineRecordingExternalDeliveryProvider struct {
 func (provider *deadlineRecordingExternalDeliveryProvider) SendExternalDelivery(ctx context.Context, _ SafeExternalDelivery) ExternalDeliveryProviderOutcome {
 	provider.deadline, _ = ctx.Deadline()
 	return provider.outcome
+}
+
+type cancellingExternalDeliveryProvider struct{ cancel context.CancelFunc }
+
+func (provider cancellingExternalDeliveryProvider) SendExternalDelivery(context.Context, SafeExternalDelivery) ExternalDeliveryProviderOutcome {
+	provider.cancel()
+	return ExternalDeliveryProviderSent
 }
 
 func TestScopedTransportBindingRequiresExactDefaultProjectUserChannelAndBinding(t *testing.T) {
@@ -188,14 +197,15 @@ func TestScopedExternalDeliveryProcessorSendsOnlyPreparedSafeMessageAndFinalizes
 	}
 	store := &externalDeliveryStoreStub{
 		preparation: ExternalDeliveryPreparation{Prepared: &PreparedExternalDelivery{
-			Attempt: attempt,
+			ReportingCapability: testExternalDeliveryCapability(t),
+			Attempt:             attempt,
 			Binding: ScopedTransportBinding{
 				ProjectID: recordauth.ProjectIDDefault, RecipientUserID: attempt.RecipientUserID,
 				Channel: attempt.Channel, BindingID: attempt.BindingID, Provider: provider,
 			},
 			Message: message,
 		}},
-		finalResult: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete},
+		finalResult: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete, QueueFinalized: true},
 	}
 	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
 		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: 5 * time.Second,
@@ -208,7 +218,7 @@ func TestScopedExternalDeliveryProcessorSendsOnlyPreparedSafeMessageAndFinalizes
 	if err != nil || result != store.finalResult {
 		t.Fatalf("ProcessExternalDelivery() = (%#v, %v)", result, err)
 	}
-	if !reflect.DeepEqual(store.steps, []string{"prepare", "finalize"}) || len(provider.messages) != 1 || provider.messages[0] != message || store.finalOutcome != ExternalDeliveryProviderSent {
+	if !reflect.DeepEqual(store.steps, []string{"prepare", "report", "finalize"}) || len(provider.messages) != 1 || provider.messages[0] != message || store.finalOutcome != ExternalDeliveryProviderSent {
 		t.Fatalf("steps=%#v messages=%#v outcome=%q", store.steps, provider.messages, store.finalOutcome)
 	}
 }
@@ -238,7 +248,7 @@ func TestScopedExternalDeliveryProcessorTreatsInvalidProviderOutcomeAsUnknown(t 
 	claim := externalDeliveryTestClaim(startedAt.Add(time.Minute))
 	provider := &recordingExternalDeliveryProvider{outcome: "provider_body: secret"}
 	store := externalDeliveryPreparedStore(t, claim, startedAt, provider)
-	store.finalResult = ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete}
+	store.finalResult = ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete, QueueFinalized: true}
 	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
 		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
 		SendTimeout: 10 * time.Second, Clock: fixedExternalDeliveryClock{now: startedAt},
@@ -251,6 +261,63 @@ func TestScopedExternalDeliveryProcessorTreatsInvalidProviderOutcomeAsUnknown(t 
 	}
 	if store.finalOutcome != ExternalDeliveryProviderUnknownOutcome {
 		t.Fatalf("final outcome = %q, want unknown_outcome", store.finalOutcome)
+	}
+}
+
+func TestScopedExternalDeliveryProcessorReportsAfterCallerCancellation(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	claim := externalDeliveryTestClaim(now.Add(time.Minute))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := externalDeliveryPreparedStore(t, claim, now, cancellingExternalDeliveryProvider{cancel: cancel})
+	store.finalResult = ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete, QueueFinalized: true}
+	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
+		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+		SendTimeout: time.Second, Clock: fixedExternalDeliveryClock{now: now},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := processor.ProcessExternalDelivery(ctx, claim)
+	if err != nil || !result.QueueFinalized || store.reportContextErr != nil || store.finalContextErr != nil || store.reportClaim != claim {
+		t.Fatalf("canceled sender result=%#v error=%v report context=%v finalize context=%v", result, err, store.reportContextErr, store.finalContextErr)
+	}
+}
+
+func TestScopedExternalDeliveryProcessorDoesNotFinalizeWhenReportFails(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	claim := externalDeliveryTestClaim(now.Add(time.Minute))
+	provider := &recordingExternalDeliveryProvider{outcome: ExternalDeliveryProviderSent}
+	store := externalDeliveryPreparedStore(t, claim, now, provider)
+	store.reportErr = errors.New("report unavailable")
+	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
+		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+		SendTimeout: time.Second, Clock: fixedExternalDeliveryClock{now: now},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := processor.ProcessExternalDelivery(context.Background(), claim); !errors.Is(err, store.reportErr) ||
+		len(provider.messages) != 1 || !reflect.DeepEqual(store.steps, []string{"prepare", "report"}) {
+		t.Fatalf("report failure error=%v sends=%d steps=%#v", err, len(provider.messages), store.steps)
+	}
+}
+
+func TestScopedExternalDeliveryProcessorRejectsMissingReportingCapability(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	claim := externalDeliveryTestClaim(now.Add(time.Minute))
+	provider := &recordingExternalDeliveryProvider{outcome: ExternalDeliveryProviderSent}
+	store := externalDeliveryPreparedStore(t, claim, now, provider)
+	store.preparation.Prepared.ReportingCapability = ExternalDeliveryReportingCapability{}
+	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
+		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+		SendTimeout: time.Second, Clock: fixedExternalDeliveryClock{now: now},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := processor.ProcessExternalDelivery(context.Background(), claim); !errors.Is(err, ErrInvalidExternalDeliveryResult) || len(provider.messages) != 0 {
+		t.Fatalf("missing capability error=%v sends=%d", err, len(provider.messages))
 	}
 }
 
@@ -279,7 +346,7 @@ func TestScopedExternalDeliveryProcessorBoundsSendDeadlineBeforeOwnerLeaseExpiry
 	claim := externalDeliveryTestClaim(now.Add(5 * time.Second))
 	provider := &deadlineRecordingExternalDeliveryProvider{outcome: ExternalDeliveryProviderSent}
 	store := externalDeliveryPreparedStore(t, claim, now, provider)
-	store.finalResult = ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete}
+	store.finalResult = ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete, QueueFinalized: true}
 	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
 		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
 		SendTimeout: 30 * time.Second, Clock: fixedExternalDeliveryClock{now: now},
@@ -383,28 +450,48 @@ func TestScopedNotifierProviderMapsTypedContentFreeFailureClasses(t *testing.T) 
 }
 
 type externalDeliveryStoreStub struct {
-	preparation  ExternalDeliveryPreparation
-	prepareErr   error
-	finalResult  ExternalDeliveryOutboxResult
-	finalErr     error
-	finalOutcome ExternalDeliveryProviderOutcome
-	steps        []string
+	preparation      ExternalDeliveryPreparation
+	prepareErr       error
+	reportErr        error
+	reportContextErr error
+	finalContextErr  error
+	reportClaim      recordplatform.ClaimedOutboxEventV1
+	finalResult      ExternalDeliveryOutboxResult
+	finalErr         error
+	finalOutcome     ExternalDeliveryProviderOutcome
+	steps            []string
 }
 
-func (store *externalDeliveryStoreStub) PrepareExternalDelivery(_ context.Context, _ recordplatform.ClaimedOutboxEventV1, _ string) (ExternalDeliveryPreparation, error) {
+func (store *externalDeliveryStoreStub) PrepareExternalDelivery(_ context.Context, _ recordplatform.ClaimedOutboxEventV1, _ string, _ time.Duration) (ExternalDeliveryPreparation, error) {
 	store.steps = append(store.steps, "prepare")
 	return store.preparation, store.prepareErr
 }
 
+func (store *externalDeliveryStoreStub) ReportExternalDeliveryOutcome(
+	ctx context.Context,
+	claim recordplatform.ClaimedOutboxEventV1,
+	attempt ExternalDeliveryAttempt,
+	_ ExternalDeliveryReportingCapability,
+	outcome ExternalDeliveryProviderOutcome,
+) (ExternalDeliveryFactLocator, error) {
+	store.steps = append(store.steps, "report")
+	store.reportContextErr = ctx.Err()
+	store.reportClaim = claim
+	store.finalOutcome = outcome
+	return ExternalDeliveryFactLocator{
+		AttemptID: NotificationDeliveryAttemptID(attempt.DeliveryID, attempt.Attempt), EvidenceDigest: [32]byte{1},
+	}, store.reportErr
+}
+
 func (store *externalDeliveryStoreStub) FinalizeExternalDelivery(
-	_ context.Context,
+	ctx context.Context,
 	_ recordplatform.ClaimedOutboxEventV1,
 	_ ExternalDeliveryAttempt,
-	outcome ExternalDeliveryProviderOutcome,
+	_ ExternalDeliveryFactLocator,
 	_ time.Duration,
 ) (ExternalDeliveryOutboxResult, error) {
 	store.steps = append(store.steps, "finalize")
-	store.finalOutcome = outcome
+	store.finalContextErr = ctx.Err()
 	return store.finalResult, store.finalErr
 }
 
@@ -422,13 +509,59 @@ func externalDeliveryPreparedStore(t *testing.T, claim recordplatform.ClaimedOut
 		Attempt: 1, StartedAt: startedAt,
 	}
 	return &externalDeliveryStoreStub{preparation: ExternalDeliveryPreparation{Prepared: &PreparedExternalDelivery{
-		Attempt: attempt,
+		Attempt:             attempt,
+		ReportingCapability: testExternalDeliveryCapability(t),
 		Binding: ScopedTransportBinding{
 			ProjectID: recordauth.ProjectIDDefault, RecipientUserID: attempt.RecipientUserID,
 			Channel: attempt.Channel, BindingID: attempt.BindingID, Provider: provider,
 		},
 		Message: message,
 	}}}
+}
+
+func testExternalDeliveryCapability(t *testing.T) ExternalDeliveryReportingCapability {
+	t.Helper()
+	capability, err := ParseExternalDeliveryReportingCapability([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return capability
+}
+
+func TestExternalDeliveryReportingCapabilityIsOpaque(t *testing.T) {
+	capability := testExternalDeliveryCapability(t)
+	if _, err := ParseExternalDeliveryReportingCapability([]byte("short")); err == nil {
+		t.Fatal("short reporting capability was accepted")
+	}
+	if (ExternalDeliveryReportingCapability{}).Validate() == nil {
+		t.Fatal("missing reporting capability was accepted")
+	}
+	for _, rendered := range []string{fmt.Sprintf("%v", capability), fmt.Sprintf("%#v", capability), fmt.Sprintf("%x", capability)} {
+		if rendered != "[redacted]" {
+			t.Fatalf("capability formatting exposed data: %q", rendered)
+		}
+	}
+	if _, err := json.Marshal(struct {
+		Capability ExternalDeliveryReportingCapability
+	}{capability}); err == nil {
+		t.Fatal("reporting capability was serialized")
+	}
+}
+
+func TestExternalDeliveryFactLocatorRequiresCanonicalIdentity(t *testing.T) {
+	valid := ExternalDeliveryFactLocator{AttemptID: "rna_" + strings.Repeat("a", 64), EvidenceDigest: [32]byte{1}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid fact locator: %v", err)
+	}
+	for _, invalid := range []ExternalDeliveryFactLocator{
+		{AttemptID: "rna_short", EvidenceDigest: [32]byte{1}},
+		{AttemptID: "rna_" + strings.Repeat("g", 64), EvidenceDigest: [32]byte{1}},
+		{AttemptID: valid.AttemptID},
+	} {
+		if err := invalid.Validate(); !errors.Is(err, ErrInvalidExternalDeliveryResult) {
+			t.Fatalf("invalid fact locator %#v: %v", invalid, err)
+		}
+	}
 }
 
 type fixedExternalDeliveryClock struct{ now time.Time }

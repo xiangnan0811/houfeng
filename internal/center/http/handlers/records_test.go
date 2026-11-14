@@ -16,6 +16,8 @@ import (
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordmarkdown"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
@@ -26,12 +28,15 @@ func TestRecordsHandlerPreparesOrderedEvidenceBeforeCreate(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
 	draft := mustRecordsHandlerDraft(t, actor, "", "")
 	preparer := &recordEvidencePreparerStub{t: t}
+	options, _ := newHandlerBirthFixture(t)
+	options.EvidencePreparer = preparer
+	var allocation recordAllocationResponse
 	application := &recordsHandlerApplicationStub{
 		preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) {
 			return draft, nil
 		},
 		createRecord: func(_ context.Context, request records.RecordCreateRequest) (records.RevisionCommitResult, error) {
-			if request.RecordID != "rec_previewowned" || request.EvidencePreparation.ValidateForRecord(request.RecordID) != nil {
+			if request.RecordID != allocation.RecordID || request.EvidencePreparation.ValidateForRecord(request.RecordID) != nil {
 				t.Fatalf("CreateRecord evidence request = %#v", request)
 			}
 			if got, want := request.EvidencePreparation.SnapshotIDs(), []string{"evs_prepareda", "evs_httpcontract"}; !reflect.DeepEqual(got, want) {
@@ -44,11 +49,9 @@ func TestRecordsHandlerPreparesOrderedEvidenceBeforeCreate(t *testing.T) {
 			}, nil
 		},
 	}
-	handler := RecordsWithOptions(application, RecordHandlerOptions{
-		NewRecordID:      func() (string, error) { return "rec_shouldnotreplace", nil },
-		EvidencePreparer: preparer,
-	})
-	body := `{"record_id":"rec_previewowned","draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"},{"existing_snapshot_id":"evs_httpcontract"}]}`
+	handler := RecordsWithOptions(application, options)
+	allocation = mustHandlerAllocation(t, handler, actor, recordbirth.PurposeEvidence, "allocate-http-evidence")
+	body := `{"record_id":` + strconvQuote(allocation.RecordID) + `,"allocation":` + handlerAllocationJSON(t, allocation) + `,"draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"},{"existing_snapshot_id":"evs_httpcontract"}]}`
 	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
 	request.Header.Set("Idempotency-Key", "create-http-evidence")
 	recorder := httptest.NewRecorder()
@@ -58,7 +61,7 @@ func TestRecordsHandlerPreparesOrderedEvidenceBeforeCreate(t *testing.T) {
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s, want 201", recorder.Code, recorder.Body.String())
 	}
-	if preparer.calls != 1 || preparer.request.RecordID != "rec_previewowned" ||
+	if preparer.calls != 1 || preparer.request.RecordID != allocation.RecordID ||
 		!reflect.DeepEqual(preparer.request.Items, []evidence.RevisionPreparationItem{
 			{CaptureIntentID: "evi_0123456789abcdef01234567"},
 			{ExistingSnapshotID: "evs_httpcontract"},
@@ -165,8 +168,11 @@ func TestRecordsHandlerEvidenceSaveFailsClosedWhenPreparerUnavailableOrStale(t *
 					return records.RevisionCommitResult{}, nil
 				},
 			}
-			handler := RecordsWithOptions(application, RecordHandlerOptions{EvidencePreparer: test.preparer})
-			body := `{"record_id":"rec_previewowned","draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"}]}`
+			options, _ := newHandlerBirthFixture(t)
+			options.EvidencePreparer = test.preparer
+			handler := RecordsWithOptions(application, options)
+			allocation := mustHandlerAllocation(t, handler, actor, recordbirth.PurposeEvidence, "allocate-http-evidence")
+			body := `{"record_id":` + strconvQuote(allocation.RecordID) + `,"allocation":` + handlerAllocationJSON(t, allocation) + `,"draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"}]}`
 			request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
 			request.Header.Set("Idempotency-Key", "create-http-evidence")
 			recorder := httptest.NewRecorder()
@@ -185,14 +191,17 @@ func TestRecordsHandlerRejectsPreparationThatDropsRequestedEvidence(t *testing.T
 	actor := mustRecordsHandlerActor(t)
 	draft := mustRecordsHandlerDraft(t, actor, "", "")
 	createCalls := 0
+	options, _ := newHandlerBirthFixture(t)
+	options.EvidencePreparer = &recordEvidencePreparerStub{}
 	handler := RecordsWithOptions(&recordsHandlerApplicationStub{
 		preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) { return draft, nil },
 		createRecord: func(context.Context, records.RecordCreateRequest) (records.RevisionCommitResult, error) {
 			createCalls++
 			return records.RevisionCommitResult{Created: true}, nil
 		},
-	}, RecordHandlerOptions{EvidencePreparer: &recordEvidencePreparerStub{}})
-	body := `{"record_id":"rec_previewowned","draft_id":"` + draft.DraftID + `","draft_etag":` +
+	}, options)
+	allocation := mustHandlerAllocation(t, handler, actor, recordbirth.PurposeEvidence, "allocate-http-dropped-evidence")
+	body := `{"record_id":` + strconvQuote(allocation.RecordID) + `,"allocation":` + handlerAllocationJSON(t, allocation) + `,"draft_id":"` + draft.DraftID + `","draft_etag":` +
 		strconvQuote(draft.ETag.String()) +
 		`,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"}]}`
 	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
@@ -298,9 +307,7 @@ func TestRecordsHandlerListsThroughTrustedActorAndReturnsOwnedDTO(t *testing.T) 
 			return records.RecordListResult{Records: make([]records.Record, 0)}, nil
 		},
 	}
-	handler := RecordsWithOptions(application, RecordHandlerOptions{
-		NewRecordID: func() (string, error) { return "rec_httpcontract", nil },
-	})
+	handler := RecordsWithOptions(application, RecordHandlerOptions{})
 	request := httptest.NewRequest(http.MethodGet, "/api/records?limit=25&sort=updated_at_desc", nil)
 	request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
 	recorder := httptest.NewRecorder()
@@ -347,9 +354,7 @@ func TestRecordsHandlerRejectsFiltersThatMovedToSearch(t *testing.T) {
 					return records.RecordListResult{}, nil
 				},
 			}
-			handler := RecordsWithOptions(application, RecordHandlerOptions{
-				NewRecordID: func() (string, error) { return "rec_httpcontract", nil },
-			})
+			handler := RecordsWithOptions(application, RecordHandlerOptions{})
 			request := httptest.NewRequest(http.MethodGet, "/api/records?"+test.query, nil)
 			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
 			recorder := httptest.NewRecorder()
@@ -381,9 +386,7 @@ func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(
 			return want, nil
 		},
 	}
-	handler := RecordsWithOptions(application, RecordHandlerOptions{
-		NewRecordID: func() (string, error) { return "rec_httpcontract", nil },
-	})
+	handler := RecordsWithOptions(application, RecordHandlerOptions{})
 	request := recordsHandlerRequest(t, actor, http.MethodGet, "/api/records/"+want.RecordID, "")
 	recorder := httptest.NewRecorder()
 
@@ -483,6 +486,8 @@ func TestRecordRevisionResponseReportsRenderModelStatus(t *testing.T) {
 func TestRecordsHandlerCreatesRecordFromTrustedDraftPayloadAndHeaders(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
 	draft := mustRecordsHandlerDraft(t, actor, "", "")
+	options, _ := newHandlerBirthFixture(t)
+	var allocatedID string
 	application := &recordsHandlerApplicationStub{
 		preparePublish: func(_ context.Context, request records.DraftPublishRequest) (records.Draft, error) {
 			if request.DraftID != draft.DraftID || !reflect.DeepEqual(request.Actor, actor) {
@@ -491,7 +496,7 @@ func TestRecordsHandlerCreatesRecordFromTrustedDraftPayloadAndHeaders(t *testing
 			return draft, nil
 		},
 		createRecord: func(_ context.Context, request records.RecordCreateRequest) (records.RevisionCommitResult, error) {
-			if request.RecordID != "rec_httpcontract" || request.DraftID != draft.DraftID ||
+			if recordidentity.Classify(request.RecordID) != recordidentity.Ordinary || request.Allocation == nil || request.Allocation.RecordID != request.RecordID || request.DraftID != draft.DraftID ||
 				request.DraftETag != draft.ETag || request.IdempotencyKey != "create-http-record" ||
 				!reflect.DeepEqual(request.Actor, actor) {
 				t.Fatalf("CreateRecord() request = %#v", request)
@@ -505,6 +510,7 @@ func TestRecordsHandlerCreatesRecordFromTrustedDraftPayloadAndHeaders(t *testing
 				!reflect.DeepEqual(request.Values.AttachmentIDs, []string{"att_httpfirst", "att_httpsecond"}) {
 				t.Fatalf("CreateRecord() mapped values = %#v, subjects %#v", request.Values, request.SubjectReferences)
 			}
+			allocatedID = request.RecordID
 			return records.RevisionCommitResult{
 				RecordID:           request.RecordID,
 				RevisionID:         "rrv_httpcontract",
@@ -517,9 +523,7 @@ func TestRecordsHandlerCreatesRecordFromTrustedDraftPayloadAndHeaders(t *testing
 			}, nil
 		},
 	}
-	handler := RecordsWithOptions(application, RecordHandlerOptions{
-		NewRecordID: func() (string, error) { return "rec_httpcontract", nil },
-	})
+	handler := RecordsWithOptions(application, options)
 	body := `{"draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `}`
 	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
 	request.Header.Set("Idempotency-Key", "create-http-record")
@@ -538,7 +542,7 @@ func TestRecordsHandlerCreatesRecordFromTrustedDraftPayloadAndHeaders(t *testing
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.RecordID != "rec_httpcontract" || response.RevisionID != "rrv_httpcontract" || !response.Created {
+	if response.RecordID != allocatedID || recordidentity.Classify(response.RecordID) != recordidentity.Ordinary || response.RevisionID != "rrv_httpcontract" || !response.Created {
 		t.Fatalf("response = %#v", response)
 	}
 }
@@ -628,9 +632,7 @@ func TestRecordsHandlerRoutesRevisionRestoreAndLifecycleActions(t *testing.T) {
 			return records.RecordLifecycleResult{RecordID: request.RecordID, Lifecycle: request.TargetLifecycle}, nil
 		},
 	}
-	handler := RecordsWithOptions(application, RecordHandlerOptions{
-		NewRecordID: func() (string, error) { return "rec_unused", nil },
-	})
+	handler := RecordsWithOptions(application, RecordHandlerOptions{})
 
 	tests := []struct {
 		name       string
@@ -719,7 +721,7 @@ func TestRecordsHandlerMapsStableErrorsAndRejectsUntrustedOrOversizedInput(t *te
 				getRecord: func(context.Context, records.RecordGetRequest) (records.Record, error) {
 					return records.Record{}, tt.err
 				},
-			}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }})
+			}, RecordHandlerOptions{})
 			request := recordsHandlerRequest(t, actor, http.MethodGet, "/api/records/rec_httpcontract", "")
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, request)
@@ -734,7 +736,7 @@ func TestRecordsHandlerMapsStableErrorsAndRejectsUntrustedOrOversizedInput(t *te
 				calls++
 				return records.RecordListResult{}, nil
 			},
-		}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }})
+		}, RecordHandlerOptions{})
 		request := httptest.NewRequest(http.MethodGet, "/api/records", nil)
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)
@@ -745,9 +747,7 @@ func TestRecordsHandlerMapsStableErrorsAndRejectsUntrustedOrOversizedInput(t *te
 	})
 
 	t.Run("oversized body", func(t *testing.T) {
-		handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{
-			NewRecordID: func() (string, error) { return "rec_unused", nil },
-		})
+		handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{})
 		request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", `{"draft_id":"rdf_http","padding":"`+strings.Repeat("x", DefaultJSONBodyLimit)+`"}`)
 		request.Header.Set("Idempotency-Key", "oversized-http-record")
 		recorder := httptest.NewRecorder()
@@ -756,9 +756,7 @@ func TestRecordsHandlerMapsStableErrorsAndRejectsUntrustedOrOversizedInput(t *te
 	})
 
 	t.Run("unknown field", func(t *testing.T) {
-		handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{
-			NewRecordID: func() (string, error) { return "rec_unused", nil },
-		})
+		handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{})
 		request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", `{"draft_id":"rdf_http","draft_etag":"bad","trusted_project":"other"}`)
 		request.Header.Set("Idempotency-Key", "unknown-http-record")
 		recorder := httptest.NewRecorder()
@@ -780,14 +778,12 @@ func TestRecordHandlersSetPrivateNoStoreForAllResponseClasses(t *testing.T) {
 				listRecords: func(context.Context, records.RecordListRequest) (records.RecordListResult, error) {
 					return records.RecordListResult{Records: make([]records.Record, 0)}, nil
 				},
-			}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }}),
+			}, RecordHandlerOptions{}),
 			request: recordsHandlerRequest(t, actor, http.MethodGet, "/api/records", ""),
 		},
 		{
-			name: "records not found",
-			handler: RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{
-				NewRecordID: func() (string, error) { return "rec_unused", nil },
-			}),
+			name:    "records not found",
+			handler: RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{}),
 			request: recordsHandlerRequest(t, actor, http.MethodGet, "/api/records/rec_httpcontract/unknown", ""),
 		},
 		{
@@ -796,14 +792,12 @@ func TestRecordHandlersSetPrivateNoStoreForAllResponseClasses(t *testing.T) {
 				getRecord: func(context.Context, records.RecordGetRequest) (records.Record, error) {
 					return records.Record{}, records.ErrRecordRevisionConflict
 				},
-			}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }}),
+			}, RecordHandlerOptions{}),
 			request: recordsHandlerRequest(t, actor, http.MethodGet, "/api/records/rec_httpcontract", ""),
 		},
 		{
-			name: "records unavailable",
-			handler: RecordsWithOptions(nil, RecordHandlerOptions{
-				NewRecordID: func() (string, error) { return "rec_unused", nil },
-			}),
+			name:    "records unavailable",
+			handler: RecordsWithOptions(nil, RecordHandlerOptions{}),
 			request: recordsHandlerRequest(t, actor, http.MethodGet, "/api/records", ""),
 		},
 		{
@@ -833,6 +827,7 @@ func TestRecordsHandlerTreatsNonAllowlistedPersistedDraftPayloadAsInternalError(
 		`{"secret_internal":"must-not-leak"}`,
 	)
 	createCalls := 0
+	options, _ := newHandlerBirthFixture(t)
 	handler := RecordsWithOptions(&recordsHandlerApplicationStub{
 		preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) {
 			return draft, nil
@@ -841,7 +836,7 @@ func TestRecordsHandlerTreatsNonAllowlistedPersistedDraftPayloadAsInternalError(
 			createCalls++
 			return records.RevisionCommitResult{}, nil
 		},
-	}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }})
+	}, options)
 	request := recordsHandlerRequest(
 		t,
 		actor,
@@ -868,7 +863,7 @@ func TestRecordsHandlerRejectsTrailingSlashItemPathBeforeApplication(t *testing.
 			calls++
 			return records.Record{}, nil
 		},
-	}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }})
+	}, RecordHandlerOptions{})
 	request := recordsHandlerRequest(t, actor, http.MethodGet, "/api/records/rec_httpcontract/", "")
 	recorder := httptest.NewRecorder()
 
@@ -884,7 +879,7 @@ func TestRecordsHandlerRoundTripsOpaqueCursorAndRejectsInvalidCursor(t *testing.
 	actor := mustRecordsHandlerActor(t)
 	wantCursor := records.RecordCursor{
 		UpdatedAt: time.Date(2026, time.August, 3, 16, 0, 0, 123, time.FixedZone("offset", 8*60*60)),
-		RecordID:  "rec_cursorcontract",
+		RecordID:  "rec2_80000000000000000000000000000000",
 	}
 	calls := 0
 	handler := RecordsWithOptions(&recordsHandlerApplicationStub{
@@ -907,7 +902,7 @@ func TestRecordsHandlerRoundTripsOpaqueCursorAndRejectsInvalidCursor(t *testing.
 				return records.RecordListResult{}, nil
 			}
 		},
-	}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }})
+	}, RecordHandlerOptions{})
 
 	first := recordsHandlerRequest(t, actor, http.MethodGet, "/api/records", "")
 	firstRecorder := httptest.NewRecorder()
@@ -940,9 +935,7 @@ func TestRecordsHandlerRoundTripsOpaqueCursorAndRejectsInvalidCursor(t *testing.
 
 func TestRecordsHandlerRequiresIdempotencyKeyBeforeFormalMutations(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
-	handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{
-		NewRecordID: func() (string, error) { return "rec_unused", nil },
-	})
+	handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{})
 	for _, tt := range []struct {
 		name string
 		path string
@@ -974,7 +967,7 @@ func TestRecordsHandlerRejectsDraftRoutingMismatchBeforeRevisionWrite(t *testing
 			createCalls++
 			return records.RevisionCommitResult{}, nil
 		},
-	}, RecordHandlerOptions{NewRecordID: func() (string, error) { return "rec_unused", nil }})
+	}, RecordHandlerOptions{})
 	body := `{"base_revision_id":"rrv_httpbase","lock_version":7,"authorization_epoch":5,"draft_id":"` +
 		draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `}`
 	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records/rec_httpcontract/revisions", body)
@@ -991,9 +984,7 @@ func TestRecordsHandlerRejectsDraftRoutingMismatchBeforeRevisionWrite(t *testing
 
 func TestRecordsHandlerUsesExactSubtreesAndMethodBoundaries(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
-	handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{
-		NewRecordID: func() (string, error) { return "rec_unused", nil },
-	})
+	handler := RecordsWithOptions(&recordsHandlerApplicationStub{}, RecordHandlerOptions{})
 	for _, tt := range []struct {
 		name       string
 		method     string

@@ -38,6 +38,7 @@ var (
 	errInvalidComposeDeployInitInvocation      = errors.New("only deploy-init --scope compose is supported")
 	errInvalidComposeDeployInitConfiguration   = errors.New("Compose deploy-init configuration is invalid")
 	errComposeDeployInit                       = errors.New("Compose deployment initialization failed")
+	errComposeSecretStage                      = errors.New("Compose secret staging failed")
 	errInvalidComposeRecordAuthorityInvocation = errors.New("only record-authority --scope compose is supported")
 	errComposeRecordAuthority                  = errors.New("Compose Records authority failed")
 )
@@ -46,7 +47,7 @@ type appMigrationDependencies struct {
 	lookupEnv    func(string) (string, bool)
 	openPostgres func(context.Context, string) (*pgxpool.Pool, error)
 	closePool    func(*pgxpool.Pool)
-	converge     func(context.Context, *pgxpool.Pool, string, string) error
+	converge     func(context.Context, *pgxpool.Pool, string, string, string) error
 }
 
 type appACLR2BootstrapDependencies struct {
@@ -84,11 +85,12 @@ type appACLR2FinalizeDependencies struct {
 }
 
 type appAdminDependencies struct {
-	migration   appMigrationDependencies
-	bootstrap   appACLR2BootstrapDependencies
-	finalize    appACLR2FinalizeDependencies
-	composeInit composeDeployInitDependencies
-	authority   composeRecordAuthorityDependencies
+	migration    appMigrationDependencies
+	bootstrap    appACLR2BootstrapDependencies
+	finalize     appACLR2FinalizeDependencies
+	composeInit  composeDeployInitDependencies
+	composeStage composeDeployInitDependencies
+	authority    composeRecordAuthorityDependencies
 }
 
 type composeDeployInitDependencies struct {
@@ -101,17 +103,22 @@ type composeRecordAuthorityDependencies struct {
 }
 
 const (
-	composeBootstrapPasswordPath = "/run/secrets/postgres_bootstrap_password"
-	composeRuntimePasswordPath   = "/run/secrets/houfeng_runtime_password"
-	composeAdminPasswordPath     = "/run/secrets/houfeng_platform_admin_password"
-	composeMigratorPasswordPath  = "/run/secrets/houfeng_migrator_password"
+	composeBootstrapPasswordPath      = "/run/secrets/postgres_bootstrap_password"
+	composeRuntimePasswordPath        = "/run/secrets/houfeng_runtime_password"
+	composeAdminPasswordPath          = "/run/secrets/houfeng_platform_admin_password"
+	composeDeletionWorkerPasswordPath = "/run/secrets/houfeng_record_deletion_worker_password"
+	composeMigratorPasswordPath       = "/run/secrets/houfeng_migrator_password"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := runAdminWithDeps(ctx, os.Args[1:], defaultAppAdminDependencies()); err != nil {
-		slog.Error("record platform admin command failed", "error", err)
+		var c80Handled *legacyC80HandledResultError
+		var c81Handled *legacyC81HandledResultError
+		if !errors.As(err, &c80Handled) && !errors.As(err, &c81Handled) {
+			slog.Error("record platform admin command failed", "error", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -129,6 +136,10 @@ func defaultAppAdminDependencies() appAdminDependencies {
 			readFile:   os.ReadFile,
 			initialize: centerdeploy.InitializeCompose,
 		},
+		composeStage: composeDeployInitDependencies{
+			readFile:   os.ReadFile,
+			initialize: centerdeploy.StageComposeSecrets,
+		},
 		authority: composeRecordAuthorityDependencies{run: centerdeploy.RunComposeAuthority},
 	}
 }
@@ -140,9 +151,11 @@ func defaultAppMigrationDependencies() appMigrationDependencies {
 		closePool: func(pool *pgxpool.Pool) {
 			pool.Close()
 		},
-		converge: func(ctx context.Context, pool *pgxpool.Pool, runtimeRole, adminRole string) error {
-			_, err := migrate.ConvergeAppACLCurrent(ctx, pool, runtimeRole, adminRole)
-			return err
+		converge: func(ctx context.Context, pool *pgxpool.Pool, runtimeRole, adminRole, deletionWorkerRole string) error {
+			return centerdeploy.WithSourceMaintenance(ctx, pool, centerdeploy.SourceMaintenanceConfigPath, false, func(*centerdeploy.SourceMaintenanceConfig) error {
+				_, err := migrate.ConvergeAppACLCurrent(ctx, pool, runtimeRole, adminRole, deletionWorkerRole)
+				return err
+			})
 		},
 	}
 }
@@ -154,7 +167,11 @@ func defaultAppACLR2BootstrapDependencies() appACLR2BootstrapDependencies {
 		closePool: func(pool *pgxpool.Pool) {
 			pool.Close()
 		},
-		bootstrap: migrate.BootstrapAppACLR2,
+		bootstrap: func(ctx context.Context, pool *pgxpool.Pool) error {
+			return centerdeploy.WithSourceMaintenance(ctx, pool, centerdeploy.SourceMaintenanceConfigPath, false, func(*centerdeploy.SourceMaintenanceConfig) error {
+				return migrate.BootstrapAppACLR2(ctx, pool)
+			})
+		},
 	}
 }
 
@@ -165,19 +182,46 @@ func defaultAppACLR2FinalizeDependencies() appACLR2FinalizeDependencies {
 		closePool: func(pool *pgxpool.Pool) {
 			pool.Close()
 		},
-		finalize: migrate.FinalizeAppACLR2,
+		finalize: func(ctx context.Context, pool *pgxpool.Pool) error {
+			return centerdeploy.WithSourceMaintenance(ctx, pool, centerdeploy.SourceMaintenanceConfigPath, false, func(*centerdeploy.SourceMaintenanceConfig) error {
+				return migrate.FinalizeAppACLR2(ctx, pool)
+			})
+		},
 	}
 }
 
 func runAdminWithDeps(ctx context.Context, args []string, deps appAdminDependencies) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "local-namespace":
+			return runLocalNamespace(ctx, args)
+		case "source-authority":
+			if len(args) > 1 && (args[1] == "legacy-retirement-preview" || args[1] == "legacy-retire" || args[1] == "legacy-retirement-reconcile") {
+				return runSourceLegacyRetirement(ctx, args)
+			}
+			return runSourceAuthority(ctx, args)
+		case "record-deletion":
+			if len(args) > 1 && args[1] == "legacy-c80-service" {
+				return runLegacyC80Service(ctx, args)
+			}
+			if len(args) > 1 && args[1] == "legacy-c81-migrate" {
+				return runLegacyC81Migration(ctx, args)
+			}
+			return runRecordDeletion(ctx, args)
 		case "bootstrap":
 			return runAppACLR2BootstrapWithDeps(ctx, args, deps.bootstrap)
 		case "finalize":
 			return runAppACLR2FinalizeWithDeps(ctx, args, deps.finalize)
 		case "deploy-init":
 			return runComposeDeployInitWithDeps(ctx, args, deps.composeInit)
+		case "deploy-stage-secrets":
+			if len(args) != 3 || args[1] != "--scope" || args[2] != "compose" {
+				return errors.New("only deploy-stage-secrets --scope compose is supported")
+			}
+			if err := runComposeDeployInitWithDeps(ctx, []string{"deploy-init", "--scope", "compose"}, deps.composeStage); err != nil {
+				return errComposeSecretStage
+			}
+			return nil
 		case "record-authority":
 			return runComposeRecordAuthorityWithDeps(ctx, args, deps.authority)
 		}
@@ -236,15 +280,20 @@ func runComposeDeployInitWithDeps(ctx context.Context, args []string, deps compo
 	if err != nil {
 		return err
 	}
+	deletionWorkerPassword, err := readPassword(composeDeletionWorkerPasswordPath)
+	if err != nil {
+		return err
+	}
 	migratorPassword, err := readPassword(composeMigratorPasswordPath)
 	if err != nil {
 		return err
 	}
 	config, err := centerdeploy.NewComposeInitConfig(centerdeploy.ComposeInitPasswords{
-		Bootstrap:     bootstrapPassword,
-		Runtime:       runtimePassword,
-		PlatformAdmin: adminPassword,
-		Migrator:      migratorPassword,
+		Bootstrap:      bootstrapPassword,
+		Runtime:        runtimePassword,
+		PlatformAdmin:  adminPassword,
+		DeletionWorker: deletionWorkerPassword,
+		Migrator:       migratorPassword,
 	})
 	if err != nil {
 		return errInvalidComposeDeployInitConfiguration
@@ -258,6 +307,7 @@ func runComposeDeployInitWithDeps(ctx context.Context, args []string, deps compo
 func safeComposeDeployInitError(initializationErr error) error {
 	for _, stage := range []error{
 		centerdeploy.ErrComposeInitOpenBootstrap,
+		centerdeploy.ErrComposeInitMaintenance,
 		centerdeploy.ErrComposeInitPrepareAuthority,
 		centerdeploy.ErrComposeInitProvisionBootstrap,
 		centerdeploy.ErrComposeInitOpenMigrator,
@@ -294,7 +344,7 @@ func runWithDeps(ctx context.Context, args []string, deps appMigrationDependenci
 	if err != nil || pool == nil {
 		return errOpenAppMigratorPool
 	}
-	if err := deps.converge(ctx, pool, config.RuntimeRole, config.AdminRole); err != nil {
+	if err := deps.converge(ctx, pool, config.RuntimeRole, config.AdminRole, config.DeletionWorkerRole); err != nil {
 		if errors.Is(err, migrate.ErrDevelopmentDatabaseRebuildRequired) {
 			return fmt.Errorf("%w: %w", errConvergeAppMigration, migrate.ErrDevelopmentDatabaseRebuildRequired)
 		}

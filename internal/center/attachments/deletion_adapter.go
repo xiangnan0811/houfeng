@@ -12,12 +12,12 @@ import (
 var ErrInvalidDeletionAdapter = errors.New("invalid attachment deletion adapter")
 
 type AttachmentDeletionCommand struct {
-	Operation     recorddeletion.DeletionOperation
+	recorddeletion.PurgeTarget
 	SurfaceDigest [sha256.Size]byte
 }
 
 func (command AttachmentDeletionCommand) Validate() error {
-	if (recorddeletion.PurgeTarget{Operation: command.Operation}).Validate() != nil ||
+	if command.PurgeTarget.Validate() != nil ||
 		command.SurfaceDigest != recorddeletion.RecordAttachmentsSurfaceDigest() {
 		return ErrInvalidDeletionAdapter
 	}
@@ -96,7 +96,7 @@ func (adapter *DeletionAdapter) PurgeDeletion(
 		return recorddeletion.AdapterPurgeReceipt{}, ErrInvalidDeletionAdapter
 	}
 	command := AttachmentDeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordAttachmentsSurfaceDigest(),
+		PurgeTarget: target, SurfaceDigest: recorddeletion.RecordAttachmentsSurfaceDigest(),
 	}
 	if err := command.Validate(); err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
@@ -123,7 +123,7 @@ func (adapter *DeletionAdapter) VerifyDeletion(
 		return err
 	}
 	command := AttachmentDeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordAttachmentsSurfaceDigest(),
+		PurgeTarget: target, SurfaceDigest: recorddeletion.RecordAttachmentsSurfaceDigest(),
 	}
 	return adapter.store.VerifyRecordAttachmentsPurge(ctx, command, receipt)
 }

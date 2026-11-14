@@ -24,7 +24,7 @@ import (
 type PostgresRecordCommentRepository struct {
 	platform      *PostgresRecordPlatformRepository
 	members       CollaborationMembershipReader
-	authorization *PostgresCurrentRecordAuthorizationSource
+	authorization currentRecordAuthorizationPrefetcher
 }
 
 func NewPostgresRecordCommentRepository(
@@ -46,20 +46,23 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 	if err := command.Validate(); err != nil {
 		return recordcollaboration.CommentMutationResult{}, err
 	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.RecordID})
+	if err != nil {
+		return recordcollaboration.CommentMutationResult{}, err
+	}
 
 	var result recordcollaboration.CommentMutationResult
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		claim, err := transaction.ClaimIdempotency(ctx, command.Idempotency)
+	err = repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		result = recordcollaboration.CommentMutationResult{}
+		users := append([]string{command.Actor.UserID}, command.MentionUserIDs...)
+		claim, err := claimCollaborationEffect(ctx, transaction, command.RecordID, command.Actor.UserID, users, "", command.Idempotency)
 		if err != nil {
 			return err
 		}
 		if (claim.ReplayResult == nil) == (claim.Owner == nil) {
 			return recordcollaboration.ErrInvalidCommentCommand
 		}
-		if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
-			return err
-		}
-		binding, err := loadCollaborationRecordFenceBinding(ctx, transaction.tx, command.RecordID)
+		binding, err := readAcquiredCollaborationRecordFenceBinding(ctx, transaction.tx, command.RecordID)
 		if err != nil {
 			return err
 		}
@@ -73,7 +76,7 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 			return recordcollaboration.ErrCommentConflict
 		}
 		persistedActor, currentAuthorization, err := repository.loadCurrentCommentAuthorization(
-			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordUpdate,
+			ctx, transaction.tx, authorization, command.Actor, command.RecordID, recordauth.CapabilityRecordUpdate,
 		)
 		if err != nil {
 			return err
@@ -207,8 +210,13 @@ func (repository *PostgresRecordCommentRepository) ListComments(ctx context.Cont
 	if err := command.Validate(); err != nil {
 		return nil, err
 	}
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.RecordID})
+	if err != nil {
+		return nil, err
+	}
+
 	var result []recordcollaboration.CommentRecord
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		if err := assertRecordReadFence(ctx, transaction.tx, command.RecordID); err != nil {
 			return err
 		}
@@ -226,7 +234,7 @@ func (repository *PostgresRecordCommentRepository) ListComments(ctx context.Cont
 			return recordcollaboration.ErrCommentConflict
 		}
 		_, currentAuthorization, err := repository.loadCurrentCommentAuthorization(
-			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordRead,
+			ctx, transaction.tx, authorization, command.Actor, command.RecordID, recordauth.CapabilityRecordRead,
 		)
 		if err != nil {
 			return err
@@ -251,6 +259,7 @@ func (repository *PostgresRecordCommentRepository) ListComments(ctx context.Cont
 func (repository *PostgresRecordCommentRepository) loadCurrentCommentAuthorization(
 	ctx context.Context,
 	tx pgx.Tx,
+	authorization currentRecordAuthorizationTransactionResolver,
 	actorInput recordauth.ActorScope,
 	recordID string,
 	capability recordauth.Capability,
@@ -265,7 +274,7 @@ func (repository *PostgresRecordCommentRepository) loadCurrentCommentAuthorizati
 	if actor.UserID != actorInput.UserID || actor.ProjectID != actorInput.ProjectID || actor.Role != actorInput.Role {
 		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, recordauth.ErrDenied
 	}
-	current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
+	current, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
 	if err != nil {
 		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
 	}

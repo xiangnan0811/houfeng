@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 )
 
 func TestApplicationRestoreRevisionCopiesHistoricalContentThroughFreshSubjectReferences(t *testing.T) {
@@ -174,10 +175,11 @@ func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) 
 		t.Fatalf("NewDraftETag() error = %v", err)
 	}
 
+	allocation := &recordbirth.Allocation{}
 	var revisionRequests []RevisionSaveRequest
 	revisions := &recordApplicationRevisionStub{save: func(_ context.Context, request RevisionSaveRequest) (RevisionCommitResult, error) {
 		revisionRequests = append(revisionRequests, request)
-		return RevisionCommitResult{RecordID: request.RecordID, RevisionID: "rrv_application", Created: true}, nil
+		return RevisionCommitResult{}, nil
 	}}
 	var lifecycleRequest RecordLifecycleRequest
 	lifecycle := &recordApplicationLifecycleStub{change: func(_ context.Context, request RecordLifecycleRequest) (RecordLifecycleResult, error) {
@@ -203,6 +205,7 @@ func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) 
 	_, err = application.CreateRecord(context.Background(), RecordCreateRequest{
 		Actor:               actor,
 		RecordID:            "rec_applicationcreate",
+		Allocation:          allocation,
 		DraftID:             "rdf_application",
 		DraftETag:           draftETag,
 		Values:              values,
@@ -212,6 +215,13 @@ func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) 
 	})
 	if err != nil {
 		t.Fatalf("CreateRecord() error = %v", err)
+	}
+	importAllocation := &recordbirth.Allocation{Request: recordbirth.Request{Purpose: recordbirth.PurposeImport}}
+	if _, err := application.CreateRecord(context.Background(), RecordCreateRequest{Allocation: importAllocation}); !errors.Is(err, ErrInvalidApplicationRequest) {
+		t.Fatalf("CreateRecord(import allocation) error = %v", err)
+	}
+	if len(revisionRequests) != 1 {
+		t.Fatal("import allocation reached the ordinary create route")
 	}
 	_, err = application.CreateRevision(context.Background(), RecordRevisionCreateRequest{
 		Actor:               actor,
@@ -244,12 +254,12 @@ func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) 
 	}
 	create := revisionRequests[0]
 	if create.ActivityKind != DomainActivityRecordCreated || create.BaseRevisionID != "" ||
-		create.LockVersion != 0 || create.AuthorizationEpoch != 0 {
+		create.LockVersion != 0 || create.AuthorizationEpoch != 0 || create.Allocation != allocation {
 		t.Fatalf("CreateRecord() SaveRevision request = %#v", create)
 	}
 	revise := revisionRequests[1]
 	if revise.ActivityKind != DomainActivityRecordRevised || revise.BaseRevisionID != "rrv_applicationbase" ||
-		revise.LockVersion != 7 || revise.AuthorizationEpoch != 5 {
+		revise.LockVersion != 7 || revise.AuthorizationEpoch != 5 || revise.Allocation != nil {
 		t.Fatalf("CreateRevision() SaveRevision request = %#v", revise)
 	}
 	for _, request := range revisionRequests {
@@ -526,6 +536,10 @@ func (stub *recordApplicationLifecycleStub) ChangeLifecycle(ctx context.Context,
 		return RecordLifecycleResult{}, errors.New("unexpected ChangeLifecycle call")
 	}
 	return stub.change(ctx, request)
+}
+
+func (*recordApplicationLifecycleStub) ChangeTrashState(context.Context, RecordTrashStateRequest) (RecordLifecycleResult, error) {
+	return RecordLifecycleResult{}, errors.New("unexpected ChangeTrashState call")
 }
 
 type recordApplicationDraftStub struct {

@@ -71,7 +71,7 @@ func testPostgresIntegrationAppACLCurrentP78Fresh(t *testing.T) {
 	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 	db := fixture.openRolePool(t, ctx, fixture.migratorRole)
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
-	manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil || manifest.ManifestRevision != 1 {
 		t.Fatalf("fresh C79 convergence = %#v/%v", manifest, err)
 	}
@@ -81,10 +81,10 @@ func testPostgresIntegrationAppACLCurrentP78Fresh(t *testing.T) {
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)
-	if len(before.Ledger) != 81 || before.Ledger[80].Name != appACLCurrentP80Migration {
-		t.Fatalf("fresh current must end in exactly 0080: %#v", before.Ledger)
+	if len(before.Ledger) != 82 || before.Ledger[81].Name != recordDeletionSuccessorMigration {
+		t.Fatalf("fresh current must end in exactly 0081: %#v", before.Ledger)
 	}
-	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil || repeated.ManifestDigest != manifest.ManifestDigest ||
 		!reflect.DeepEqual(readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input), before) {
 		t.Fatalf("fresh C79 repeat changed durable state: %v", err)
@@ -134,7 +134,7 @@ func testPostgresIntegrationAppACLCurrentP78Upgrade(t *testing.T, chained bool) 
 	assertAppACLCurrentCacheExpiryIndex(t, ctx, db, false)
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-	successor, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C78 to C79 convergence: %v", err)
 	}
@@ -147,13 +147,13 @@ func testPostgresIntegrationAppACLCurrentP78Upgrade(t *testing.T, chained bool) 
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)
 	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
-	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP79Migration, appACLCurrentP80Migration)
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP79Migration, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 || !reflect.DeepEqual(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog), before.Catalog) ||
 		readAppACLCurrentP77Rows(t, ctx, db) != beforeRows {
 		t.Fatal("C79 changed historical manifests, owners/ACLs, business reports or source cache facts")
 	}
 	assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, readAppACLCurrentSettingsPresenceSnapshot(t, ctx, db))
-	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil || repeated.ManifestDigest != successor.ManifestDigest ||
 		!reflect.DeepEqual(readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input), after) || readAppACLCurrentP77Rows(t, ctx, db) != beforeRows {
 		t.Fatalf("C79 repeat changed durable state or persisted facts: %v", err)
@@ -199,7 +199,7 @@ func testPostgresIntegrationAppACLCurrentP78Rollback(t *testing.T, cutpoint stri
 			return manifest, injected
 		}
 	}
-	_, err := convergeAppACLCurrentWithDependencies(ctx, db.BeginTx, fixture.runtimeRole, fixture.adminRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
+	_, err := convergeAppACLCurrentWithDependencies(ctx, db.BeginTx, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if !reached || !errors.Is(err, injected) {
 		t.Fatalf("rollback did not reach %s: reached=%t error=%v", cutpoint, reached, err)
 	}
@@ -210,7 +210,7 @@ func testPostgresIntegrationAppACLCurrentP78Rollback(t *testing.T, cutpoint stri
 	assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, readAppACLCurrentSettingsPresenceSnapshot(t, ctx, db))
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err != nil {
+	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 		t.Fatalf("C79 recovery after rollback: %v", err)
 	}
 	assertAppACLCurrentCacheExpiryIndex(t, ctx, db, true)
@@ -228,7 +228,7 @@ func testPostgresIntegrationAppACLCurrentP78Drift(t *testing.T, current bool, dr
 	seedAppACLCurrentP78Predecessor(t, ctx, fixture, db, false)
 	seedAppACLCurrentP77Rows(t, ctx, db)
 	if current {
-		if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err != nil {
+		if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 			t.Fatalf("C79 convergence before drift: %v", err)
 		}
 	}
@@ -259,7 +259,7 @@ func testPostgresIntegrationAppACLCurrentP78Drift(t *testing.T, current bool, dr
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil {
 		t.Fatal("runtime admitted predecessor or drifted current state")
 	}
-	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err == nil {
+	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err == nil {
 		t.Fatal("convergence accepted or repaired unapproved drift")
 	}
 	if !reflect.DeepEqual(readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input), before) || readAppACLCurrentP77Rows(t, ctx, db) != beforeRows {

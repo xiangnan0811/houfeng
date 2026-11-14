@@ -49,7 +49,82 @@ func materializeAppACLCurrentFragments(contract *appACLEffectiveCatalogContract,
 	for _, function := range contract.ExpectedFunctions {
 		hardened[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassFunction, SchemaName: function.SchemaName, ObjectIdentity: function.Identity}] = struct{}{}
 	}
+	workerBound := false
 	for _, fragment := range fragments {
+		if fragment.Migration == recordDeletionSuccessorMigration {
+			workerBound = true
+		}
+		replaced := make(map[AppACLManagedObjectR1]struct{}, len(fragment.FunctionReplacements))
+		for _, replacement := range fragment.FunctionReplacements {
+			before, after := replacement.Before, replacement.After
+			object := AppACLManagedObjectR1{ObjectClass: AppACLObjectClassFunction, SchemaName: before.SchemaName, ObjectIdentity: before.Identity}
+			if before.SchemaName != after.SchemaName || before.Identity != after.Identity {
+				return nil, fmt.Errorf("current APP ACL fragment %q changes replacement identity", fragment.Migration)
+			}
+			if _, duplicate := replaced[object]; duplicate {
+				return nil, fmt.Errorf("current APP ACL fragment %q replaces a function twice", fragment.Migration)
+			}
+			replaced[object] = struct{}{}
+			for _, declared := range fragment.Objects {
+				if declared == object {
+					return nil, fmt.Errorf("current APP ACL fragment %q adds and replaces a function", fragment.Migration)
+				}
+			}
+			for _, retired := range fragment.RetiredObjects {
+				if retired == object {
+					return nil, fmt.Errorf("current APP ACL fragment %q retires and replaces a function", fragment.Migration)
+				}
+			}
+			for _, declared := range fragment.Functions {
+				if declared.SchemaName == object.SchemaName && declared.Identity == object.ObjectIdentity {
+					return nil, fmt.Errorf("current APP ACL fragment %q redeclares a replacement", fragment.Migration)
+				}
+			}
+			if _, exists := managed[object]; !exists {
+				return nil, fmt.Errorf("current APP ACL fragment %q replaces an unmanaged function", fragment.Migration)
+			}
+			if _, exists := hardened[object]; !exists {
+				return nil, fmt.Errorf("current APP ACL fragment %q replaces an unhardened function", fragment.Migration)
+			}
+			for _, function := range []AppACLCurrentFunctionContract{before, after} {
+				if _, err := canonicalAppACLEffectiveCatalogFunctionContracts([]appACLEffectiveCatalogFunctionContract{{
+					SchemaName: function.SchemaName, Identity: function.Identity, OwnerRole: migratorRole,
+					Kind: function.Kind, SecurityDefiner: function.SecurityDefiner, Config: function.Config,
+				}}); err != nil {
+					return nil, fmt.Errorf("current APP ACL fragment %q replacement: %w", fragment.Migration, err)
+				}
+				settings := make(map[string]struct{}, len(function.Config))
+				for _, setting := range function.Config {
+					name, value, found := strings.Cut(setting, "=")
+					if !found || !validBareCatalogName(name) || value == "" {
+						return nil, fmt.Errorf("current APP ACL fragment %q invalid replacement configuration", fragment.Migration)
+					}
+					if _, duplicate := settings[name]; duplicate {
+						return nil, fmt.Errorf("current APP ACL fragment %q duplicate replacement configuration", fragment.Migration)
+					}
+					settings[name] = struct{}{}
+				}
+			}
+			matched := false
+			for index, actual := range contract.ExpectedFunctions {
+				if actual.SchemaName != before.SchemaName || actual.Identity != before.Identity {
+					continue
+				}
+				if actual.OwnerRole != migratorRole || actual.Kind != before.Kind ||
+					actual.SecurityDefiner != before.SecurityDefiner || !slices.Equal(actual.Config, before.Config) {
+					return nil, fmt.Errorf("current APP ACL fragment %q replacement predecessor mismatch", fragment.Migration)
+				}
+				contract.ExpectedFunctions[index] = appACLEffectiveCatalogFunctionContract{
+					SchemaName: after.SchemaName, Identity: after.Identity, OwnerRole: migratorRole,
+					Kind: after.Kind, SecurityDefiner: after.SecurityDefiner, Config: append([]string(nil), after.Config...),
+				}
+				matched = true
+				break
+			}
+			if !matched {
+				return nil, fmt.Errorf("current APP ACL fragment %q replacement predecessor absent", fragment.Migration)
+			}
+		}
 		retired := make(map[AppACLManagedObjectR1]struct{}, len(fragment.RetiredObjects))
 		for _, object := range fragment.RetiredObjects {
 			if err := validateAppACLManagedObject(object); err != nil {
@@ -100,7 +175,50 @@ func materializeAppACLCurrentFragments(contract *appACLEffectiveCatalogContract,
 		if err != nil {
 			return nil, err
 		}
+		revoked, err := appACLCurrentPrivilegesForDatabase(fragment.RevokedPrivileges, databaseName)
+		if err != nil {
+			return nil, err
+		}
+		revokedSet := make(map[AppACLPrivilege]struct{}, len(revoked))
+		for _, privilege := range revoked {
+			if err := validateAppACLPrivilege(privilege); err != nil {
+				return nil, fmt.Errorf("current APP ACL fragment %q revokes invalid privilege: %w", fragment.Migration, err)
+			}
+			if privilege.Subject == AppACLSubjectRecordDeletionWorker && !workerBound {
+				return nil, fmt.Errorf("current APP ACL fragment %q revokes a privilege of the unbound %s subject", fragment.Migration, privilege.Subject)
+			}
+			if _, duplicate := revokedSet[privilege]; duplicate {
+				return nil, fmt.Errorf("current APP ACL fragment %q revokes a privilege twice", fragment.Migration)
+			}
+			revokedSet[privilege] = struct{}{}
+		}
+		if len(revokedSet) > 0 {
+			// Every revoked tuple must be present exactly once in the replayed
+			// surface; a missing tuple means the revocation was written against
+			// a different history and must not be silently ignored.
+			found := make(map[AppACLPrivilege]int, len(revokedSet))
+			for _, privilege := range contract.Privileges {
+				if _, wanted := revokedSet[privilege]; wanted {
+					found[privilege]++
+				}
+			}
+			for privilege := range revokedSet {
+				if found[privilege] != 1 {
+					return nil, fmt.Errorf("current APP ACL fragment %q revokes privilege %#v that is not granted exactly once by its predecessors", fragment.Migration, privilege)
+				}
+			}
+			contract.Privileges = slices.DeleteFunc(contract.Privileges, func(privilege AppACLPrivilege) bool {
+				_, removed := revokedSet[privilege]
+				return removed
+			})
+		}
 		for _, privilege := range privileges {
+			if privilege.Subject == AppACLSubjectRecordDeletionWorker && !workerBound {
+				return nil, fmt.Errorf("current APP ACL fragment %q grants to the unbound %s subject", fragment.Migration, privilege.Subject)
+			}
+			if _, regranted := revokedSet[privilege]; regranted {
+				return nil, fmt.Errorf("current APP ACL fragment %q revokes and re-grants the same privilege", fragment.Migration)
+			}
 			object, err := appACLCurrentManagedObjectFromPrivilege(privilege)
 			if err != nil {
 				return nil, err

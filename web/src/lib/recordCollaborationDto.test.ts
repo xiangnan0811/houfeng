@@ -109,4 +109,19 @@ describe('record collaboration DTO decoders', () => {
 		expect(decodeRecordWatch(anchor)).toEqual(anchor)
 		expect(() => decodeRecordWatch({ ...anchor, updated_at: null })).toThrow()
 	})
+
+  it('accepts both record ID domains and rejects malformed or foreign record identities', () => {
+    const reserved = `rec2_9${'a'.repeat(31)}`
+    expect(decodeRecordAction({ ...action, record_id: reserved }).record_id).toBe(reserved)
+    expect(decodeRecordComment({ ...comment, record_id: reserved }).record_id).toBe(reserved)
+    expect(decodeRecordNotificationTarget({ record_id: reserved, subject_kind: 'record', subject_id: reserved }))
+      .toEqual({ record_id: reserved, subject_kind: 'record', subject_id: reserved })
+    for (const malformed of [`rec2_${'a'.repeat(31)}`, `rec2_${'A'.repeat(32)}`, 'rec_Record1', '', 'rrv_revision1', `rec3_${'a'.repeat(32)}`]) {
+      expect(() => decodeRecordAction({ ...action, record_id: malformed }), malformed).toThrow('invalid_record_collaboration_response')
+      expect(() => decodeRecordNotification({ ...notification, record_id: malformed }), malformed).toThrow('invalid_record_collaboration_response')
+    }
+    expect(() => decodeRecordNotificationTarget({ record_id: reserved, subject_kind: 'record', subject_id: 'rec_record1' })).toThrow()
+    // Non-record identities keep their own legacy grammar; the record domain does not widen them.
+    expect(() => decodeRecordAction({ ...action, action_id: `ract2_${'a'.repeat(32)}` })).toThrow()
+  })
 })

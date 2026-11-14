@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 var (
@@ -62,7 +63,7 @@ type ActivityFact struct {
 }
 
 func (fact ActivityFact) Validate() error {
-	if !validPortableID(fact.ActivityID, "rac_") || !validRecordID(fact.RecordID) ||
+	if !validPortableID(fact.ActivityID, "rac_") || !recordidentity.IsValid(fact.RecordID) ||
 		(fact.RevisionID != "" && !validCollaborationRevisionIdentity(fact.RevisionID)) ||
 		!validActivityFactKind(fact.Kind) || !validPortableText(fact.SourceEventID, 256, false) ||
 		fact.SourceVersion == 0 || fact.SourceVersion > math.MaxInt64 ||

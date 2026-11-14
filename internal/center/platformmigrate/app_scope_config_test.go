@@ -2,6 +2,7 @@ package platformmigrate
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +18,8 @@ func TestLoadAppScopeConfigRejectsUnsafeRoleNameWithoutLeakingValue(t *testing.T
 			return unsafeRole, true
 		case AppAdminRoleEnv:
 			return "houfeng_platform_admin", true
+		case AppDeletionWorkerRoleEnv:
+			return "houfeng_record_deletion_worker", true
 		default:
 			return "", false
 		}
@@ -74,6 +77,8 @@ func TestLoadAppScopeConfigRejectsMissingOrRepeatedRequiredValuesWithoutLeakingV
 					return tc.runtimeRole, true
 				case AppAdminRoleEnv:
 					return tc.adminRole, true
+				case AppDeletionWorkerRoleEnv:
+					return "houfeng_record_deletion_worker", true
 				default:
 					t.Fatalf("LoadAppScopeConfig() queried forbidden environment key %q", key)
 					return "", false
@@ -103,6 +108,8 @@ func TestLoadAppScopeConfigOnlyLoadsAllowedEnvironmentKeys(t *testing.T) {
 			return "houfeng_center_runtime", true
 		case AppAdminRoleEnv:
 			return "houfeng_platform_admin", true
+		case AppDeletionWorkerRoleEnv:
+			return "houfeng_record_deletion_worker", true
 		default:
 			t.Fatalf("LoadAppScopeConfig() queried forbidden environment key %q", key)
 			return "", false
@@ -111,11 +118,39 @@ func TestLoadAppScopeConfigOnlyLoadsAllowedEnvironmentKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppScopeConfig() error = %v", err)
 	}
-	if config.MigratorDatabaseURL != migratorDSN || config.RuntimeRole != "houfeng_center_runtime" || config.AdminRole != "houfeng_platform_admin" {
-		t.Fatalf("LoadAppScopeConfig() = %#v, want the three APP-only values", config)
+	if config.MigratorDatabaseURL != migratorDSN || config.RuntimeRole != "houfeng_center_runtime" || config.AdminRole != "houfeng_platform_admin" || config.DeletionWorkerRole != "houfeng_record_deletion_worker" {
+		t.Fatal("APP-only configuration did not preserve its authority bindings")
 	}
-	wantKeys := []string{AppMigratorDatabaseURLEnv, AppRuntimeRoleEnv, AppAdminRoleEnv}
+	wantKeys := []string{AppMigratorDatabaseURLEnv, AppRuntimeRoleEnv, AppAdminRoleEnv, AppDeletionWorkerRoleEnv}
 	if !reflect.DeepEqual(lookedUp, wantKeys) {
 		t.Fatalf("LoadAppScopeConfig() looked up %#v, want %#v", lookedUp, wantKeys)
+	}
+}
+
+func TestLoadAppScopeConfigRejectsInvalidDeletionWorker(t *testing.T) {
+	for _, worker := range []string{"", "runtime", "admin", "worker\x00secret"} {
+		t.Run(fmt.Sprintf("%q", worker), func(t *testing.T) {
+			_, err := LoadAppScopeConfig(func(key string) (string, bool) {
+				switch key {
+				case AppMigratorDatabaseURLEnv:
+					return "postgres://migrator:secret@example.invalid/houfeng", true
+				case AppRuntimeRoleEnv:
+					return "runtime", true
+				case AppAdminRoleEnv:
+					return "admin", true
+				case AppDeletionWorkerRoleEnv:
+					return worker, worker != ""
+				default:
+					t.Fatalf("unexpected environment input %q", key)
+					return "", false
+				}
+			})
+			if !errors.Is(err, ErrInvalidAppScopeConfig) {
+				t.Fatal("invalid worker role did not fail closed")
+			}
+			if strings.Contains(err.Error(), "secret") {
+				t.Fatal("configuration error leaked a secret")
+			}
+		})
 	}
 }

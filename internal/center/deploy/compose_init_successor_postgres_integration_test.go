@@ -47,6 +47,10 @@ func TestPostgresIntegrationComposeInitializeUpgradesExactV0794Predecessor(t *te
 	}
 	t.Cleanup(func() { cleanupComposeIntegrationDatabase(t, context.Background(), bootstrapPool, config) })
 	openPostgres := composeIntegrationPostgresOpener(baseConfig)
+	deps := composeLaunchIsolatedInitDependencies(openPostgres)
+	initialize := func(ctx context.Context, config ComposeInitConfig) error {
+		return initializeComposeWithDependencies(ctx, config, deps)
+	}
 
 	seedReleasedV0794ComposePredecessor(t, ctx, openPostgres, config)
 	passwordsBefore := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config)
@@ -55,8 +59,8 @@ func TestPostgresIntegrationComposeInitializeUpgradesExactV0794Predecessor(t *te
 		t.Fatalf("load exact predecessor authority state: %v", err)
 	}
 
-	if err := initializeCompose(ctx, config, openPostgres); err != nil {
-		t.Fatalf("upgrade exact v0.79.4 Compose predecessor through production wiring: %v", err)
+	if err := initialize(ctx, config); err != nil {
+		t.Fatalf("upgrade exact v0.79.4 Compose predecessor with isolated launch seam: %v", err)
 	}
 	passwordsAfter := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config)
 	if !reflect.DeepEqual(passwordsAfter, passwordsBefore) {
@@ -75,8 +79,8 @@ func TestPostgresIntegrationComposeInitializeUpgradesExactV0794Predecessor(t *te
 	assertComposeIntegrationAuthorityProof(t, ctx, openPostgres, config)
 
 	beforeRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
-	if err := initializeCompose(ctx, config, openPostgres); err != nil {
-		t.Fatalf("repeat exact Compose successor initialization through production wiring: %v", err)
+	if err := initialize(ctx, config); err != nil {
+		t.Fatalf("repeat exact Compose successor initialization with isolated launch seam: %v", err)
 	}
 	afterRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
 	if afterRepeat != beforeRepeat {
@@ -90,10 +94,11 @@ func TestPostgresIntegrationComposeInitializeUpgradesExactV0794Predecessor(t *te
 func exactComposeIntegrationConfig(t *testing.T, bootstrapPassword string) ComposeInitConfig {
 	t.Helper()
 	config, err := NewComposeInitConfig(ComposeInitPasswords{
-		Bootstrap:     bootstrapPassword,
-		Runtime:       "exact-runtime-secret",
-		PlatformAdmin: "exact-admin-secret",
-		Migrator:      "exact-migrator-secret",
+		Bootstrap:      bootstrapPassword,
+		Runtime:        "exact-runtime-secret",
+		PlatformAdmin:  "exact-admin-secret",
+		DeletionWorker: "exact-deletion-worker-secret",
+		Migrator:       "exact-migrator-secret",
 	})
 	if err != nil {
 		t.Fatalf("build exact Compose integration config: %v", err)
@@ -109,10 +114,10 @@ func exactComposeIntegrationConfig(t *testing.T, bootstrapPassword string) Compo
 
 func composeIntegrationPostgresOpener(baseConfig *pgxpool.Config) func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error) {
 	return func(ctx context.Context, endpoint composePostgresEndpoint) (*pgxpool.Pool, error) {
-		config := baseConfig.Copy()
-		config.ConnConfig.Database = endpoint.Database
-		config.ConnConfig.User = endpoint.Role
-		config.ConnConfig.Password = endpoint.Password
+		config, err := composeIntegrationEndpointConfig(baseConfig, endpoint)
+		if err != nil {
+			return nil, err
+		}
 		pool, err := pgxpool.NewWithConfig(ctx, config)
 		if err != nil {
 			return nil, err
@@ -151,10 +156,11 @@ func seedReleasedV0794ComposePredecessor(
 		AuthorityRole: config.AuthorityRole,
 		Roles:         config.Roles,
 		Passwords: platformmigrate.ComposeRolePasswords{
-			Runtime:       config.Passwords.Runtime,
-			PlatformAdmin: config.Passwords.PlatformAdmin,
-			Migrator:      config.Passwords.Migrator,
-			Authority:     authorityState.DatabasePassword(),
+			Runtime:        config.Passwords.Runtime,
+			PlatformAdmin:  config.Passwords.PlatformAdmin,
+			DeletionWorker: config.Passwords.DeletionWorker,
+			Migrator:       config.Passwords.Migrator,
+			Authority:      authorityState.DatabasePassword(),
 		},
 	}); err != nil {
 		bootstrapPool.Close()

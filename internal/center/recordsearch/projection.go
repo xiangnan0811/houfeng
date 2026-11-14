@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/records"
 )
 
@@ -78,7 +79,7 @@ type DocumentFacts struct {
 }
 
 func NormalizeDocumentFacts(values DocumentFactValues) (DocumentFacts, error) {
-	if !records.ValidRecordRootID(values.RecordID) {
+	if !recordidentity.IsValid(values.RecordID) {
 		return DocumentFacts{}, fmt.Errorf("%w: record id", ErrInvalidProjection)
 	}
 	if !records.ValidRevisionID(values.CurrentRevisionID) {

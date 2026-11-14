@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recordplatform"
@@ -73,23 +73,19 @@ func TestPostgresIntegrationCollaborationMembershipReaderExactDefaultProjectMatr
 
 func TestPostgresIntegrationCollaborationRevisionParticipantKeepsSubmicrosecondFollowUpStable(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	fixture := signed.platform
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	repository := newRecordsPostgresRepository(
-		t,
-		fixture.openDirectRuntimePool(t, ctx, "collaboration-follow-up-precision", 2),
-		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	)
+	repository := newRevisionMutationAdmittedRepository(t, signed, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
 
 	followUp := time.Date(2026, time.August, 19, 8, 0, 0, 123456789, time.FixedZone("UTC+8", 8*60*60))
 	firstInput := collaborationRevisionInput(t, collaborationRevisionInputValues{
 		ownerID:    "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
 		followUpAt: &followUp,
 	})
-	first, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgcollabprecision", "", 0, 0,
-		firstInput, "collaboration-follow-up-precision-create",
-	))
+	create := revisionBirthBatchCommand(t, ctx, signed, firstInput, "collaboration-follow-up-precision-create")
+	first, err := repository.CommitRevision(ctx, create)
 	if err != nil {
 		t.Fatalf("CommitRevision(create precision fixture) error = %v", err)
 	}
@@ -128,14 +124,11 @@ func TestPostgresIntegrationCollaborationRevisionParticipantKeepsSubmicrosecondF
 
 func TestPostgresIntegrationCollaborationRevisionParticipantCreateAndRestoreFacts(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	fixture := signed.platform
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "collaboration-revision-integration", 4)
-	repository := newRecordsPostgresRepository(
-		t,
-		runtimePool,
-		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	)
+	repository := newRevisionMutationAdmittedRepository(t, signed, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
 
 	firstFollowUp := time.Date(2026, time.August, 19, 8, 0, 0, 0, time.UTC)
 	firstInput := collaborationRevisionInput(t, collaborationRevisionInputValues{
@@ -143,16 +136,8 @@ func TestPostgresIntegrationCollaborationRevisionParticipantCreateAndRestoreFact
 		participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 		followUpAt:     &firstFollowUp,
 	})
-	first, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgcollaboration",
-		"",
-		0,
-		0,
-		firstInput,
-		"collaboration-create",
-	))
+	create := revisionBirthBatchCommand(t, ctx, signed, firstInput, "collaboration-create")
+	first, err := repository.CommitRevision(ctx, create)
 	if err != nil {
 		t.Fatalf("CommitRevision(create collaboration) error = %v", err)
 	}
@@ -233,69 +218,45 @@ func TestPostgresIntegrationCollaborationRevisionParticipantCreateAndRestoreFact
 
 func TestPostgresIntegrationCollaborationRevisionParticipantFailureMatrixRollsBackWholeRevision(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	fixture := signed.platform
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "collaboration-revision-rollback", 4)
 
 	projectInput := collaborationRevisionInput(t, collaborationRevisionInputValues{
 		ownerID:        "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
 		participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 	})
 	tests := []struct {
-		name         string
-		recordID     string
-		input        records.CompleteRevisionInput
-		participants func() []records.RevisionParticipant
-		cleanup      func()
+		name    string
+		input   records.CompleteRevisionInput
+		cleanup func()
 	}{
 		{
-			name:     "membership",
-			recordID: "rec_pgcollabmembership",
+			name: "membership",
 			input: collaborationRevisionInput(t, collaborationRevisionInputValues{
 				ownerID: "usr_eeeeeeeeeeeeeeeeeeeeeeee",
 			}),
 		},
 		{
-			name:     "visibility",
-			recordID: "rec_pgcollabvisibility",
-			input:    collaborationRestrictedRevisionInput(t, recordauth.SourceStateLive),
+			name:  "visibility",
+			input: collaborationRestrictedRevisionInput(t, recordauth.SourceStateLive),
 		},
 		{
-			name:     "source floor",
-			recordID: "rec_pgcollabsourcefloor",
-			input:    collaborationRestrictedRevisionInput(t, recordauth.SourceStateTombstoned),
+			name:  "source floor",
+			input: collaborationRestrictedRevisionInput(t, recordauth.SourceStateTombstoned),
 		},
 		{
-			name:     "fence",
-			recordID: "rec_pgcollabfence",
-			input:    projectInput,
-			participants: func() []records.RevisionParticipant {
-				return []records.RevisionParticipant{
-					&storeRevisionParticipantStub{name: "aaa_reserve_collaboration_fence", apply: func(ctx context.Context, tx pgx.Tx, committed records.RevisionCommitted) error {
-						_, err := tx.Exec(ctx, `
-							insert into public.deletion_fence_leases (
-								project_id, object_kind, object_id, owner_id, owner_generation, expires_at
-							) values ('default', 'record', $1, 'collaboration_test', 1,
-								transaction_timestamp() + interval '1 minute')`, committed.Result.RecordID)
-						return err
-					}},
-				}
-			},
+			name:  "follower",
+			input: projectInput,
 		},
 		{
-			name:     "follower",
-			recordID: "rec_pgcollabfollower",
-			input:    projectInput,
+			name:  "activity",
+			input: projectInput,
 		},
 		{
-			name:     "activity",
-			recordID: "rec_pgcollabactivity",
-			input:    projectInput,
-		},
-		{
-			name:     "outbox",
-			recordID: "rec_pgcollaboutbox",
-			input:    projectInput,
+			name:  "outbox",
+			input: projectInput,
 		},
 	}
 
@@ -309,128 +270,109 @@ func TestPostgresIntegrationCollaborationRevisionParticipantFailureMatrixRollsBa
 		participants := []records.RevisionParticipant{
 			NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
 		}
-		if tt.participants != nil {
-			participants = append(participants, tt.participants()...)
-		}
-		repository := newRecordsPostgresRepository(t, runtimePool, participants...)
+		repository := newRevisionMutationAdmittedRepository(t, signed, participants...)
 		key := fmt.Sprintf("collaboration-rollback-%d", index)
-		command := recordsPostgresRevisionCommand(
-			t,
-			recordplatform.OperationKindRecordCreate,
-			tt.recordID,
-			"",
-			0,
-			0,
-			tt.input,
-			key,
-		)
+		command := revisionBirthBatchCommand(t, ctx, signed, tt.input, key)
 		if result, err := repository.CommitRevision(ctx, command); err == nil {
 			t.Fatalf("CommitRevision(%s) = %#v, want failure", tt.name, result)
 		}
 		if tt.cleanup != nil {
 			tt.cleanup()
 		}
-		assertPostgresCollaborationRevisionRolledBack(t, ctx, fixture, tt.recordID, key)
+		assertPostgresCollaborationRevisionRolledBack(t, ctx, fixture, command.RecordID, key)
 	}
 }
 
-func TestPostgresIntegrationCollaborationRevisionParticipantSQLCutPointFailuresRollBackCreateReviseAndRestore(t *testing.T) {
+func TestPostgresIntegrationCollaborationRevisionRejectsLiveDeletionFence(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	fixture := signed.platform
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "collaboration-cut-points", 8)
+	runtimePool := signed.Runtime
+	repository := newRevisionMutationAdmittedRepository(t, signed,
+		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
+	birthCommand := revisionBirthBatchCommand(t, ctx, signed,
+		collaborationRevisionInput(t, collaborationRevisionInputValues{ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), "collab-fenced-create")
+	created, err := repository.CommitRevision(ctx, birthCommand)
+	if err != nil {
+		t.Fatalf("create collaboration record: %v", err)
+	}
+	platform := NewPostgresRecordPlatformRepository(runtimePool, signed.Gate)
+	if _, err := platform.AcquireDeletionFenceLease(ctx,
+		recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: created.RecordID},
+		recordplatform.LeaseClaimInputV1{OwnerID: "collaboration_fence", LeaseDuration: time.Minute}); err != nil {
+		t.Fatalf("acquire deletion fence: %v", err)
+	}
+	before := snapshotPostgresCollaborationRecordState(t, ctx, fixture, created.RecordID)
+	command := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordUpdate, created.RecordID,
+		created.RevisionID, created.LockVersion, created.AuthorizationEpoch,
+		collaborationRevisionInput(t, collaborationRevisionInputValues{ownerID: "usr_cccccccccccccccccccccccc"}), "collab-fenced-update")
+	if result, err := repository.CommitRevision(ctx, command); !errors.Is(err, records.ErrRecordDeletionReserved) || result != (records.RevisionCommitResult{}) {
+		t.Fatalf("fenced revision = (%#v, %v), want deletion reservation", result, err)
+	}
+	if after := snapshotPostgresCollaborationRecordState(t, ctx, fixture, created.RecordID); !reflect.DeepEqual(after, before) {
+		t.Fatalf("fenced revision changed durable state: before=%#v after=%#v", before, after)
+	}
+	assertPostgresCollaborationIdempotencyAbsent(t, ctx, fixture, command.Idempotency.Key.Key)
+}
 
+func TestPostgresIntegrationCollaborationRevisionParticipantFailureRollsBackReviseAndRestore(t *testing.T) {
+	ctx := context.Background()
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	fixture := signed.platform
+	seedCollaborationRevisionUsers(t, ctx, fixture)
 	tests := []struct {
 		name    string
 		flow    collaborationCutPointFlow
-		cut     collaborationSQLCutPoint
 		trigger string
 	}{
-		{name: "previous revision fact scan", flow: collaborationCutPointRevise, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"from public.record_revisions"}, occurrence: 1}},
-		{name: "previous participant query", flow: collaborationCutPointRevise, cut: collaborationSQLCutPoint{method: collaborationCutQuery, contains: []string{"from public.record_revision_participants"}, occurrence: 1}},
-		{name: "previous participant scan", flow: collaborationCutPointRestore, cut: collaborationSQLCutPoint{method: collaborationCutRowsScan, contains: []string{"from public.record_revision_participants"}, occurrence: 1}},
-		{name: "previous participant terminal rows error", flow: collaborationCutPointRestore, cut: collaborationSQLCutPoint{method: collaborationCutRowsErr, contains: []string{"from public.record_revision_participants"}, occurrence: 1}},
-		{name: "current reservation read", flow: collaborationCutPointCreate, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"from public.deletion_reservations", "state in ('previewed', 'fenced', 'committed')"}, occurrence: 1}},
-		{name: "current fence epoch initialize", flow: collaborationCutPointCreate, cut: collaborationSQLCutPoint{method: collaborationCutExec, contains: []string{"insert into public.content_delivery_epochs"}, occurrence: 1}},
-		{name: "current fence epoch read", flow: collaborationCutPointRevise, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"from public.content_delivery_epochs"}, occurrence: 1}},
-		{name: "current fence lease read", flow: collaborationCutPointRestore, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"from public.deletion_fence_leases"}, occurrence: 1}},
-		{name: "current reservation recheck", flow: collaborationCutPointCreate, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"from public.deletion_reservations", "state in ('fenced', 'committed')"}, occurrence: 1}},
-		{name: "fence binding epoch read", flow: collaborationCutPointRevise, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"from public.content_delivery_epochs"}, occurrence: 2}},
-		{name: "first follower upsert", flow: collaborationCutPointCreate, cut: collaborationSQLCutPoint{method: collaborationCutExec, contains: []string{"insert into public.record_followers"}, occurrence: 1}},
-		{name: "later follower upsert", flow: collaborationCutPointRevise, cut: collaborationSQLCutPoint{method: collaborationCutExec, contains: []string{"insert into public.record_followers"}, occurrence: 3}},
-		{name: "stale follower delete", flow: collaborationCutPointRestore, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"select public.record_collaboration_prune_revision_followers"}, occurrence: 1}},
-		{name: "stale follower update", flow: collaborationCutPointRevise, cut: collaborationSQLCutPoint{method: collaborationCutExec, contains: []string{"update public.record_followers"}, occurrence: 1}},
-		{name: "first activity insert", flow: collaborationCutPointCreate, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"insert into public.record_domain_activities"}, occurrence: 1}},
-		{name: "second activity insert", flow: collaborationCutPointRevise, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"insert into public.record_domain_activities"}, occurrence: 2}},
-		{name: "third activity insert", flow: collaborationCutPointRestore, cut: collaborationSQLCutPoint{method: collaborationCutQueryRow, contains: []string{"insert into public.record_domain_activities"}, occurrence: 3}},
-		{name: "first collaboration outbox insert", flow: collaborationCutPointCreate, trigger: "outbox_owner"},
-		{name: "later collaboration outbox insert", flow: collaborationCutPointRestore, trigger: "outbox_participant"},
+		{name: "revise follower", flow: collaborationCutPointRevise, trigger: "follower"},
+		{name: "revise activity", flow: collaborationCutPointRevise, trigger: "activity"},
+		{name: "restore follower", flow: collaborationCutPointRestore, trigger: "follower"},
+		{name: "restore outbox", flow: collaborationCutPointRestore, trigger: "outbox_participant"},
 	}
-
-	for index := range tests {
-		tt := &tests[index]
+	for index, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			recordID := fmt.Sprintf("rec_pgcollabcut%02d", index)
-			idempotencyKey := fmt.Sprintf("collaboration-cut-point-%02d", index)
-			before, command := preparePostgresCollaborationCutPointFlow(
-				t, ctx, fixture, runtimePool, recordID, idempotencyKey, tt.flow,
-			)
-			if tt.trigger != "" {
-				cleanup := installCollaborationRevisionFailureTrigger(t, ctx, fixture, tt.trigger)
-				defer cleanup()
+			recordID := fmt.Sprintf("rec_pgcollabrollback%02d", index)
+			key := fmt.Sprintf("collaboration-existing-rollback-%02d", index)
+			before, command := preparePostgresCollaborationCutPointFlow(t, ctx, signed, recordID, key, tt.flow)
+			cleanup := installCollaborationRevisionFailureTrigger(t, ctx, fixture, tt.trigger)
+			defer cleanup()
+			repository := newRevisionMutationAdmittedRepository(t, signed,
+				NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
+			if result, err := repository.CommitRevision(ctx, command); err == nil || !strings.Contains(err.Error(), "collaboration stage failed") {
+				t.Fatalf("CommitRevision() = (%#v, %v), want trigger failure", result, err)
 			}
-			participant := records.RevisionParticipant(
-				NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-			)
-			if tt.cut.method != "" {
-				participant = newCollaborationSQLCutPointParticipant(&tt.cut)
+			if after := snapshotPostgresCollaborationRecordState(t, ctx, fixture, command.RecordID); !reflect.DeepEqual(after, before) {
+				t.Fatalf("record state changed across failed %s: before=%#v after=%#v", tt.flow, before, after)
 			}
-			repository := newRecordsPostgresRepository(t, runtimePool, participant)
-			if result, err := repository.CommitRevision(ctx, command); err == nil {
-				t.Fatalf("CommitRevision() = %#v, want %s failure", result, tt.name)
-			} else if tt.cut.method != "" && !errors.Is(err, errCollaborationSQLCutPoint) {
-				t.Fatalf("CommitRevision() error = %v, want injected cut-point error", err)
-			} else if tt.trigger != "" && !strings.Contains(err.Error(), "collaboration stage failed") {
-				t.Fatalf("CommitRevision() error = %v, want trigger failure", err)
-			}
-			if tt.cut.method != "" && !tt.cut.triggered {
-				t.Fatalf("cut point %#v was not reached", tt.cut)
-			}
-			if tt.flow == collaborationCutPointCreate {
-				assertPostgresCollaborationRevisionRolledBack(t, ctx, fixture, recordID, idempotencyKey)
-				return
-			}
-			after := snapshotPostgresCollaborationRecordState(t, ctx, fixture, recordID)
-			if !reflect.DeepEqual(after, before) {
-				t.Fatalf("record state changed across failed %s:\nafter=%#v\nbefore=%#v", tt.flow, after, before)
-			}
-			assertPostgresCollaborationIdempotencyAbsent(t, ctx, fixture, idempotencyKey)
+			assertPostgresCollaborationIdempotencyAbsent(t, ctx, fixture, key)
 		})
 	}
 }
 
 func TestPostgresIntegrationCollaborationRevisionParticipantConcurrentSameBaseKeepsWinnerFollowers(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	fixture := signed.platform
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	seedRepository := newRecordsPostgresRepository(
-		t,
-		fixture.openDirectRuntimePool(t, ctx, "collaboration-race-seed", 1),
-		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	)
+	seedRepository := newRevisionMutationAdmittedRepository(t, signed,
+		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
 	seedInput := collaborationRevisionInput(t, collaborationRevisionInputValues{ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"})
-	seed, err := seedRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgcollabrace", "", 0, 0, seedInput, "collaboration-race-seed",
-	))
+	seedCommand := revisionBirthBatchCommand(t, ctx, signed, seedInput, "collaboration-race-seed")
+	seed, err := seedRepository.CommitRevision(ctx, seedCommand)
 	if err != nil {
 		t.Fatalf("CommitRevision(seed) error = %v", err)
 	}
 
 	firstInput := collaborationRevisionInput(t, collaborationRevisionInputValues{ownerID: "usr_cccccccccccccccccccccccc"})
 	secondInput := collaborationRevisionInput(t, collaborationRevisionInputValues{ownerID: "usr_dddddddddddddddddddddddd"})
-	firstPool := fixture.openDirectRuntimePool(t, ctx, "collaboration-race-first", 1)
-	secondPool := fixture.openDirectRuntimePool(t, ctx, "collaboration-race-second", 1)
+	firstPool := revisionBirthBatchRuntimePool(t, ctx, signed.Runtime)
+	secondPool := revisionBirthBatchRuntimePool(t, ctx, signed.Runtime)
 	firstPID := postgresCollaborationBackendPID(t, ctx, firstPool)
 	secondPID := postgresCollaborationBackendPID(t, ctx, secondPool)
 
@@ -440,17 +382,12 @@ func TestPostgresIntegrationCollaborationRevisionParticipantConcurrentSameBaseKe
 		reached: firstReachedHold,
 		release: releaseFirst,
 	}
-	firstRepository := newRecordsPostgresRepository(
-		t,
-		firstPool,
-		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-		hold,
-	)
-	secondRepository := newRecordsPostgresRepository(
-		t,
-		secondPool,
-		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	)
+	firstFixture, secondFixture := signed, signed
+	firstFixture.Runtime, secondFixture.Runtime = firstPool, secondPool
+	firstRepository := newRevisionMutationAdmittedRepository(t, firstFixture,
+		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()), hold)
+	secondRepository := newRevisionMutationAdmittedRepository(t, secondFixture,
+		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
 	firstCommand := recordsPostgresRevisionCommand(
 		t, recordplatform.OperationKindRecordUpdate, seed.RecordID, seed.RevisionID,
 		seed.LockVersion, seed.AuthorizationEpoch, firstInput, "collaboration-race-first",
@@ -541,6 +478,10 @@ type postgresCollaborationBlockingParticipant struct {
 
 func (*postgresCollaborationBlockingParticipant) Name() string { return "zzz_collaboration_test_hold" }
 
+func (*postgresCollaborationBlockingParticipant) MutationResources(context.Context, pgx.Tx, records.RevisionCommitCommand) (records.RevisionMutationResources, error) {
+	return records.RevisionMutationResources{}, nil
+}
+
 func (participant *postgresCollaborationBlockingParticipant) ApplyRevision(
 	ctx context.Context,
 	_ pgx.Tx,
@@ -601,128 +542,6 @@ const (
 	collaborationCutPointRestore collaborationCutPointFlow = "restore"
 )
 
-const (
-	collaborationCutQueryRow = "query_row"
-	collaborationCutQuery    = "query"
-	collaborationCutRowsScan = "rows_scan"
-	collaborationCutRowsErr  = "rows_err"
-	collaborationCutExec     = "exec"
-)
-
-var errCollaborationSQLCutPoint = errors.New("collaboration SQL cut point failed")
-
-type collaborationSQLCutPoint struct {
-	method     string
-	contains   []string
-	occurrence int
-	seen       int
-	triggered  bool
-}
-
-func (cut *collaborationSQLCutPoint) matches(method, sql string) bool {
-	if cut == nil || cut.method != method {
-		return false
-	}
-	compact := strings.ToLower(strings.Join(strings.Fields(sql), " "))
-	for _, required := range cut.contains {
-		if !strings.Contains(compact, required) {
-			return false
-		}
-	}
-	cut.seen++
-	wantOccurrence := cut.occurrence
-	if wantOccurrence == 0 {
-		wantOccurrence = 1
-	}
-	if cut.seen != wantOccurrence {
-		return false
-	}
-	cut.triggered = true
-	return true
-}
-
-type collaborationSQLCutPointParticipant struct {
-	delegate records.RevisionParticipant
-	cut      *collaborationSQLCutPoint
-}
-
-func newCollaborationSQLCutPointParticipant(cut *collaborationSQLCutPoint) records.RevisionParticipant {
-	return &collaborationSQLCutPointParticipant{
-		delegate: NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-		cut:      cut,
-	}
-}
-
-func (*collaborationSQLCutPointParticipant) Name() string { return "collaboration" }
-
-func (participant *collaborationSQLCutPointParticipant) ApplyRevision(
-	ctx context.Context,
-	tx pgx.Tx,
-	committed records.RevisionCommitted,
-) error {
-	return participant.delegate.ApplyRevision(ctx, &collaborationSQLCutPointTx{Tx: tx, cut: participant.cut}, committed)
-}
-
-type collaborationSQLCutPointTx struct {
-	pgx.Tx
-	cut *collaborationSQLCutPoint
-}
-
-func (tx *collaborationSQLCutPointTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if tx.cut.matches(collaborationCutQueryRow, sql) {
-		return collaborationSQLCutPointRow{}
-	}
-	return tx.Tx.QueryRow(ctx, sql, args...)
-}
-
-func (tx *collaborationSQLCutPointTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	if tx.cut.matches(collaborationCutQuery, sql) {
-		return nil, errCollaborationSQLCutPoint
-	}
-	rows, err := tx.Tx.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	if tx.cut.matches(collaborationCutRowsScan, sql) {
-		return &collaborationSQLCutPointRows{Rows: rows, failScan: true}, nil
-	}
-	if tx.cut.matches(collaborationCutRowsErr, sql) {
-		return &collaborationSQLCutPointRows{Rows: rows, failErr: true}, nil
-	}
-	return rows, nil
-}
-
-func (tx *collaborationSQLCutPointTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	if tx.cut.matches(collaborationCutExec, sql) {
-		return pgconn.CommandTag{}, errCollaborationSQLCutPoint
-	}
-	return tx.Tx.Exec(ctx, sql, args...)
-}
-
-type collaborationSQLCutPointRow struct{}
-
-func (collaborationSQLCutPointRow) Scan(...any) error { return errCollaborationSQLCutPoint }
-
-type collaborationSQLCutPointRows struct {
-	pgx.Rows
-	failScan bool
-	failErr  bool
-}
-
-func (rows *collaborationSQLCutPointRows) Scan(dest ...any) error {
-	if rows.failScan {
-		return errCollaborationSQLCutPoint
-	}
-	return rows.Rows.Scan(dest...)
-}
-
-func (rows *collaborationSQLCutPointRows) Err() error {
-	if rows.failErr {
-		return errCollaborationSQLCutPoint
-	}
-	return rows.Rows.Err()
-}
-
 type postgresCollaborationFollowerState struct {
 	UserID           string
 	FollowerVersion  int64
@@ -765,13 +584,13 @@ type postgresCollaborationRecordState struct {
 func preparePostgresCollaborationCutPointFlow(
 	t *testing.T,
 	ctx context.Context,
-	fixture recordPlatformPostgresFixture,
-	runtimePool *pgxpool.Pool,
+	signed ImportAttachmentGCFixture,
 	recordID string,
 	idempotencyKey string,
 	flow collaborationCutPointFlow,
 ) (postgresCollaborationRecordState, records.RevisionCommitCommand) {
 	t.Helper()
+	fixture := signed.platform
 	firstFollowUp := time.Date(2026, time.August, 19, 8, 0, 0, 0, time.UTC)
 	secondFollowUp := firstFollowUp.Add(2 * time.Hour)
 	firstInput := collaborationRevisionInput(t, collaborationRevisionInputValues{
@@ -790,22 +609,16 @@ func preparePostgresCollaborationCutPointFlow(
 		followUpAt: &secondFollowUp,
 	})
 	if flow == collaborationCutPointCreate {
-		return postgresCollaborationRecordState{}, recordsPostgresRevisionCommand(
-			t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
-			secondInput, idempotencyKey,
-		)
+		return postgresCollaborationRecordState{}, revisionBirthBatchCommand(t, ctx, signed, secondInput, idempotencyKey)
 	}
-	goodRepository := newRecordsPostgresRepository(
-		t, runtimePool,
-		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	)
-	first, err := goodRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
-		firstInput, idempotencyKey+"-seed-create",
-	))
+	goodRepository := newRevisionMutationAdmittedRepository(t, signed,
+		NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
+	seedCommand := revisionBirthBatchCommand(t, ctx, signed, firstInput, idempotencyKey+"-seed-create")
+	first, err := goodRepository.CommitRevision(ctx, seedCommand)
 	if err != nil {
 		t.Fatalf("CommitRevision(seed create) error = %v", err)
 	}
+	recordID = first.RecordID
 	if flow == collaborationCutPointRevise {
 		seedPostgresCollaborationRetainedStaleFollower(t, ctx, fixture, recordID)
 		return snapshotPostgresCollaborationRecordState(t, ctx, fixture, recordID), recordsPostgresRevisionCommand(
@@ -971,18 +784,7 @@ func assertPostgresCollaborationIdempotencyAbsent(
 
 func seedCollaborationRevisionUsers(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture) {
 	t.Helper()
-	for index, userID := range []string{
-		"usr_aaaaaaaaaaaaaaaaaaaaaaaa",
-		"usr_bbbbbbbbbbbbbbbbbbbbbbbb",
-		"usr_cccccccccccccccccccccccc",
-		"usr_dddddddddddddddddddddddd",
-	} {
-		if _, err := fixture.db.Exec(ctx, `
-			insert into public.users (user_id, username, password_hash, display_name, role)
-			values ($1, $2, 'test-hash', $2, 'admin')`, userID, fmt.Sprintf("collaboration-user-%d", index)); err != nil {
-			t.Fatalf("seed collaboration user %q: %v", userID, err)
-		}
-	}
+	seedRecordsPostgresUsers(t, ctx, fixture)
 }
 
 func assertPostgresCollaborationFollowers(

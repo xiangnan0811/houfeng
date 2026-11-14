@@ -30,6 +30,8 @@ type RouterOptions struct {
 	RecordInboxHandler                            stdhttp.Handler
 	RecordDraftsHandler                           stdhttp.Handler
 	RecordDeletionsHandler                        stdhttp.Handler
+	RecordClientCleanupHandler                    stdhttp.Handler
+	RecordClientCleanupReconcileHandler           stdhttp.Handler
 	RecordPortabilityHandler                      stdhttp.Handler
 	EvidenceHandler                               stdhttp.Handler
 	AttachmentUploadsHandler                      stdhttp.Handler
@@ -207,6 +209,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.RecordsEnabled && opts.RecordSearchHandler != nil {
 		mux.Handle("/api/records/search", protect(opts.RecordSearchHandler))
+	}
+	if opts.RecordsEnabled && opts.RecordClientCleanupHandler != nil {
+		mux.Handle("/api/records/client-cleanup", protect(opts.RecordClientCleanupHandler))
+	}
+	if opts.RecordsEnabled && opts.RecordClientCleanupReconcileHandler != nil {
+		mux.Handle("/api/records/client-cleanup/reconcile", protect(opts.RecordClientCleanupReconcileHandler))
 	}
 	if opts.RecordsEnabled && opts.SubjectActivityHandler != nil {
 		mux.Handle("/api/subjects/{type}/{id}/activity", protect(opts.SubjectActivityHandler))

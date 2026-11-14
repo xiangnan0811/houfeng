@@ -1,3 +1,4 @@
+import { isRecordId } from '../../../lib/recordIdentity'
 import type {
   ComparisonAlignment,
   ComparisonKindRef,
@@ -220,7 +221,7 @@ function parseFixedItems(value: unknown): ComparisonURLFixedItem[] | null {
       items.push({ snapshot_id: snapshotID })
       continue
     }
-    if (!snapshotID && recordID && revisionID) {
+    if (!snapshotID && isRecordId(recordID) && revisionID) {
       items.push(snapshotIDs.length
         ? { record_id: recordID, revision_id: revisionID, snapshot_ids: snapshotIDs }
         : { record_id: recordID, revision_id: revisionID })
@@ -372,7 +373,7 @@ function normalizeComparisonFixedItem(item: ComparisonURLFixedItem): ComparisonU
   }
   const recordID = item.record_id.trim()
   const revisionID = item.revision_id.trim()
-  if (!recordID || !revisionID) return null
+  if (!isRecordId(recordID) || !revisionID) return null
   const snapshotIDs = uniqueTrimmedIDs(item.snapshot_ids)
   return snapshotIDs.length
     ? { record_id: recordID, revision_id: revisionID, snapshot_ids: snapshotIDs }

@@ -1,13 +1,14 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { createContext, useContext, useEffect, type ReactNode } from 'react'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../lib/apiRequest'
 import * as recordsApi from '../../../lib/recordsApi'
 import type {
   ComparisonCandidateResponse,
   ComparisonEvaluateResponse,
+  RecordAllocation,
   RecordDraft,
   RecordMutationResult,
 } from '../../../lib/types'
@@ -19,6 +20,19 @@ import {
   type ComparisonURLState,
 } from './comparisonQueryState'
 import { useComparisonWorkbench, type ComparisonWorkbenchCommands, type ComparisonWorkbenchState } from './useComparisonWorkbench'
+import type * as DraftBuffers from '../draftBuffer'
+import { memoryDraftBufferStore } from '../draftBuffer'
+import { recordAllocationFixture } from '../testFixtures'
+import { applyRecordClientCleanup, type RecordCleanupAck } from '../../../lib/recordClientCleanup'
+
+vi.mock('../draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof DraftBuffers>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
+
+const withResolvers = <T,>() => (Promise as PromiseConstructor & {
+  withResolvers: () => { promise: Promise<T>; resolve: (value: T) => void }
+}).withResolvers()
 
 const CANDIDATE: ComparisonURLState = {
   version: COMPARISON_URL_VERSION,
@@ -70,6 +84,7 @@ const comparisonResponse: ComparisonEvaluateResponse = {
   items: [
     {
       snapshot_id: 'evs_a',
+      source_record_id: 'rec_a',
       canonical_hash: '11'.repeat(32),
       kind: 'monitoring.host',
       schema_version: 1,
@@ -79,6 +94,7 @@ const comparisonResponse: ComparisonEvaluateResponse = {
     },
     {
       snapshot_id: 'evs_b',
+      source_record_id: 'rec_b',
       canonical_hash: '22'.repeat(32),
       kind: 'monitoring.host',
       schema_version: 1,
@@ -100,10 +116,12 @@ const comparisonResponse: ComparisonEvaluateResponse = {
   },
 }
 
+// Every new comparison target comes from the reservation endpoint.
+const SAVED_RECORD_ID = `rec2_8${'0'.repeat(30)}5`
 const saveDraft = {
   draft_id: 'rdf_compare',
   etag: 'rdt1_compare',
-  record_id: 'rec_comparisonsave',
+  record_id: SAVED_RECORD_ID,
   payload: {} as RecordDraft['payload'],
   version: 1,
   created_at: '2026-08-20T10:00:00Z',
@@ -112,7 +130,7 @@ const saveDraft = {
 } as RecordDraft
 
 const savedRecord: RecordMutationResult = {
-  record_id: 'rec_comparisonsave',
+  record_id: SAVED_RECORD_ID,
   revision_id: 'rrv_comparisonsave',
   revision_no: 1,
   lock_version: 1,
@@ -185,6 +203,12 @@ function compareURL(state: ComparisonURLState): string {
 }
 
 describe('useComparisonWorkbench', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    vi.spyOn(recordsApi, 'createRecordAllocation').mockImplementation(async (input, key) => recordAllocationFixture('save', {
+      purpose: input.purpose, request_digest: input.request_digest, idempotency_key: key, record_id: SAVED_RECORD_ID,
+    }))
+  })
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -315,7 +339,7 @@ describe('useComparisonWorkbench', () => {
     const draft = {
       draft_id: 'rdf_compare',
       etag: 'rdt1_compare',
-      record_id: 'rec_comparisonsave',
+      record_id: SAVED_RECORD_ID,
       payload: {} as RecordDraft['payload'],
       version: 1,
       created_at: '2026-08-20T10:00:00Z',
@@ -323,7 +347,7 @@ describe('useComparisonWorkbench', () => {
       expires_at: '2026-11-01T10:00:00Z',
     } as RecordDraft
     const created: RecordMutationResult = {
-      record_id: 'rec_comparisonsave',
+      record_id: SAVED_RECORD_ID,
       revision_id: 'rrv_comparisonsave',
       revision_no: 1,
       lock_version: 1,
@@ -334,12 +358,16 @@ describe('useComparisonWorkbench', () => {
       committed_at: '2026-08-20T10:00:00Z',
     }
     const createDraft = vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(draft)
-    const save = vi.spyOn(recordsApi, 'saveComparisonRecord').mockResolvedValue(created)
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord').mockImplementation(async (body, key) => {
+      const raw = sessionStorage.getItem(`houfeng.comparison-save/usr_1/${comparisonResponse.digest}`)
+      expect(raw).not.toBeNull()
+      expect(JSON.parse(raw!)).toMatchObject({ idempotencyKey: key, request: body })
+      return created
+    })
     const publish = vi.spyOn(recordsApi, 'createRecord')
     const { result } = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_comparisonsave',
         newIdempotencyKey: () => 'comparison-save-key',
       }),
       { wrapper: wrapper(compareURL(FIXED)) },
@@ -370,15 +398,47 @@ describe('useComparisonWorkbench', () => {
     })
     expect(save).toHaveBeenCalledTimes(2)
     expect(save.mock.calls[0]?.[0]).toEqual({
-      record_id: 'rec_comparisonsave',
+      record_id: SAVED_RECORD_ID,
       draft_id: draft.draft_id,
       draft_etag: draft.etag,
       comparison_intent: 'cmp1.valid.payload.mac',
+      allocation: expect.objectContaining({ record_id: SAVED_RECORD_ID, purpose: 'comparison_save' }),
     })
     expect(save.mock.calls[0]?.[1]).toBe('comparison-save-key')
-    expect(save.mock.calls[1]?.[0].record_id).toBe('rec_comparisonsave')
+    // The replay sends the stored body: no second reservation or draft.
+    expect(save.mock.calls[1]?.[0]).toEqual(save.mock.calls[0]?.[0])
     expect(save.mock.calls[1]?.[1]).toBe('comparison-save-key')
-    expect(result.current.state.savedRecordId).toBe('rec_comparisonsave')
+    expect(createDraft).toHaveBeenCalledTimes(1)
+    expect(recordsApi.createRecordAllocation).toHaveBeenCalledTimes(1)
+    expect(result.current.state.savedRecordId).toBe(SAVED_RECORD_ID)
+  })
+
+  it('uses a fresh allocation and publication key for an edited conclusion after success', async () => {
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    const allocate = vi.mocked(recordsApi.createRecordAllocation)
+    allocate.mockImplementation(async (input, key) => recordAllocationFixture(key, {
+      purpose: input.purpose, request_digest: input.request_digest, idempotency_key: key,
+    }))
+    const firstID = recordAllocationFixture('edited-1').record_id
+    const secondID = recordAllocationFixture('edited-3').record_id
+    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord')
+      .mockResolvedValueOnce({ ...savedRecord, record_id: firstID })
+      .mockResolvedValueOnce({ ...savedRecord, record_id: secondID })
+    let sequence = 0
+    const { result } = renderHook(() => useComparisonWorkbench({ userId: 'usr_1', newIdempotencyKey: () => `edited-${++sequence}` }), {
+      wrapper: wrapper(compareURL(FIXED)),
+    })
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    act(() => result.current.commands.setConclusion('first conclusion'))
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.savedRecordId).toBe(firstID)
+    act(() => result.current.commands.setConclusion('revised conclusion'))
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.savedRecordId).toBe(secondID)
+    expect(allocate.mock.calls.map((call) => call[1])).toEqual(['edited-1', 'edited-3'])
+    expect(save.mock.calls.map((call) => call[1])).toEqual(['edited-2', 'edited-4'])
+    expect(save.mock.calls[0]?.[0].record_id).not.toBe(save.mock.calls[1]?.[0].record_id)
   })
 
   it('reuses the digest-scoped save attempt after remount', async () => {
@@ -387,7 +447,7 @@ describe('useComparisonWorkbench', () => {
     vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue({
       draft_id: 'rdf_compare',
       etag: 'rdt1_compare',
-      record_id: 'rec_comparisonsave',
+      record_id: SAVED_RECORD_ID,
       payload: {} as RecordDraft['payload'],
       version: 1,
       created_at: '2026-08-20T10:00:00Z',
@@ -395,7 +455,7 @@ describe('useComparisonWorkbench', () => {
       expires_at: '2026-11-01T10:00:00Z',
     } as RecordDraft)
     const save = vi.spyOn(recordsApi, 'saveComparisonRecord').mockResolvedValue({
-      record_id: 'rec_comparisonsave',
+      record_id: SAVED_RECORD_ID,
       revision_id: 'rrv_comparisonsave',
       revision_no: 1,
       lock_version: 1,
@@ -408,7 +468,6 @@ describe('useComparisonWorkbench', () => {
     let keys = 0
     const options = {
       userId: 'usr_1',
-      newRecordId: () => `rec_retry_${keys}`,
       newIdempotencyKey: () => `comparison-retry-${++keys}`,
     }
     const first = renderHook(() => useComparisonWorkbench(options), { wrapper: wrapper(compareURL(FIXED)) })
@@ -427,9 +486,11 @@ describe('useComparisonWorkbench', () => {
       await second.result.current.commands.save()
     })
     expect(save).toHaveBeenCalledTimes(2)
-    expect(save.mock.calls[0]?.[1]).toBe('comparison-retry-1')
-    expect(save.mock.calls[1]?.[1]).toBe('comparison-retry-1')
-    expect(keys).toBe(1)
+    expect(save.mock.calls[0]?.[1]).toBe('comparison-retry-2')
+    expect(save.mock.calls[1]?.[1]).toBe('comparison-retry-2')
+    expect(save.mock.calls.map(([input]) => input.record_id)).toEqual([SAVED_RECORD_ID, SAVED_RECORD_ID])
+    // One reservation key and one publication key; the remount replays both.
+    expect(keys).toBe(2)
   })
 
   it('does not render a save action when the intent is blocked', async () => {
@@ -738,11 +799,15 @@ describe('useComparisonWorkbench', () => {
   })
 
   it.each([
+    ['401', new ApiError(401, 'unauthenticated'), null],
     ['403', new ApiError(403, 'forbidden', { code: 'permission_denied' }), 'permission_denied'],
     ['404', new ApiError(404, 'hidden', { code: 'resource_not_found' }), 'resource_not_found'],
+    ['409', new ApiError(409, 'conflict', { code: 'idempotency_conflict' }), 'idempotency_conflict'],
+    ['503', new ApiError(503, 'pending', { code: 'publication_pending' }), 'publication_pending'],
     ['422 comparison_intent_invalid', new ApiError(422, 'comparison intent is invalid', { code: 'comparison_intent_invalid' }), 'comparison_intent_invalid'],
     ['422 comparison_intent_stale', new ApiError(422, 'comparison intent is stale', { code: 'comparison_intent_stale' }), 'comparison_intent_stale'],
-  ] as const)('retires comparison results and the signed intent when save returns %s', async (_label, failure, code) => {
+    ['422 comparison_intent_expired', new ApiError(422, 'comparison intent expired', { code: 'comparison_intent_expired' }), 'comparison_intent_expired'],
+  ] as const)('keeps the sent request available for exact retry after %s', async (_label, failure, code) => {
     sessionStorage.clear()
     vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
     vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
@@ -750,7 +815,6 @@ describe('useComparisonWorkbench', () => {
     const { result } = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_denied',
         newIdempotencyKey: () => 'comparison-denied',
       }),
       { wrapper: wrapper(compareURL(FIXED)) },
@@ -766,21 +830,25 @@ describe('useComparisonWorkbench', () => {
       await result.current.commands.save()
     })
 
-    expect(result.current.state.errorCode).toBe(code)
+    expect(result.current.state.saveErrorCode).toBe(code)
+    expect(result.current.state.error).toBeNull()
     expect(result.current.state.savedRecordId).toBeNull()
-    expect(result.current.state.comparison).toBeNull()
+    expect(result.current.state.comparison).not.toBeNull()
     expect(result.current.state.candidates).toBeNull()
-    expect(result.current.state.saveBlocked).toBe(true)
+    expect(result.current.state.saveBlocked).toBe(false)
     expect(result.current.state.saving).toBe(false)
     expect(fixedItems(result.current.state.query)).toEqual(FIXED.items)
-    expect(JSON.stringify(result.current.state)).not.toContain('cmp1.valid.payload.mac')
-    expect(save).toHaveBeenCalledTimes(1)
+    expect(save).toHaveBeenCalledTimes(2)
+    // A refusal after the request was sent does not prove it did not commit.
+    const stored = sessionStorage.getItem(`houfeng.comparison-save/usr_1/${comparisonResponse.digest}`)
+    expect(stored).not.toBeNull()
+    expect(JSON.parse(stored!)).toMatchObject({ idempotencyKey: 'comparison-denied', request: save.mock.calls[0]?.[0] })
   })
 
-  it('keeps the signed intent and retries a transport failure with the same idempotency key', async () => {
+  it('keeps the signed intent and retries a transport failure with the same body and idempotency key', async () => {
     sessionStorage.clear()
     vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
-    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    const createDraft = vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
     const save = vi.spyOn(recordsApi, 'saveComparisonRecord').mockRejectedValue(
       new ApiError(503, 'unavailable'),
     )
@@ -788,7 +856,6 @@ describe('useComparisonWorkbench', () => {
     const { result } = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_denied',
         newIdempotencyKey: () => `comparison-denied-${++deniedKeys}`,
       }),
       { wrapper: wrapper(compareURL(FIXED)) },
@@ -809,9 +876,183 @@ describe('useComparisonWorkbench', () => {
     expect(fixedItems(result.current.state.query)).toEqual(FIXED.items)
     expect(save).toHaveBeenCalledTimes(2)
     expect(save.mock.calls[0]?.[0].comparison_intent).toBe('cmp1.valid.payload.mac')
-    expect(deniedKeys).toBe(1)
-    expect(save.mock.calls[0]?.[1]).toBe('comparison-denied-1')
-    expect(save.mock.calls[1]?.[1]).toBe('comparison-denied-1')
+    expect(deniedKeys).toBe(2)
+    expect(save.mock.calls[0]?.[1]).toBe('comparison-denied-2')
+    expect(save.mock.calls[1]?.[0]).toEqual(save.mock.calls[0]?.[0])
+    expect(save.mock.calls[1]?.[1]).toBe('comparison-denied-2')
+    expect(createDraft).toHaveBeenCalledTimes(1)
+    expect(result.current.state.saveUnresolved).toBe(true)
+    expect(result.current.state.saveFeedback).toContain('尚未确认')
+  })
+
+  it('replays the stored request after a lost reply and reload, even once its intent has expired', async () => {
+    sessionStorage.clear()
+    const evaluate = vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    const createDraft = vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(savedRecord)
+    let keys = 0
+    const options = { userId: 'usr_1', newIdempotencyKey: () => `comparison-lost-${++keys}` }
+    const first = renderHook(() => useComparisonWorkbench(options), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(first.result.current.state.saveBlocked).toBe(false))
+    act(() => { first.result.current.commands.setTitle('原结论') })
+    await act(async () => { await first.result.current.commands.save() })
+    expect(first.result.current.state.saveUnresolved).toBe(true)
+    first.unmount()
+
+    // The old draft and intent may be gone; the result is checked before a new evaluation.
+    evaluate.mockRejectedValue(new ApiError(404, 'comparison unavailable'))
+    const second = renderHook(() => useComparisonWorkbench(options), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(second.result.current.state.savedRecordId).toBe(SAVED_RECORD_ID))
+
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save.mock.calls[1]?.[0]).toEqual(save.mock.calls[0]?.[0])
+    expect(save.mock.calls[1]?.[0].comparison_intent).toBe('cmp1.valid.payload.mac')
+    expect(save.mock.calls[1]?.[1]).toBe(save.mock.calls[0]?.[1])
+    expect(createDraft).toHaveBeenCalledTimes(1)
+    expect(recordsApi.createRecordAllocation).toHaveBeenCalledTimes(1)
+    expect(keys).toBe(2)
+    expect(second.result.current.state.savedRecordId).toBe(SAVED_RECORD_ID)
+    expect(second.result.current.state.saveUnresolved).toBe(false)
+  })
+
+  it('clears confirmed save feedback without clearing a separate evaluation failure', async () => {
+    const evaluate = vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord')
+      .mockRejectedValueOnce(new TypeError('first reply lost'))
+      .mockRejectedValueOnce(new TypeError('recovery unavailable'))
+      .mockResolvedValueOnce(savedRecord)
+    const options = { userId: 'usr_1', newIdempotencyKey: () => 'same-request-key' }
+    const first = renderHook(() => useComparisonWorkbench(options), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(first.result.current.state.saveBlocked).toBe(false))
+    await act(async () => { await first.result.current.commands.save() })
+    first.unmount()
+
+    evaluate.mockRejectedValue(new ApiError(404, 'comparison unavailable'))
+    const second = renderHook(() => useComparisonWorkbench(options), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(second.result.current.state.errorCode).toBe('resource_not_found'))
+    expect(second.result.current.state.saveFeedback).not.toBeNull()
+    await act(async () => { await second.result.current.commands.save() })
+    expect(second.result.current.state.savedRecordId).toBe(SAVED_RECORD_ID)
+    expect(second.result.current.state.saveFeedback).toBeNull()
+    expect(second.result.current.state.errorCode).toBe('resource_not_found')
+    expect(save.mock.calls[2]?.slice(0, 2)).toEqual(save.mock.calls[0]?.slice(0, 2))
+  })
+
+  it('requires explicit discard before replacing an uncertain draft creation', async () => {
+    sessionStorage.clear()
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    const createDraft = vi.spyOn(recordsApi, 'createRecordDraft')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(saveDraft)
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord').mockResolvedValue(savedRecord)
+    let keys = 0
+    const { result } = renderHook(
+      () => useComparisonWorkbench({ userId: 'usr_1', newIdempotencyKey: () => `comparison-edit-${++keys}` }),
+      { wrapper: wrapper(compareURL(FIXED)) },
+    )
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    act(() => { result.current.commands.setTitle('first') })
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.saveUnresolved).toBe(true)
+    act(() => { result.current.commands.setTitle('second') })
+    expect(result.current.state.title).toBe('first')
+    await act(async () => { await result.current.commands.save() })
+    expect(createDraft).toHaveBeenCalledTimes(1)
+    act(() => { result.current.commands.discardUnresolvedSave() })
+    act(() => { result.current.commands.setTitle('second') })
+    await act(async () => { await result.current.commands.save() })
+
+    const allocate = vi.mocked(recordsApi.createRecordAllocation)
+    expect(allocate).toHaveBeenCalledTimes(2)
+    expect(allocate.mock.calls[0]?.[1]).toBe('comparison-edit-1')
+    expect(allocate.mock.calls[1]?.[1]).toBe('comparison-edit-3')
+    expect(allocate.mock.calls[1]?.[0].request_digest).not.toBe(allocate.mock.calls[0]?.[0].request_digest)
+    expect(createDraft).toHaveBeenCalledTimes(2)
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save.mock.calls[0]?.[1]).toBe('comparison-edit-4')
+  })
+
+  it('asks for a legacy save result with only its original key and record, never rewriting or reproducing it', async () => {
+    sessionStorage.clear()
+    const legacyKey = `houfeng.comparison-save/usr_1/${comparisonResponse.digest}`
+    const legacyRaw = JSON.stringify({
+      version: 1, userId: 'usr_1', digest: comparisonResponse.digest, recordId: 'rec_legacyresult',
+      idempotencyKey: 'legacy-save-key', generation: '0', sourceRecordIds: ['rec_a', 'rec_b'],
+    })
+    sessionStorage.setItem(legacyKey, legacyRaw)
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    const createDraft = vi.spyOn(recordsApi, 'createRecordDraft')
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord')
+    const recover = vi.spyOn(recordsApi, 'recoverLegacyComparisonRecord')
+      .mockRejectedValueOnce(new ApiError(409, 'claims differ', { code: 'idempotency_conflict' }))
+      .mockResolvedValueOnce({ ...savedRecord, record_id: 'rec_legacyresult', replayed: true })
+    const { result } = renderHook(() => useComparisonWorkbench({ userId: 'usr_1' }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(result.current.state.saveUnresolved).toBe(true))
+
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.saveFeedback).toContain('无法确认旧版另存')
+    expect(sessionStorage.getItem(legacyKey)).toBe(legacyRaw)
+    await act(async () => { await result.current.commands.save() })
+
+    expect(recover).toHaveBeenCalledTimes(2)
+    expect(recover.mock.calls[1]?.slice(0, 2)).toEqual([{ record_id: 'rec_legacyresult', comparison_intent: 'cmp1.valid.payload.mac' }, 'legacy-save-key'])
+    expect(result.current.state.savedRecordId).toBe('rec_legacyresult')
+    expect(result.current.state.saveFeedback).toBeNull()
+    expect(createDraft).not.toHaveBeenCalled()
+    expect(save).not.toHaveBeenCalled()
+    expect(recordsApi.createRecordAllocation).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(legacyKey)).toBe(legacyRaw)
+  })
+
+  it('retains a legacy envelope when the current evaluation has a different digest', async () => {
+    const key = `houfeng.comparison-save/usr_1/${comparisonResponse.digest}`
+    const raw = JSON.stringify({
+      version: 1, userId: 'usr_1', digest: comparisonResponse.digest, recordId: 'rec_legacyresult',
+      idempotencyKey: 'legacy-save-key', generation: '0', sourceRecordIds: ['rec_a', 'rec_b'],
+    })
+    sessionStorage.setItem(key, raw)
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue({ ...comparisonResponse, digest: 'ee'.repeat(32) })
+    const recover = vi.spyOn(recordsApi, 'recoverLegacyComparisonRecord')
+    const { result } = renderHook(() => useComparisonWorkbench({ userId: 'usr_1' }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(result.current.state.comparison?.digest).toBe('ee'.repeat(32)))
+    expect(result.current.state.saveUnresolved).toBe(true)
+    expect(result.current.state.saveFeedback).toContain('不一致')
+    await act(async () => { await result.current.commands.save() })
+    expect(recordsApi.createRecordAllocation).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(key)).toBe(raw)
+    expect(recover).not.toHaveBeenCalled()
+  })
+
+  it('ends local confirmation only on explicit discard, then saves as a new request', async () => {
+    sessionStorage.clear()
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord')
+      .mockRejectedValueOnce(new ApiError(503, 'publication pending', { code: 'publication_pending' }))
+      .mockResolvedValueOnce(savedRecord)
+    let keys = 0
+    const { result } = renderHook(
+      () => useComparisonWorkbench({ userId: 'usr_1', newIdempotencyKey: () => `comparison-discard-${++keys}` }),
+      { wrapper: wrapper(compareURL(FIXED)) },
+    )
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.saveUnresolved).toBe(true)
+    expect(result.current.state.saveFeedback).toContain('确认中')
+    act(() => { result.current.commands.discardUnresolvedSave() })
+    expect(result.current.state.saveUnresolved).toBe(false)
+    expect(result.current.state.saveFeedback).toContain('可能已经创建')
+    expect(sessionStorage.getItem(`houfeng.comparison-save/usr_1/${comparisonResponse.digest}`)).toBeNull()
+    act(() => { result.current.commands.setTitle('new conclusion') })
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.saveFeedback).toBeNull()
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save.mock.calls[0]?.[1]).toBe('comparison-discard-2')
+    expect(save.mock.calls[1]?.[1]).toBe('comparison-discard-4')
+    expect(recordsApi.createRecordAllocation).toHaveBeenCalledTimes(2)
   })
 
   it('does not publish a draft that resolves after browser back or forward', async () => {
@@ -832,7 +1073,6 @@ describe('useComparisonWorkbench', () => {
     const { result } = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_comparisonsave',
         newIdempotencyKey: () => 'comparison-history-draft',
       }),
       { wrapper: Wrapper },
@@ -891,7 +1131,6 @@ describe('useComparisonWorkbench', () => {
     const { result } = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_comparisonsave',
         newIdempotencyKey: () => 'comparison-external-published',
       }),
       { wrapper: Wrapper },
@@ -903,7 +1142,7 @@ describe('useComparisonWorkbench', () => {
     await act(async () => {
       await result.current.commands.save()
     })
-    expect(result.current.state.savedRecordId).toBe('rec_comparisonsave')
+    expect(result.current.state.savedRecordId).toBe(SAVED_RECORD_ID)
 
     act(() => {
       controls.replace(compareURL(other))
@@ -962,7 +1201,6 @@ describe('useComparisonWorkbench', () => {
     const draftHook = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_comparisonsave',
         newIdempotencyKey: () => 'comparison-unmount-draft',
       }),
       { wrapper: wrapper(compareURL(FIXED)) },
@@ -984,6 +1222,8 @@ describe('useComparisonWorkbench', () => {
       await draftSave
     })
     expect(save).not.toHaveBeenCalled()
+    // Start a separate scenario after explicitly discarding the unknown draft attempt.
+    sessionStorage.clear()
 
     createDraft.mockResolvedValue(saveDraft)
     let resolveSave: (value: RecordMutationResult) => void = () => {}
@@ -994,7 +1234,6 @@ describe('useComparisonWorkbench', () => {
     const saveHook = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_comparisonsave',
         newIdempotencyKey: () => 'comparison-unmount-save',
       }),
       { wrapper: wrapper(compareURL(FIXED)) },
@@ -1034,7 +1273,6 @@ describe('useComparisonWorkbench', () => {
     const { result } = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_comparisonsave',
         newIdempotencyKey: () => 'comparison-cancel-save',
       }),
       { wrapper: wrapper(compareURL(FIXED)) },
@@ -1087,7 +1325,6 @@ describe('useComparisonWorkbench', () => {
     const { result } = renderHook(
       () => useComparisonWorkbench({
         userId: 'usr_1',
-        newRecordId: () => 'rec_comparisonsave',
         newIdempotencyKey: () => 'comparison-presentation-save',
       }),
       { wrapper: Wrapper },
@@ -1122,7 +1359,7 @@ describe('useComparisonWorkbench', () => {
       resolveSave(savedRecord)
       await savePromise
     })
-    expect(result.current.state.savedRecordId).toBe('rec_comparisonsave')
+    expect(result.current.state.savedRecordId).toBe(SAVED_RECORD_ID)
     expect(result.current.state.saving).toBe(false)
     expect(result.current.state.error).toBeNull()
     expect(save).toHaveBeenCalledTimes(1)
@@ -1279,6 +1516,247 @@ describe('useComparisonWorkbench', () => {
     expectSavedSubjects(createDraft, [BASKET_SUBJECTS.evs_e, BASKET_SUBJECTS.evs_f])
     expect(result.current.state.saveSubjects).toEqual([BASKET_SUBJECTS.evs_e, BASKET_SUBJECTS.evs_f])
   })
+
+  it('closes a pending comparison destination before cleanup acknowledgement and ignores its late success', async () => {
+    const base = memoryDraftBufferStore()
+    const cleanupGate = withResolvers<void>()
+    const store = { ...base, applyCleanup: async (...args: Parameters<typeof base.applyCleanup>) => {
+      await cleanupGate.promise
+      return base.applyCleanup(...args)
+    } }
+    const userId = 'usr_comparecleanup'
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    const response = withResolvers<RecordMutationResult>()
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord').mockReturnValue(response.promise)
+    const { result } = renderHook(() => useComparisonWorkbench({ userId, store }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    act(() => {
+      result.current.commands.setTitle('private comparison')
+      result.current.commands.setConclusion('private conclusion')
+    })
+    const staleCommands = result.current.commands
+    let saving!: Promise<void>
+    act(() => { saving = result.current.commands.save() })
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    let cleanup!: Promise<RecordCleanupAck>
+    act(() => { cleanup = applyRecordClientCleanup(store, userId, 'browser1', {
+      version: 1, cursor: '1', operation_id: 'rpo_comparedestination', record_id: SAVED_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['comparison_workbench', 'comparison_save_attempt'],
+    }) })
+    expect(result.current.state.comparison).toBeNull()
+    expect(result.current.state.title).toBe('')
+    expect(result.current.state.conclusion).toBe('')
+    expect(result.current.state.saveUnresolved).toBe(false)
+    expect(result.current.state.saving).toBe(false)
+    await act(async () => {
+      staleCommands.setConclusion('late callback must not reopen content')
+      await staleCommands.save()
+    })
+    expect(result.current.state.conclusion).toBe('')
+    expect(save).toHaveBeenCalledTimes(1)
+    await act(async () => { cleanupGate.resolve(); await cleanup })
+    await act(async () => { response.resolve(savedRecord); await saving })
+    expect(result.current.state.savedRecordId).toBeNull()
+    expect(result.current.state.comparison).toBeNull()
+    expect(sessionStorage.getItem(`houfeng.comparison-save/${userId}/${comparisonResponse.digest}`)).toBeNull()
+  })
+
+  it('does not expose an unresolved comparison allocation after cleanup', async () => {
+    const store = memoryDraftBufferStore()
+    const userId = 'usr_compareallocation'
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    const allocate = vi.mocked(recordsApi.createRecordAllocation)
+    const response = withResolvers<RecordAllocation>()
+    allocate.mockRejectedValueOnce(new TypeError('allocation reply lost')).mockReturnValueOnce(response.promise)
+    const draft = vi.spyOn(recordsApi, 'createRecordDraft')
+    const first = renderHook(() => useComparisonWorkbench({ userId, store }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(first.result.current.state.saveBlocked).toBe(false))
+    act(() => first.result.current.commands.setConclusion('hidden pending comparison'))
+    await act(async () => { await first.result.current.commands.save() })
+    expect(first.result.current.state.saveUnresolved).toBe(true)
+    first.unmount()
+    const second = renderHook(() => useComparisonWorkbench({ userId, store }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(allocate).toHaveBeenCalledTimes(2))
+    expect(second.result.current.state.conclusion).toBe('')
+    await act(async () => { await applyRecordClientCleanup(store, userId, 'browser4', {
+      version: 1, cursor: '1', operation_id: 'rpo_compareallocation', record_id: SAVED_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['comparison_workbench', 'comparison_save_attempt'],
+    }) })
+    const call = allocate.mock.calls[1]
+    if (!call) throw new Error('expected allocation replay')
+    await act(async () => { response.resolve(recordAllocationFixture('save', {
+      purpose: call[0].purpose, request_digest: call[0].request_digest, idempotency_key: call[1], record_id: SAVED_RECORD_ID,
+    })) })
+    await waitFor(() => expect(second.result.current.state.comparison).toBeNull())
+    expect(second.result.current.state.saveBlocked).toBe(true)
+    expect(second.result.current.state.errorCode).toBeNull()
+    expect(second.result.current.state.conclusion).toBe('')
+    expect(sessionStorage.getItem(`houfeng.comparison-save/${userId}/${comparisonResponse.digest}`)).toBeNull()
+    expect(draft).not.toHaveBeenCalled()
+  })
+
+
+  it('does not expose a recovered comparison reservation when cleanup races its target scope', async () => {
+    const base = memoryDraftBufferStore()
+    const userId = 'usr_comparerestore'
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    const draft = vi.spyOn(recordsApi, 'createRecordDraft').mockRejectedValueOnce(new TypeError('draft reply lost'))
+    const save = vi.spyOn(recordsApi, 'saveComparisonRecord')
+    const first = renderHook(() => useComparisonWorkbench({ userId, store: base }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(first.result.current.state.saveBlocked).toBe(false))
+    act(() => first.result.current.commands.setTitle('hidden recovered conclusion'))
+    await act(async () => { await first.result.current.commands.save() })
+    expect(first.result.current.state.saveUnresolved).toBe(true)
+    first.unmount()
+    const hold = withResolvers<void>()
+    const reached = withResolvers<void>()
+    const store = { ...base, captureScope: async (...args: Parameters<typeof base.captureScope>) => {
+      if (args[1] === SAVED_RECORD_ID) { reached.resolve(); await hold.promise }
+      return base.captureScope(...args)
+    } }
+    const second = renderHook(() => useComparisonWorkbench({ userId, store }), { wrapper: wrapper(compareURL(FIXED)) })
+    await act(async () => { await reached.promise })
+    expect(second.result.current.state.title).toBe('')
+    await act(async () => { await applyRecordClientCleanup(base, userId, 'browser2', {
+      version: 1, cursor: '1', operation_id: 'rpo_comparerestore', record_id: SAVED_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['comparison_workbench', 'comparison_save_attempt'],
+    }) })
+    expect(second.result.current.state.comparison).toBeNull()
+    expect(second.result.current.state.title).toBe('')
+    await act(async () => { hold.resolve() })
+    expect(second.result.current.state.title).toBe('')
+    expect(second.result.current.state.saveUnresolved).toBe(false)
+    expect(draft).toHaveBeenCalledTimes(1)
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('closes a pending comparison destination on another tab cleanup broadcast', async () => {
+    const store = memoryDraftBufferStore()
+    const userId = 'usr_comparetab'
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    vi.spyOn(recordsApi, 'saveComparisonRecord').mockRejectedValue(new TypeError('response lost'))
+    const { result } = renderHook(() => useComparisonWorkbench({ userId, store }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    act(() => result.current.commands.setConclusion('tab comparison secret'))
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.saveUnresolved).toBe(true)
+    const remote = new BroadcastChannel('houfeng-record-security')
+    remote.postMessage({ type: 'cleanup', userId, event: {
+      version: 1, cursor: '1', operation_id: 'rpo_comparetab', record_id: SAVED_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['comparison_workbench', 'comparison_save_attempt'],
+    } })
+    await waitFor(() => expect(result.current.state.comparison).toBeNull())
+    expect(result.current.state.conclusion).toBe('')
+    expect(result.current.state.saveUnresolved).toBe(false)
+    expect(sessionStorage.getItem(`houfeng.comparison-save/${userId}/${comparisonResponse.digest}`)).toBeNull()
+    remote.close()
+  })
+
+  it('detaches a discarded destination before a new comparison attempt', async () => {
+    const store = memoryDraftBufferStore()
+    const userId = 'usr_comparediscard'
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    vi.mocked(recordsApi.createRecordAllocation).mockImplementation(async (input, key) => recordAllocationFixture(key, {
+      purpose: input.purpose, request_digest: input.request_digest, idempotency_key: key,
+    }))
+    const draftReply = withResolvers<RecordDraft>()
+    const draft = vi.spyOn(recordsApi, 'createRecordDraft').mockRejectedValueOnce(new TypeError('draft reply lost')).mockReturnValueOnce(draftReply.promise)
+    const nextTarget = recordAllocationFixture('replace-3').record_id
+    vi.spyOn(recordsApi, 'saveComparisonRecord').mockResolvedValue({ ...savedRecord, record_id: nextTarget })
+    let sequence = 0
+    const { result } = renderHook(() => useComparisonWorkbench({ userId, store, newIdempotencyKey: () => `replace-${++sequence}` }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    act(() => result.current.commands.setTitle('first conclusion'))
+    await act(async () => { await result.current.commands.save() })
+    act(() => result.current.commands.discardUnresolvedSave())
+    act(() => result.current.commands.setTitle('replacement conclusion'))
+    let saving!: Promise<void>
+    act(() => { saving = result.current.commands.save() })
+    await waitFor(() => expect(draft).toHaveBeenCalledTimes(2))
+    await act(async () => { await applyRecordClientCleanup(store, userId, 'browser3', {
+      version: 1, cursor: '1', operation_id: 'rpo_comparediscard', record_id: recordAllocationFixture('replace-1').record_id,
+      cleanup_epoch: '1', scopes: ['comparison_workbench', 'comparison_save_attempt'],
+    }) })
+    expect(result.current.state.comparison).not.toBeNull()
+    expect(result.current.state.title).toBe('replacement conclusion')
+    await act(async () => { draftReply.resolve(saveDraft); await saving })
+    expect(result.current.state.savedRecordId).toBe(nextTarget)
+  })
+
+  it('closes source-dependent work and prevents a late draft response from publishing after cleanup', async () => {
+    sessionStorage.clear()
+    const store = memoryDraftBufferStore()
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    let finishDraft!: (draft: RecordDraft) => void
+    const create = vi.spyOn(recordsApi, 'createRecordDraft').mockImplementation(() => new Promise((resolve) => { finishDraft = resolve }))
+    const publish = vi.spyOn(recordsApi, 'saveComparisonRecord').mockResolvedValue(savedRecord)
+    const { result } = renderHook(() => useComparisonWorkbench({ userId: 'usr_cleanup', store }), { wrapper: wrapper(compareURL(FIXED)) })
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    act(() => { result.current.commands.setTitle('private source conclusion') })
+    let saving!: Promise<void>
+    act(() => { saving = result.current.commands.save() })
+    await waitFor(() => expect(create).toHaveBeenCalled())
+    await act(async () => {
+      await applyRecordClientCleanup(store, 'usr_cleanup', 'browser_workbench', {
+        version: 1, cursor: '9007199254740993', operation_id: 'rpo_workbench', record_id: 'rec_a',
+        cleanup_epoch: '9007199254740995', scopes: ['comparison_workbench', 'comparison_save_attempt'],
+      })
+    })
+    expect(result.current.state.comparison).toBeNull()
+    expect(result.current.state.title).toBe('')
+    expect(result.current.state.saveBlocked).toBe(true)
+    await act(async () => { finishDraft(saveDraft); await saving })
+    expect(publish).not.toHaveBeenCalled()
+    expect(result.current.state.savedRecordId).toBeNull()
+  })
+
+  it('does not carry conclusions or late successful save state into another user workspace', async () => {
+    sessionStorage.clear()
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    let finishSave!: (value: RecordMutationResult) => void
+    const publish = vi.spyOn(recordsApi, 'saveComparisonRecord').mockImplementation(() => new Promise((resolve) => { finishSave = resolve }))
+    const { result, rerender } = renderHook(({ userId }) => useComparisonWorkbench({ userId }), {
+      initialProps: { userId: 'usr_first' }, wrapper: wrapper(compareURL(FIXED)),
+    })
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    act(() => {
+      result.current.commands.setTitle('first user private title')
+      result.current.commands.setConclusion('first user private conclusion')
+    })
+    let saving!: Promise<void>
+    act(() => { saving = result.current.commands.save() })
+    await waitFor(() => expect(publish).toHaveBeenCalled())
+    rerender({ userId: 'usr_second' })
+    expect(result.current.state.title).toBe('')
+    expect(result.current.state.conclusion).toBe('')
+    await act(async () => { finishSave(savedRecord); await saving })
+    expect(result.current.state.savedRecordId).toBeNull()
+    expect(result.current.state.title).toBe('')
+    expect(result.current.state.conclusion).toBe('')
+  })
+
+  it('blocks a replacement evaluation when prior-user retry metadata cannot be retired', async () => {
+    sessionStorage.clear()
+    vi.spyOn(recordsApi, 'evaluateFixedComparison').mockResolvedValue(comparisonResponse)
+    vi.spyOn(recordsApi, 'createRecordDraft').mockResolvedValue(saveDraft)
+    const publish = vi.spyOn(recordsApi, 'saveComparisonRecord').mockResolvedValue(savedRecord)
+    const { result, rerender } = renderHook(({ userId }) => useComparisonWorkbench({ userId }), {
+      initialProps: { userId: 'usr_first' }, wrapper: wrapper(compareURL(FIXED)),
+    })
+    await waitFor(() => expect(result.current.state.saveBlocked).toBe(false))
+    await act(async () => { await result.current.commands.save() })
+    expect(result.current.state.savedRecordId).toBe(savedRecord.record_id)
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementationOnce(() => { throw new Error('storage blocked') })
+    rerender({ userId: 'usr_second' })
+    await waitFor(() => expect(result.current.state.error).toContain('重试状态清理失败'))
+    expect(result.current.state.comparison).toBeNull()
+    expect(result.current.state.saveBlocked).toBe(true)
+    await act(async () => { await result.current.commands.save() })
+    expect(publish).toHaveBeenCalledTimes(1)
+  })
 })
 
 function fixedItems(query: ReturnType<typeof useComparisonWorkbench>['state']['query']) {
@@ -1305,7 +1783,6 @@ function comparisonSaveOptions(prefix: string) {
   let keys = 0
   return {
     userId: 'usr_1',
-    newRecordId: () => `rec_${prefix}`,
     newIdempotencyKey: () => `${prefix}-${++keys}`,
   }
 }
@@ -1318,6 +1795,7 @@ function installBasketSubjectEvaluation() {
       if (!subject) throw new Error(`unexpected snapshot ${snapshotId}`)
       return {
         snapshot_id: snapshotId,
+        source_record_id: `rec_${snapshotId.slice(4)}`,
         canonical_hash: '11'.repeat(32),
         kind: 'monitoring.host' as const,
         schema_version: 1,

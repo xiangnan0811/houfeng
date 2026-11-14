@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"houfeng/internal/center/recordplatform"
 )
 
 func TestCoreAdapterDelegatesHealthPreviewPurgeAndVerifiedAbsenceWithExactOwnership(t *testing.T) {
@@ -25,10 +27,11 @@ func TestCoreAdapterDelegatesHealthPreviewPurgeAndVerifiedAbsenceWithExactOwners
 		SurvivingCopies:  []AdapterSurvivingCopy{},
 	}
 	operation := deletionTestOperation(DeletionStateOnlinePurging)
+	purgeTarget := coreTestPurgeTarget(operation)
 	verifiedAt := time.Date(2026, time.August, 3, 14, 0, 0, 0, time.UTC)
 	store := &recordCoreStoreStub{health: health, preview: preview}
 	store.purge = func(command CorePurgeCommand) (AdapterPurgeReceipt, error) {
-		if command.Operation != operation || command.SurfaceDigest != digestAdapterSurfaces(descriptor) {
+		if command.PurgeTarget != purgeTarget || command.SurfaceDigest != digestAdapterSurfaces(descriptor) {
 			t.Fatalf("core purge command = %#v", command)
 		}
 		return AdapterPurgeReceipt{
@@ -57,13 +60,15 @@ func TestCoreAdapterDelegatesHealthPreviewPurgeAndVerifiedAbsenceWithExactOwners
 	if err != nil || !reflect.DeepEqual(gotPreview, preview) {
 		t.Fatalf("PreviewDeletion() = %#v, %v", gotPreview, err)
 	}
-	purgeTarget := PurgeTarget{Operation: operation}
 	receipt, err := adapter.PurgeDeletion(context.Background(), purgeTarget)
 	if err != nil {
 		t.Fatalf("PurgeDeletion() error = %v", err)
 	}
 	if err := adapter.VerifyDeletion(context.Background(), purgeTarget, receipt); err != nil {
 		t.Fatalf("VerifyDeletion() error = %v", err)
+	}
+	if store.verifiedTarget != purgeTarget {
+		t.Fatalf("verified target = %#v, want %#v", store.verifiedTarget, purgeTarget)
 	}
 	if store.healthCalls != 1 || store.previewCalls != 1 || store.purgeCalls != 1 || store.verifyCalls != 1 {
 		t.Fatalf("core store calls health=%d preview=%d purge=%d verify=%d", store.healthCalls, store.previewCalls, store.purgeCalls, store.verifyCalls)
@@ -117,7 +122,7 @@ func TestCoreAdapterRejectsInvalidStoreResultsAndTypedNilStore(t *testing.T) {
 			case "invalid preview":
 				_, err = adapter.PreviewDeletion(context.Background(), previewTarget(operation.Object, deletionTestRecordSnapshot(t)))
 			default:
-				_, err = adapter.PurgeDeletion(context.Background(), PurgeTarget{Operation: operation})
+				_, err = adapter.PurgeDeletion(context.Background(), coreTestPurgeTarget(operation))
 			}
 			if !errors.Is(err, ErrDeletionSafetyUnavailable) {
 				t.Fatalf("adapter error = %v, want ErrDeletionSafetyUnavailable", err)
@@ -151,7 +156,7 @@ func TestRegistryPurgerUsesDependencySafeReverseOrderAndVerifiesEachReceiptBefor
 	}
 	purger := NewRegistryPurger(registry)
 
-	receipt, err := purger.PurgeOnline(context.Background(), operation)
+	receipt, err := purger.PurgeOnline(context.Background(), coreTestPurgeTarget(operation))
 	if err != nil {
 		t.Fatalf("PurgeOnline() error = %v", err)
 	}
@@ -185,15 +190,16 @@ func TestRegistryPurgerStopsAtFirstPurgeOrVerificationFailure(t *testing.T) {
 					VerifiedAbsentAt: time.Date(2026, time.August, 3, 16, index, 0, 0, time.UTC),
 				}
 			}
+			lost := recordplatform.ErrLostOwnerLease
 			if failure == "purge" {
-				adapters[2].purgeErr = errors.New("purge unavailable")
+				adapters[2].purgeErr = lost
 			} else {
-				adapters[2].verifyErr = errors.New("absence unavailable")
+				adapters[2].verifyErr = lost
 			}
 			purger := NewRegistryPurger(registry)
 
-			if _, err := purger.PurgeOnline(context.Background(), operation); !errors.Is(err, ErrDeletionSafetyUnavailable) {
-				t.Fatalf("PurgeOnline() error = %v, want ErrDeletionSafetyUnavailable", err)
+			if _, err := purger.PurgeOnline(context.Background(), coreTestPurgeTarget(operation)); !errors.Is(err, ErrDeletionSafetyUnavailable) || !errors.Is(err, lost) {
+				t.Fatalf("PurgeOnline() error = %v, want safety failure retaining lost owner lease", err)
 			}
 			if adapters[1].purgeCalls != 0 {
 				t.Fatalf("adapter after failure purge calls = %d, want zero", adapters[1].purgeCalls)
@@ -202,15 +208,49 @@ func TestRegistryPurgerStopsAtFirstPurgeOrVerificationFailure(t *testing.T) {
 	}
 }
 
+func coreTestPurgeTarget(operation DeletionOperation) PurgeTarget {
+	return PurgeTarget{Operation: operation, OwnerClaim: OperationOwnerClaim{
+		OperationID: operation.OperationID,
+		Owner: recordplatform.OwnerLease{
+			OwnerID: "deletion_worker", Generation: 7,
+			ExpiresAt: time.Date(2026, time.October, 29, 12, 0, 0, 0, time.UTC),
+		},
+	}}
+}
+
+func TestCoreAdapterRequiresExactOwnerForBothContracts(t *testing.T) {
+	t.Parallel()
+	for _, version := range []DeletionContractVersion{DeletionContractV1, DeletionContractV2} {
+		operation := deletionTestOperation(DeletionStateOnlinePurging)
+		operation.ContractVersion = version
+		if version == DeletionContractV2 {
+			operation.LedgerSequence = 0
+			operation.LedgerEntryHash = [32]byte{}
+		}
+		target := coreTestPurgeTarget(operation)
+		if err := target.Validate(); err != nil {
+			t.Fatalf("contract %d target rejected: %v", version, err)
+		}
+		for _, claim := range []OperationOwnerClaim{{}, {OperationID: "rpo_another", Owner: target.OwnerClaim.Owner}} {
+			invalid := target
+			invalid.OwnerClaim = claim
+			if err := invalid.Validate(); !errors.Is(err, ErrInvalidDeletionOperation) {
+				t.Fatalf("contract %d accepted owner %#v: %v", version, claim, err)
+			}
+		}
+	}
+}
+
 type recordCoreStoreStub struct {
-	health       AdapterHealthSnapshot
-	preview      AdapterPreviewSnapshot
-	purge        func(CorePurgeCommand) (AdapterPurgeReceipt, error)
-	verifyErr    error
-	healthCalls  int
-	previewCalls int
-	purgeCalls   int
-	verifyCalls  int
+	health         AdapterHealthSnapshot
+	preview        AdapterPreviewSnapshot
+	purge          func(CorePurgeCommand) (AdapterPurgeReceipt, error)
+	verifyErr      error
+	verifiedTarget PurgeTarget
+	healthCalls    int
+	previewCalls   int
+	purgeCalls     int
+	verifyCalls    int
 }
 
 func (store *recordCoreStoreStub) RecordCoreHealth(context.Context) (AdapterHealthSnapshot, error) {
@@ -231,7 +271,8 @@ func (store *recordCoreStoreStub) PurgeRecordCore(_ context.Context, command Cor
 	return AdapterPurgeReceipt{}, nil
 }
 
-func (store *recordCoreStoreStub) VerifyRecordCorePurge(_ context.Context, _ CorePurgeCommand, _ AdapterPurgeReceipt) error {
+func (store *recordCoreStoreStub) VerifyRecordCorePurge(_ context.Context, command CorePurgeCommand, _ AdapterPurgeReceipt) error {
 	store.verifyCalls++
+	store.verifiedTarget = command.PurgeTarget
 	return store.verifyErr
 }

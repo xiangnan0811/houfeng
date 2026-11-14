@@ -49,7 +49,7 @@ func testPostgresIntegrationAppACLCurrentP76Upgrade(t *testing.T, state string) 
 	}
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C76 to C77 convergence: %v", err)
 	}
@@ -65,7 +65,7 @@ func testPostgresIntegrationAppACLCurrentP76Upgrade(t *testing.T, state string) 
 		t.Fatalf("current successor must append exactly one manifest: %#v", after.Manifest)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 	for _, pair := range [][2][]AppACLEffectiveCatalogPrivilegeObservationR1{
 		{before.Catalog.DirectPrivileges, appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).DirectPrivileges},
 		{before.Catalog.EffectivePrivileges, appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).EffectivePrivileges},
@@ -114,7 +114,7 @@ func testPostgresIntegrationAppACLCurrentP76Upgrade(t *testing.T, state string) 
 	assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB))
 	assertAppACLCurrentP76LegacyProductNulls(t, ctx, runtimeDB)
 	assertAppACLCurrentP76RuntimeProductAccess(t, ctx, runtimeDB)
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C77 repeat: %v", err)
 	}
@@ -262,7 +262,7 @@ func testPostgresIntegrationAppACLCurrentP76Rollback(t *testing.T) {
 		}
 		return injected
 	}
-	_, err := convergeAppACLCurrentWithDependencies(ctx, migratorDB.BeginTx, fixture.runtimeRole, fixture.adminRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
+	_, err := convergeAppACLCurrentWithDependencies(ctx, migratorDB.BeginTx, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if !errors.Is(err, injected) {
 		t.Fatalf("rollback cutpoint error = %v, want injected failure", err)
 	}
@@ -288,7 +288,7 @@ func testPostgresIntegrationAppACLCurrentP76Drift(t *testing.T, drift string) {
 	migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
 	profile := appACLCurrentReleasedPostgresProfile(t, appACLCurrentP76Migration)
 	seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
-	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole); err != nil {
+	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 		t.Fatalf("C77 convergence before drift: %v", err)
 	}
 	var statement string
@@ -333,7 +333,7 @@ func testPostgresIntegrationAppACLCurrentP76Drift(t *testing.T, drift string) {
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil {
 		t.Fatal("runtime admitted unexpected product privilege")
 	}
-	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole); err == nil {
+	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err == nil {
 		t.Fatal("convergence accepted or repaired unexpected product privilege")
 	}
 	if after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input); !reflect.DeepEqual(after, before) {
@@ -400,7 +400,7 @@ func testPostgresIntegrationAppACLCurrentP76HistoricalChain(t *testing.T) {
 			t.Fatal("historical C75 to C76 ACL delta is not exactly runtime family-state SELECT")
 		}
 	}
-	third, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	third, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("chained C76 to C77 convergence: %v", err)
 	}

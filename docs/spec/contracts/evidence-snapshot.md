@@ -12,13 +12,15 @@
 - existing-reference SQL必须inner join `evidence_payloads`并校验payload encoding、digest、canonical size和compressed size，但query不得选择`compressed_payload`。ordinary read/export仅在授权后读取/解压payload，并把授权前metadata与payload read返回的全部split-column metadata精确比较。
 - JSONB解码后可重建的唯一非持久化状态是`SourceAuthorization`内部canonical-byte cache；所有公开authorization字段、时间、envelope字段和split digest/size必须保持canonical exact，不能靠normalize修复corruption。
 - 真实PostgreSQL测试必须从participant写入logical snapshot，再经public read/service/export/existing-reference路径读回；missing payload、unknown schema、permission intersection与corrupt metadata/payload都必须失败关闭，不允许仅插fixture绕过writer。
+- C81 的 `record_evidence_payload_insert` 只接受经受信 Go 校验的 canonical bytes 与确定性 gzip；SQL 独立计算 canonical digest，重核当前 actor、record fence 和 native intent/allocation/source，或 exact import job/plan/record/evidence owner mapping 与当前 birth。runtime 不得直接 INSERT payload。SQL 不解压 gzip，也不校验 comparison token 的 HMAC；受信 Go 必须在同一效果事务内完成相应授权。
+- 完整 canonical read、comparison dependency 证明、evidence 删除 preview/receipt 与 orphan GC receipt 在产生正向结果前必须解压实际保存的 gzip，按完整 canonical bytes 重算 digest；缺失、损坏或内容不匹配一律失败关闭。metadata-only existing-reference 只证明其 metadata 绑定，不构成 canonical 内容证明。
 
 ## Scenario: Evidence project logical capacity 与 lifecycle maintenance
 
 ### 1. Scope / Trigger
 
 - Trigger：修改`evidence_snapshots.logical_size_bytes`的核算、`PostgresEvidenceRepository` capacity/backlog query、`RecordEvidenceRevisionParticipant` final quota check、`EvidenceMaintenanceWorker` composition或lifecycle primitive scheduling时。
-- 此场景只使用已应用的`0054_create_record_evidence.sql`；capacity不新增counter/settings migration，不修改0054，不读取attachment quota/table。
+- capacity 核算继续使用已应用的`0054_create_record_evidence.sql`，不新增counter/settings migration、不修改0054、不读取attachment quota/table。comparison dependency 派生索引及其维护使用forward `0081_record_deletion_successor.sql`，与容量事实分开。
 
 ### 2. Signatures
 
@@ -76,7 +78,7 @@ Strict PostgreSQL输出必须实际运行exact-boundary、over-boundary rollback
 - 修改 dashboard 对 monitoring event 的发生时间、补传状态或纠错状态解释；
 - 修改 `internal/center/http/handlers/evidence.go`、Records 的 `evidence_items` save hook 或 revision response；
 - 修改 `internal/center/evidence/{service,deletion_adapter,export_adapter,recovery_adapter}.go`；
-- 修改 `internal/center/store/evidence_task5.go`、`evidence_recovery.go` 或 `record_evidence` deletion surfaces；
+- 修改 `internal/center/store/evidence_task5.go` 或 `record_evidence` deletion surfaces；
 - 修改 `internal/center/evidence/{capacity,maintenance_worker}.go`、`internal/center/store/evidence.go` 的capacity/backlog query或`record_evidence_participant.go`的final quota check；
 - 新增 kind/schema、producer/rule version、event/state/provenance 或敏感字段语义。
 
@@ -117,7 +119,7 @@ GET /api/evidence/{snapshot_id}
 - `evidence.RevisionPreparer.Prepare(...)`：revision事务外重授权、重捕获、preview drift检查与existing snapshot reuse；
 - `evidence.CapacityPolicy` / `CapacityEnforcer`：evidence独立的project logical quota、warning与preview/final evaluation；
 - `evidence.MaintenanceWorker`：有界调度existing expired-intent/orphan-GC primitive并发布aggregate observer state；
-- `evidence.NewDeletionAdapter(...)`、`NewExportAdapter(...)`、`NewRecoveryAdapter(...)`：删除、kind-owned export和闭合恢复边界；
+- `evidence.NewDeletionAdapter(...)`、`NewExportAdapter(...)`：删除和 kind-owned export；当前没有获认证的 evidence 恢复 writer 或 production recovery adapter；
 - 每个 kind adapter 必须实现 `ValidateSelection`、`Authorize`、`PreviewCapture`、`Capture`、`Summarize`、`Compare`、`Export`，且 summary/comparison 只能返回 allowlisted、显式版本化 DTO。
 
 ## 3. Contracts / Invariants
@@ -174,16 +176,17 @@ GET /api/evidence/{snapshot_id}
 - HTTP response由transport-owned显式DTO构建，只含allowlisted envelope、preview-bound precision/bucket/quota/retention/redaction、`renderer_version`和显式版本化`read_model`；禁止canonical payload、authorization digest、任意metadata或generic JSON fallback。
 - 预览错误必须可分类，不得把正常业务情况落成 `500 internal_error`：来源不存在、已删除、已退役或无权采集（含 `Authorize` 拒绝，统一包成 `evidence.ErrSourceNotFound`，resolver 用 `%w` 保留内层链）对外为 opaque `404 resource_not_found`；来源类型未知或来源 ID 不合法（`records.ErrInvalidSubjectReference`）是选择错误 `422 evidence_invalid`；解析结果与请求不一致（摘要、种类、ID、身份或项目不符）是完整性问题，不归入以上两类；内层是主体服务暂不可用（`store.ErrRecordSubjectUnavailable`）时为 `503 evidence_service_unavailable`；所选窗口内没有数据（监控零桶、事件/审计零条、无 IP 质量报告、无订阅账单或预算）为 `422 evidence_source_empty`；桶数或数据点超过单份上限（含 PostgreSQL loader 读到第 `MaxSnapshotDataPoints+1` 条时的提前终止、事件“事件数 + 指标数”超限）为 `422 evidence_window_too_large`。计数与条目不一致始终是完整性错误，先于“无数据 / 超上限”判定。选择参数本身非法仍是 `422 evidence_invalid`。
 - 带证据的 Records save 在发布时重新采集；来源已不可访问、窗口已无数据、超出上限或证据持久化冲突都说明预览不再成立，统一为 `409 evidence_preview_stale`，且必须先于 `ErrDenied -> 404` 判定（来源错误链带着内层拒绝，误判 404 会让客户端以为记录被撤销）；主体服务或证据容量暂不可用为 `503 record_service_unavailable`；`existing_snapshot_id` 找不到为 `422 record_invalid`。
+- ranked resource discovery 与最终 intent 消费保持相同的持久化冲突分类：intent 缺失、已消费或其持久绑定漂移均为 `409 evidence_preview_stale`；真实数据库故障保留原错误链，不伪装成预览冲突。
 - production bootstrap已具备closed source resolver与read/reference composition，但真实deployment-membership `AdmissionGate`和witnessed source-deletion authority仍是外部依赖；gate为nil/typed-nil时必须稳定503、零worker/零写，禁止allow-all fallback或仅为演示打开feature。
 
 ### 3.6 Deletion、export 与 recovery
 
 - `record_evidence` closed surfaces固定为`evidence_capture_intents`、`evidence_copy_lineage`、`evidence_payload_gc_receipts`、`evidence_payloads`、`evidence_purge_receipts`、`evidence_snapshots`、`record_revision_evidence`。descriptor不能接受占位或额外surface。
 - 删除record时只清其revision refs、intents和owned logical snapshots；其他record拥有的显式copy及其lineage必须存活。payload只在全局无snapshot引用时删除。
-- deletion receipt和recovery replay必须对相同输入幂等；已提交后响应丢失不能让重试永久冲突。分歧receipt/inventory必须失败关闭，不能`ON CONFLICT DO NOTHING`后假装成功。
+- deletion receipt必须对相同输入幂等；已提交后响应丢失不能让重试永久冲突。分歧receipt必须失败关闭，不能`ON CONFLICT DO NOTHING`后假装成功。
 - export只能在exact registry lookup、canonical reconstruction和授权成功后调用`kind.Export`；返回bytes仍需runtime forbidden-corpus检查，禁止raw canonical JSON fallback。
-- recovery inventory必须深拷贝并完整重放payload、logical snapshot、intent、revision ref、source authorization floor和copy lineage。所有snapshot时间必须exact UTC、无monotonic且PostgreSQL微秒可表示。
-- inventory中的每个payload必须被某个待恢复logical snapshot引用；恢复后GC按全局引用判断。`comparison.result/*`仅在具体kind/version已显式注册时可恢复，prefix本身不构成许可。
+- inventory 的纯校验要求每个payload被待恢复logical snapshot引用，source authorization、copy lineage和所有snapshot时间保持一致且时间为exact UTC、无monotonic、PostgreSQL微秒可表示。`comparison.result/*`仅在具体kind/version已显式注册时通过校验，prefix本身不构成许可。
+- 完整 authenticated maintenance recovery 仍未交付，runtime 不接受任意 inventory 的重放，也不将纯校验或无保护的 orphan sweep 作为恢复能力。将来实现必须闭合 source/birth 准入、writer fencing、copy lineage、恢复后全局引用检查与幂等重放，再声明 readiness。
 
 ### 3.7 Capacity、janitor 与 aggregate state
 
@@ -205,6 +208,12 @@ GET /api/evidence/{snapshot_id}
 - `POST /api/evidence/comparisons` 只接受 2–6 个 snapshot XOR `record_id+revision_id`。客户端不得提交 payload、单位转换或已计算差值。无 `Detail` 返回 review；有 `Detail` 只追加一个 kind/metric。
 - 非时序 kind 复用 pairwise `Kind.Compare(..., AlignmentExact)`，`item_index` 是真实 compared item。`actual_coverage` series / trend / matrix 只服务 `monitoring.host/v1` 与 `monitoring.probe/v2`：`AlignActualCoverage` 必须把 nearest 一对一匹配接到 series 与逐桶差，尊重 `BaselineIndex`，对每个非基准项配对；测试必须断言配对改变输出。空 metric 记 `metric_missing`，不得默默返回空图。当前 kind 的 `common_overlap` 只返回 blocked reason，不实现重聚合。
 - 任一 `metadata_only` 只跳过该 item 的 payload，不得短路整次数值计算。授权失败省略 snapshot（对外 404）；授权后 payload/hash 失败标 `Unreadable` 且不签发 intent。
+- 每项另有授权来源 sidecar `source_record_id`：snapshot-only 从本次授权后加载的 snapshot owner 取得；metadata-only 从已授权修订取得。它不是基础设施 `subject_id`，也不把 snapshot-only 改成 revision-bound；有修订上下文时仍保留独立 `record_id`/`revision_id`。HTTP evaluation 与 HMAC claims 携带该 sidecar，另存重读并逐项核对；缺失来源的旧 intent 或 owner 不匹配返回 `comparison_intent_stale`，不猜测或补造授权。
+- 此 sidecar 不进入历史 canonical comparison payload / digest，不改已有 B 的正文、payload 或 lineage。它是 G2 派生 dependency index 与浏览器失效所需的来源输入；新增来源字段本身不证明历史索引补齐或 comparison adapter readiness。
+- C81 native save 的 dependency index 在同一 revision 事务写入：comparison participant 先验证签名 claims 与实际 canonical items 的逐项绑定，并拒绝准备对象篡改 owner；evidence participant 插入 result 后写完整 source identity 集合及绑定 payload digest 的 completion。metadata-only 也产生 `(source_record_id, source_revision_id, NULL)`，不能把无 payload 当无依赖。源身份没有 live-source FK，删除源不改写这些历史字符串。
+- comparison result 的真实本地 copy 可继承其源 result 的认证索引，但必须重新验证 canonical bytes、源 completion 的 result/digest 绑定与每项完整覆盖；缺行、多行、归属歧义或 digest 不符均不完成索引。destination record 不是原始 source owner。导入只验证 canonical integrity 不足以证明嵌入 ID 属于本地，禁止按 ID 碰撞或“没有 import mapping”猜来源；无法证明时保留未完成状态，不能发零依赖 completion。历史/recovery 批处理与 deletion readiness 必须同样遵守这一边界。
+- maintenance 按 snapshot ID 的稳定 lexical cursor 每批最多100个实际 comparison result 做可重放补索引，轮末从头重新扫描；没有全局 done 位。canonical 不合法、版本不支持或来源无法认证的结果不写 completion，也不阻塞同一批其他可证明结果的检查。恢复须在 references/lineage 全部写入后做相同判定；unkeyed 派生 ID 和 recovery inventory 自报 lineage 不是 native-origin 认证。
+- 可认证的历史 copy 必须由已有完整索引的 parent result 在同一 owner revision 中绑定其真实 copied ID/hash/kind，再核对 lineage、source owner 及 source result 的认证依赖集合。只修复派生 index/completion，不改 canonical bytes、正文或 lineage。独立 readiness probe 使用一个 REPEATABLE READ READ ONLY admitted snapshot，逐结果验证真实 canonical 和完整依赖覆盖；任何未完成结果返回`comparison_dependency_index_incomplete`，不能凭维护 cursor 或总行数宣布完整。
 - `comparison.result/v1` 只固化系统可验证选择、条件、差异和告警，使用派生 envelope，不整份拷贝基准机器 Source/Authorization。无快照拷贝时仍写 result（只存条件与告警）。人工标题与 conclusion 留在 revision Markdown。kind 实现 Summarize / Compare(self/exact) / Export；无 live capture。
 - 另存走现有 `POST /api/records` / revisions + `Idempotency-Key` + `comparison_intent`。客户端不得发送 `evidence_items` 或自造 copied IDs。participant `Name() == "comparison"` 排在 `collaboration` 与 `evidence` 之间；copy 使用新 logical ID + lineage，source mutation = 0。HMAC claims 必须带上修订 `record_id`/`revision_id`、chosen snapshot 和 compare 时的 Detail；另存重算不得把修订项降级成 snapshot-only。HMAC 仍有效但过期的 intent 必须能重建同一 copy/result identity，以便同 key 重试到达 idempotent replay。
 - HMAC intent purpose 为 `comparison-save/v1`，独立 0400 regular file、`O_NOFOLLOW`，不复用 deletion/backup/session key。`HOUFENG_COMPARISON_ENABLED=true` 时 keyring 与 key id 必填。unreadable / hash / copy blocker 不签发 intent；签发失败不得保持 eligible 且无 token。
@@ -225,14 +234,14 @@ GET /api/evidence/{snapshot_id}
 | Preview/save 错误 | 来源不可访问 404、主体服务不可用 503、窗口无数据 422 `evidence_source_empty`、超上限 422 `evidence_window_too_large`；发布时重新采集失败 409 `evidence_preview_stale` | 正常业务情况落成 500、`%v` 丢掉内层错误链、发布时来源拒绝被映射成 404 |
 | Read | record+source授权先于kind/payload、exact registry、strict metadata/payload binding、versioned allowlist | denied actor区分unknown/corrupt payload、metadata-only读取payload bytes、静默normalize持久化envelope、raw payload/authorization/generic JSON |
 | Deletion/export | owned logical rows删除、global-ref payload GC、`kind.Export` | 删除其他copy、raw JSON export、不可重试receipt |
-| Recovery | deep-cloned reachable inventory、exact timestamp、同输入幂等 | orphan payload、浅拷贝TOCTOU、prefix kind放行、分歧replay |
+| Recovery | inventory 纯校验、exact timestamp、显式 kind/version | 普通 runtime 任意写入恢复 inventory、将纯校验当作恢复 readiness |
 | Capacity | project logical bytes、warning可确认、exact boundary、existing ref豁免 | attachment quota、physical dedup折扣、stale/exceeded/unavailable写intent或snapshot |
 | Janitor/metrics | bounded DB-time cleanup、global-ref GC、aggregate defensive snapshot | unbounded scan、local-time age、identity/digest/payload label、nil gate log loop |
 | Comparison workbench | 2–6 authorized items、host/probe-only series、HMAC intent、copy-lineage save、capability default-off | generic JSON/Markdown 抽指标、source mutation、human conclusion 进 derived evidence、4 GiB harness 冒充本 child 退出门 |
 
 ## 5. Good / Baseline / Bad
 
-Good：正常业务 writer 通过 typed builder 保存闭合 metadata，真实 PostgreSQL 测试调用公开 writer/revision participant/RecoveryAdapter，再经 source 与 adapter 读取；custom source hostile corpus、summary/compare/export 与 canonical bytes 都有失败关闭断言。删除与恢复的相同请求可在ambiguous commit后安全重试；并发new capture经project lock最多一个越过剩余容量，loser完整回滚并保留intent。
+Good：正常业务 writer 通过 typed builder 保存闭合 metadata，真实 PostgreSQL 测试调用公开 writer/revision participant，再经 source 与 adapter 读取；custom source hostile corpus、summary/compare/export 与 canonical bytes 都有失败关闭断言。删除相同请求可在ambiguous commit后安全重试；并发new capture经project lock最多一个越过剩余容量，loser完整回滚并保留intent。
 
 Baseline：legacy dashboard row 可用 `created_at`/旧 backfill inference 展示，但只限字段确实缺失；legacy/incomplete row 不能被 `monitoring.event/v2` 捕获为权威 snapshot。生产 gate 已接线；gate 不可用时 Evidence/带证据 save 必须失败关闭为 503，不能用注入依赖的 domain/handler 测试代替真实准入证据。
 

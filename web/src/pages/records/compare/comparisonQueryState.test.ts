@@ -67,6 +67,18 @@ describe('comparison query state', () => {
     expect(comparisonHref(FIXED)).toBe(`/records/compare?state=${encoded}`)
   })
 
+  it('roundtrips reserved-domain revision items and rejects malformed record identities', () => {
+    const reserved = `rec2_${'a'.repeat(32)}`
+    const state: ComparisonURLState = { ...FIXED, items: [{ snapshot_id: 'evs_a' }, { record_id: reserved, revision_id: 'rrv_2' }] }
+    expect(parseComparisonURLState(encodeComparisonURLState(state))).toEqual({ ok: true, state })
+    for (const malformed of [`rec2_${'a'.repeat(31)}`, `rec2_${'A'.repeat(32)}`, 'rec_B', 'rec_b:rrv_x', 'rrv_2']) {
+      const tampered = { ...FIXED, items: [{ snapshot_id: 'evs_a' }, { record_id: malformed, revision_id: 'rrv_2' }] }
+      expect(parseComparisonURLState(encodeComparisonURLState(tampered)), malformed).toEqual({ ok: false, reason: 'invalid' })
+      expect(addFixedComparisonItem(FIXED, { record_id: malformed, revision_id: 'rrv_9' }), malformed)
+        .toEqual({ ok: true, changed: false, state: FIXED })
+    }
+  })
+
   it('roundtrips candidate subject mode without inventing fixed IDs', () => {
     expect(parseComparisonURLState(encodeComparisonURLState(CANDIDATE))).toEqual({
       ok: true,

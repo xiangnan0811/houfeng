@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,6 +36,7 @@ import (
 	"houfeng/internal/center/notify"
 	"houfeng/internal/center/portability"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
@@ -64,6 +66,9 @@ type bootstrapDeps struct {
 	openPostgres                func(context.Context, string) (postgresDB, error)
 	applyMigrations             func(context.Context, postgresDB) error
 	admitRuntime                func(context.Context, postgresDB) error
+	loadRuntimeLaunch           func(string, string) (recordbirth.LaunchBinding, [32]byte, error)
+	verifyRuntimeLaunch         func(context.Context, *pgxpool.Pool, *recordbirth.PostgresAuthority, recordbirth.LaunchBinding) error
+	newRecordAdmissionGate      func(config.CenterConfig) (store.AdmissionGate, error)
 	ensureSearchGeneration      func(context.Context, postgresDB) error
 	ensureActivityGeneration    func(context.Context, postgresDB) error
 	newActivityProjectionWorker func(*pgxpool.Pool, string) (centerapp.Worker, error)
@@ -106,19 +111,67 @@ type recordCollaborationRuntime struct {
 	watchesHandler             http.Handler
 	inboxHandler               http.Handler
 	portabilityHandler         http.Handler
+	clientCleanup              *store.PostgresRecordClientCleanupRepository
 	projectionWorker           *recordcollaboration.NotificationProjectionWorker
 	activityDeletionAdapter    recorddeletion.Adapter
 	portabilityDeletionAdapter recorddeletion.Adapter
 	readiness                  *recordreadiness.Registry
+	closeBlob                  func()
 }
 
 func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version string, deps bootstrapDeps) (appRunner, func(), error) {
 	deps = deps.withDefaults()
 
-	db, err := deps.openPostgres(ctx, cfg.DatabaseURL)
+	databaseURL := cfg.DatabaseURL
+	var launch recordbirth.LaunchBinding
+	if cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission {
+		var digest [32]byte
+		var err error
+		launch, digest, err = deps.loadRuntimeLaunch(cfg.BirthLaunchFile, "center")
+		if err != nil {
+			return nil, nil, fmt.Errorf("load record birth launch: %w", err)
+		}
+		if launch.ProcessKind != "center" || launch.DeploymentID == "" || launch.DeploymentID != cfg.RecordDeploymentID {
+			return nil, nil, errors.New("record birth launch deployment mismatch")
+		}
+		databaseURL, err = recordbirth.WithRuntimeLaunch(databaseURL, digest)
+		if err != nil {
+			return nil, nil, fmt.Errorf("bind record birth launch to APP connection: %w", err)
+		}
+	}
+	db, err := deps.openPostgres(ctx, databaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
+	var birthAuthority recordbirth.Authority
+	var birthReader recordbirth.ContinuityReader
+	var closeBirthReader func()
+	var closeBirth func()
+	var closeBlob func()
+	var closeOnce sync.Once
+	cleanup := func() {
+		closeOnce.Do(func() {
+			if closeBlob != nil {
+				closeBlob()
+			}
+			if closeBirth != nil {
+				closeBirth()
+			}
+			if closeBirthReader != nil {
+				closeBirthReader()
+			}
+			if witness := deps.recordSubjectTombstoneWitness; witness != nil && witness != db.Pool() {
+				witness.Close()
+			}
+			db.Close()
+		})
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			cleanup()
+		}
+	}()
 	if deps.recordSubjectTombstoneWitness == nil {
 		witnessURL := strings.TrimSpace(os.Getenv("HOUFENG_DELETION_WITNESS_DATABASE_URL"))
 		witnessApplication := config.DeploymentSettingApplicationInactive
@@ -134,7 +187,6 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		if witnessURL != "" {
 			witnessPool, err := pgxpool.New(ctx, witnessURL)
 			if err != nil {
-				db.Close()
 				return nil, nil, fmt.Errorf("open deletion witness: %w", err)
 			}
 			deps.recordSubjectTombstoneWitness = witnessPool
@@ -144,28 +196,53 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	switch cfg.RecordPlatformMode {
 	case config.RecordPlatformModeLegacy:
 		if err := deps.applyMigrations(ctx, db); err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("apply migrations: %w", err)
 		}
 	case config.RecordPlatformModeRuntimeAdmission:
 		if err := deps.admitRuntime(ctx, db); err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("admit app runtime: %w", err)
 		}
 	default:
-		db.Close()
 		return nil, nil, fmt.Errorf("unknown record-platform mode %d", cfg.RecordPlatformMode)
+	}
+	if cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission {
+		var reader *recordbirth.PostgresAuthority
+		var readerPool *pgxpool.Pool
+		if launch.BirthInstalled {
+			reader, readerPool, err = openProductionBirthReader(ctx, cfg, db.Pool(), deps.recordSubjectTombstoneWitness)
+			if err != nil {
+				return nil, nil, fmt.Errorf("open record birth continuity reader: %w", err)
+			}
+			closeBirthReader = readerPool.Close
+			birthReader = reader
+		}
+		if err := deps.verifyRuntimeLaunch(ctx, db.Pool(), reader, launch); err != nil {
+			return nil, nil, fmt.Errorf("verify record birth launch: %w", err)
+		}
+		if launch.BirthInstalled {
+			var birthPool *pgxpool.Pool
+			birthAuthority, birthPool, err = openProductionBirthAuthority(ctx, cfg, db.Pool(), deps.recordSubjectTombstoneWitness, readerPool)
+			if err != nil {
+				return nil, nil, fmt.Errorf("open record birth authority: %w", err)
+			}
+			if birthPool != nil {
+				closeBirth = birthPool.Close
+			}
+		}
+	} else {
+		// Preserve the legacy configuration rejection without opening W2.
+		if _, _, err := openProductionBirthAuthority(ctx, cfg, db.Pool(), deps.recordSubjectTombstoneWitness, nil); err != nil {
+			return nil, nil, fmt.Errorf("open record birth authority: %w", err)
+		}
 	}
 	// The search projector only writes published or building generations, so one
 	// has to exist before the first record commits or nothing would be indexed.
 	if err := deps.ensureSearchGeneration(ctx, db); err != nil {
-		db.Close()
 		return nil, nil, err
 	}
 	// The activity worker waits when no generation is active, so a fresh install
 	// needs one before the first pass or nothing would be projected.
 	if err := deps.ensureActivityGeneration(ctx, db); err != nil {
-		db.Close()
 		return nil, nil, err
 	}
 
@@ -202,12 +279,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
 	intelligenceWorker, err := ipquality.NewIntelligenceWorker(ipQualityRepo, settingsRepo, slog.Default())
 	if err != nil {
-		db.Close()
 		return nil, nil, fmt.Errorf("initialize IP quality intelligence worker: %w", err)
 	}
 	receiverHealthObserver, err := deps.newReceiverHealthObserver(ctx, db.Pool())
 	if err != nil {
-		db.Close()
 		return nil, nil, fmt.Errorf("initialize receiver health: %w", err)
 	}
 	sparklinesRepo := store.NewPostgresMonitoringInstanceSparklinesRepository(db.Pool())
@@ -252,11 +327,9 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	userRepo := store.NewPostgresUserRepository(db.Pool())
 	sessionRepo, err := deps.newSessionRepository(db.Pool(), cfg.SessionHMACKey)
 	if err != nil {
-		db.Close()
 		return nil, nil, fmt.Errorf("create session repository: %w", err)
 	}
 	if err := deps.seedInitialUser(ctx, userRepo, cfg); err != nil {
-		db.Close()
 		return nil, nil, fmt.Errorf("seed initial user: %w", err)
 	}
 	authSvc := auth.New(userRepo, sessionRepo, auth.Options{
@@ -280,9 +353,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		Portability: recordsEnabled && cfg.PortabilityEnabled,
 	}
 	if recordsEnabled && nilBootstrapAdmissionGate(deps.recordPlatformAdmissionGate) {
-		gate, gateErr := newProductionRecordPlatformAdmissionGate(cfg)
+		gate, gateErr := deps.newRecordAdmissionGate(cfg)
 		if gateErr != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("create record platform admission gate: %w", gateErr)
 		}
 		deps.recordPlatformAdmissionGate = gate
@@ -304,6 +376,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		reservedKeyPaths := comparisonReservedKeyPaths(&cfg)
 		recordsHandler, recordSearchHandler, recordActionsHandler, recordCommentsHandler, recordDraftsHandler, recordDeletionsHandler, evidenceHandler,
 			attachmentUploadsHandler, attachmentsHandler, collaborationRuntime, evidenceMaintenance, err = newRecordsHTTPHandlers(
+			ctx,
 			db.Pool(),
 			vpsAssetRepo,
 			monitoringInstanceRepo,
@@ -316,6 +389,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			deps.recordPlatformAdmissionGate,
 			cfg,
 			deps.recordSubjectTombstoneWitness,
+			birthReader,
+			birthAuthority,
 			comparisonRuntimeConfig{
 				Enabled:          cfg.ComparisonEnabled,
 				AdmissionBudget:  cfg.ComparisonAdmissionBudget,
@@ -325,9 +400,9 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			},
 		)
 		if err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("create records handlers: %w", err)
 		}
+		closeBlob = collaborationRuntime.closeBlob
 		subjectActivityHandler, err = deps.newSubjectActivityHandler(
 			db.Pool(),
 			vpsAssetRepo,
@@ -336,7 +411,6 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			cfg.SessionHMACKey,
 		)
 		if err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("create subject activity handler: %w", err)
 		}
 	}
@@ -355,7 +429,6 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		recordsEnabled,
 	)
 	if err != nil {
-		db.Close()
 		return nil, nil, fmt.Errorf("create vps overview handler: %w", err)
 	}
 
@@ -380,6 +453,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		RecordInboxHandler:                        collaborationRuntime.inboxHandler,
 		RecordDraftsHandler:                       recordDraftsHandler,
 		RecordDeletionsHandler:                    recordDeletionsHandler,
+		RecordClientCleanupHandler:                handlers.RecordClientCleanupStream(collaborationRuntime.clientCleanup, authSvc),
+		RecordClientCleanupReconcileHandler:       handlers.RecordClientCleanupReconcile(collaborationRuntime.clientCleanup),
 		RecordPortabilityHandler:                  collaborationRuntime.portabilityHandler,
 		EvidenceHandler:                           evidenceHandler,
 		AttachmentUploadsHandler:                  attachmentUploadsHandler,
@@ -499,7 +574,6 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		// generation a still-live process is writing.
 		rebuildOwnerID, err := ids.New("rso")
 		if err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("mint record search rebuild owner id: %w", err)
 		}
 		// The in-transaction projector only indexes commits, so records that
@@ -516,31 +590,21 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			},
 		)
 		if err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("create record search rebuild worker: %w", err)
 		}
 		workers = append(workers, searchRebuilder)
 
 		activityOwnerID, err := ids.New("rao")
 		if err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("mint activity projection owner id: %w", err)
 		}
 		activityWorker, err := deps.newActivityProjectionWorker(db.Pool(), activityOwnerID)
 		if err != nil {
-			db.Close()
 			return nil, nil, fmt.Errorf("create activity projection worker: %w", err)
 		}
 		workers = append(workers, activityWorker)
 	}
-	cleanup := db.Close
-	if deps.recordSubjectTombstoneWitness != nil && deps.recordSubjectTombstoneWitness != db.Pool() {
-		witness := deps.recordSubjectTombstoneWitness
-		cleanup = func() {
-			witness.Close()
-			db.Close()
-		}
-	}
+	transferred = true
 	return deps.newApp(cfg.HTTPAddr, router, workers...), cleanup, nil
 }
 
@@ -729,17 +793,17 @@ func newProductionWitnessedRecordSubjectTombstoneSource(
 	cfg config.CenterConfig,
 	local *pgxpool.Pool,
 	witness *pgxpool.Pool,
-) store.WitnessedRecordSubjectTombstoneSource {
-	reader, err := store.NewWitnessedRecordSubjectTombstoneReader(
+) (*store.WitnessedRecordSubjectTombstoneReader, error) {
+	authority, err := configuredSourceAuthority(local, witness)
+	if err != nil {
+		return nil, err
+	}
+	return store.NewWitnessedRecordSubjectTombstoneReader(
 		recordplatform.DeploymentID(strings.TrimSpace(cfg.RecordDeploymentID)),
 		recordauth.ProjectIDDefault,
-		optionalRecordSubjectQueryer(witness),
+		authority,
 		optionalRecordSubjectQueryer(local),
 	)
-	if err != nil {
-		return &store.WitnessedRecordSubjectTombstoneReader{}
-	}
-	return reader
 }
 
 func optionalRecordSubjectQueryer(pool *pgxpool.Pool) *pgxpool.Pool {
@@ -808,6 +872,9 @@ func comparisonReservedKeyPaths(cfg *config.CenterConfig) []string {
 			config.DeploymentSettingApplicationReservationOnly,
 			backupHMACPath != "",
 		)
+		if cfg.BirthProducer.CredentialFile != "" {
+			reserved = append(reserved, cfg.BirthProducer.CredentialFile)
+		}
 	}
 	if recordDeletionPath != "" {
 		reserved = append(reserved, recordDeletionPath)
@@ -819,6 +886,7 @@ func comparisonReservedKeyPaths(cfg *config.CenterConfig) []string {
 }
 
 func newRecordsHTTPHandlers(
+	ctx context.Context,
 	pool *pgxpool.Pool,
 	vpsRepository *store.PostgresVPSAssetRepository,
 	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
@@ -828,12 +896,20 @@ func newRecordsHTTPHandlers(
 	gate store.AdmissionGate,
 	cfg config.CenterConfig,
 	tombstoneWitness *pgxpool.Pool,
+	birthReader recordbirth.ContinuityReader,
+	birthAuthority recordbirth.Authority,
 	comparison comparisonRuntimeConfig,
 ) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, recordCollaborationRuntime, *centerevidence.MaintenanceWorker, error) {
 	effectiveGate := gate
 	if nilBootstrapAdmissionGate(effectiveGate) {
 		effectiveGate = nil
 	}
+	birthApplication := store.NewPostgresRecordBirthRepository(pool, effectiveGate, nil)
+	birthCoordinator, err := recordbirth.NewCoordinator(birthApplication, birthReader, birthAuthority)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record birth coordinator: %w", err)
+	}
+	birthRepository := store.NewPostgresRecordBirthRepository(pool, effectiveGate, birthCoordinator)
 	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
 		store.NewVPSRecordSubjectAdapter(vpsRepository),
 		store.NewMonitoringInstanceRecordSubjectAdapter(monitoringInstanceRepository),
@@ -842,13 +918,17 @@ func newRecordsHTTPHandlers(
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record subject registry: %w", err)
 	}
-	witness := newProductionWitnessedRecordSubjectTombstoneSource(cfg, pool, tombstoneWitness)
+	witness, err := newProductionWitnessedRecordSubjectTombstoneSource(cfg, pool, tombstoneWitness)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, err
+	}
 	subjectResolver := store.NewRecordSubjectReadResolver(subjects, witness)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, subjectResolver, effectiveGate)
 	var evidenceComposition *productionEvidenceComposition
 	if effectiveGate != nil {
 		evidenceComposition, err = newProductionEvidenceComposition(productionEvidenceCompositionDependencies{
 			Pool: pool, Gate: effectiveGate, Subjects: subjects, Sources: evidenceSources,
+			Birth: birthCoordinator, Allocations: birthRepository,
 			Tombstones:        witness,
 			ComparisonEnabled: comparison.Enabled,
 			Comparison:        comparison,
@@ -873,18 +953,47 @@ func newRecordsHTTPHandlers(
 		store.NewComparisonRevisionParticipant(comparisonSigner),
 		store.NewRecordEvidenceRevisionParticipant(),
 		store.NewRecordSearchRevisionParticipant(),
-	})
+	}, authorizations, birthCoordinator)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record repository: %w", err)
 	}
 	draftRepository := store.NewPostgresRecordDraftRepository(pool, effectiveGate)
+	if err := draftRepository.ConfigureRecordMutationAuthorization(collaborationMembers, authorizations); err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure draft mutation authorization: %w", err)
+	}
 	attachmentRepository := store.NewPostgresAttachmentRepository(pool)
+	if err := attachmentRepository.ConfigureRecordMutationAuthorization(collaborationMembers, authorizations); err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure attachment mutation authorization: %w", err)
+	}
 	contentLeaseRepository := store.NewPostgresRecordPlatformRepository(pool, effectiveGate)
-	blob, err := newAttachmentBlobStore(attachmentConfig)
+	localRepository := store.NewPostgresLocalBlobRepository(pool, witness, birthCoordinator)
+	blob, err := newAttachmentBlobStore(ctx, attachmentConfig, localRepository)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment Blob store: %w", err)
 	}
-	if err := attachmentRepository.ConfigureAttachmentDeletionBlobStore(attachmentConfig.BlobBackend, blob); err != nil {
+	keepBlob := false
+	defer func() {
+		if !keepBlob {
+			if local, ok := blob.(*attachments.LocalBlobStore); ok {
+				_ = local.Close()
+			}
+		}
+	}()
+	writer, err := attachments.NewManagedBlobWriter(blob, attachmentConfig.BlobBackend, localRepository)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create managed attachment writer: %w", err)
+	}
+	var localCleanup *attachments.LocalCleanupCoordinator
+	if local, ok := blob.(*attachments.LocalBlobStore); ok {
+		coordinator, cleanupErr := attachments.NewLocalCleanupCoordinator(local, localRepository)
+		if cleanupErr == nil {
+			cleanupErr = attachmentRepository.ConfigureAttachmentDeletionLocalCleanup(coordinator)
+		}
+		if cleanupErr != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure local attachment cleanup: %w", cleanupErr)
+		}
+		localCleanup = coordinator
+	} else if err := attachmentRepository.ConfigureAttachmentDeletionBlobStore(attachmentConfig.BlobBackend, blob); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure attachment deletion Blob store: %w", err)
 	}
 	scanner, err := newAttachmentScanner(attachmentConfig)
@@ -896,6 +1005,7 @@ func newRecordsHTTPHandlers(
 		attachmentRepository,
 		blob,
 		attachments.UploadServiceOptions{
+			Writer:                  writer,
 			TransportKind:           attachments.TransportKind(attachmentConfig.BlobBackend),
 			Limits:                  attachmentConfig.Limits,
 			ArchiveScannerReadiness: newArchiveScannerReadiness(scanner),
@@ -920,7 +1030,7 @@ func newRecordsHTTPHandlers(
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record read service: %w", err)
 	}
-	revisionService, err := centerrecords.NewRevisionService(subjects, authorizations, recordRepository)
+	revisionService, err := centerrecords.NewRevisionService(subjects, authorizations, recordRepository, birthCoordinator)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record revision service: %w", err)
 	}
@@ -1041,6 +1151,11 @@ func newRecordsHTTPHandlers(
 	// until every RequiredAdapterNames member is wired and healthy, the
 	// production deletion transport remains explicitly closed.
 	deletionRepository := store.NewPostgresRecordDeletionRepository(pool, effectiveGate)
+	if localCleanup != nil {
+		if err := deletionRepository.ConfigurePortabilityDeletionLocalCleanup(localCleanup); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure local portability cleanup: %w", err)
+		}
+	}
 	activityDeletionAdapter, err := activity.NewDeletionAdapter(deletionRepository)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create activity deletion adapter: %w", err)
@@ -1088,24 +1203,28 @@ func newRecordsHTTPHandlers(
 			snapshotSource = evidenceComposition.repository
 		}
 		portabilityOptions := portability.Options{
-			Enabled:         true,
-			BackendKind:     backendKind,
-			Documents:       application,
-			Jobs:            store.NewPostgresRecordPortabilityRepository(pool, effectiveGate),
-			Evidence:        evidenceExporter,
-			Snapshots:       snapshotSource,
-			Comparison:      comparisonKind,
-			Activity:        activityReader,
-			PDF:             portability.NewIsolatedDocumentPDFRenderer(contentProcessorPDFBinary()),
-			Imports:         store.NewPostgresRecordPortabilityRepository(pool, effectiveGate),
-			Importer:        application,
-			EvidenceImports: portability.NewKnownKindEvidenceImporter(),
-			Subjects:        subjects,
-			Rebuilder:       portability.NewAuthoritativeProjectionRebuilder(),
-			Staging:         portability.NewLeasedBlobStore(blob),
-			Attachments:     portability.NewDownloadAttachmentSource(downloadService),
-			AttachmentBlobs: blob,
-			ImportBlobGC:    attachmentRepository,
+			Enabled:             true,
+			BackendKind:         backendKind,
+			Documents:           application,
+			Jobs:                store.NewPostgresRecordPortabilityRepository(pool, effectiveGate, witness, birthCoordinator),
+			Evidence:            evidenceExporter,
+			Snapshots:           snapshotSource,
+			Comparison:          comparisonKind,
+			Activity:            activityReader,
+			PDF:                 portability.NewIsolatedDocumentPDFRenderer(contentProcessorPDFBinary()),
+			Imports:             store.NewPostgresRecordPortabilityRepository(pool, effectiveGate, witness, birthCoordinator),
+			Importer:            application,
+			BirthCoordinator:    birthCoordinator,
+			BirthAllocations:    birthRepository,
+			ImportAuthorization: authorizations,
+			EvidenceImports:     portability.NewKnownKindEvidenceImporter(),
+			Subjects:            subjects,
+			Rebuilder:           portability.NewAuthoritativeProjectionRebuilder(),
+			Staging:             portability.NewLeasedBlobStore(blob, writer),
+			Attachments:         portability.NewDownloadAttachmentSource(downloadService),
+			AttachmentBlobs:     blob,
+			AttachmentWriter:    writer,
+			ImportBlobGC:        attachmentRepository,
 		}
 		if evidenceComposition != nil {
 			portabilityOptions.Kinds = evidenceComposition.registry
@@ -1117,7 +1236,14 @@ func newRecordsHTTPHandlers(
 		collaborationRuntime.portabilityHandler = handlers.RecordPortability(portabilityService)
 	}
 
-	recordOptions := handlers.RecordHandlerOptions{EvidencePreparer: evidencePreparer}
+	recordOptions := handlers.RecordHandlerOptions{
+		Birth: birthCoordinator, Allocations: birthRepository,
+		CreateReplay:     recordRepository.LookupCompletedRecordCreate,
+		EvidencePreparer: evidencePreparer,
+	}
+	if evidenceComposition != nil {
+		recordOptions.ComparisonReplay = evidenceComposition.application
+	}
 	if comparison.Enabled && evidenceComposition != nil {
 		recordOptions.ComparisonSave = evidenceComposition.application
 		recordOptions.CompletedIdempotency = func(
@@ -1133,6 +1259,11 @@ func newRecordsHTTPHandlers(
 			})
 		}
 	}
+	collaborationRuntime.clientCleanup = store.NewPostgresRecordClientCleanupRepository(pool, effectiveGate, authorizations)
+	if local, ok := blob.(*attachments.LocalBlobStore); ok {
+		collaborationRuntime.closeBlob = func() { _ = local.Close() }
+	}
+	keepBlob = true
 	return handlers.RecordsWithOptions(application, recordOptions),
 		handlers.RecordSearch(searchService),
 		handlers.RecordActions(actionApplication), handlers.RecordComments(commentApplication), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), evidenceHandler,
@@ -1176,21 +1307,15 @@ func newProductionRecordReadinessRegistry(
 	deletions = append(deletions, collaborationDeletion)
 
 	recoveries := make([]recordreadiness.RecoveryAdapter, 0, 4)
-	if _, err := recorddeletion.NewRecoveryAdapter(deletionRepository); err == nil {
-		recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
-			recordreadiness.CapabilityRecoveryRecordCore, recordreadiness.CapabilityContractVersionV1,
-		))
-	}
+	// Core replay is available only through the management coordinator's held
+	// maintenance fence and independently verified ledger, not this runtime pool.
 	if _, err := attachments.NewRecoveryAdapter(attachmentRepository); err == nil {
 		recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
 			recordreadiness.CapabilityRecoveryRecordAttachments, recordreadiness.CapabilityContractVersionV1,
 		))
 	}
-	if evidenceComposition != nil && evidenceComposition.recovery != nil {
-		recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
-			recordreadiness.CapabilityRecoveryRecordEvidence, recordreadiness.CapabilityContractVersionV1,
-		))
-	}
+	// Evidence restoration requires an authenticated maintenance executor.
+	// An ordinary runtime repository is not that recovery authority.
 	if activityStore, err := store.NewActivityProjectionRepository(pool); err == nil {
 		if _, err := activity.NewRecoveryAdapter(activityStore); err == nil {
 			recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
@@ -1228,10 +1353,10 @@ type attachmentBlobStore interface {
 	attachments.BlobGCDeleter
 }
 
-func newAttachmentBlobStore(attachmentConfig config.AttachmentConfig) (attachmentBlobStore, error) {
+func newAttachmentBlobStore(ctx context.Context, attachmentConfig config.AttachmentConfig, repository attachments.LocalNamespaceRepository) (attachmentBlobStore, error) {
 	switch attachmentConfig.BlobBackend {
 	case attachments.BackendKindLocal:
-		return attachments.NewLocalBlobStore(attachmentConfig.BlobRoot)
+		return attachments.NewLocalBlobStore(ctx, attachmentConfig.BlobRoot, repository)
 	case attachments.BackendKindS3:
 		client, err := minio.New(attachmentConfig.S3Endpoint, &minio.Options{
 			Creds:  credentials.NewStaticV4(attachmentConfig.S3AccessKey, attachmentConfig.S3SecretKey, ""),
@@ -1287,6 +1412,15 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 			}
 			return pgxPostgresDB{pool: pool}, nil
 		}
+	}
+	if d.loadRuntimeLaunch == nil {
+		d.loadRuntimeLaunch = recordbirth.LoadRuntimeLaunchBinding
+	}
+	if d.verifyRuntimeLaunch == nil {
+		d.verifyRuntimeLaunch = recordbirth.VerifyRuntimeLaunch
+	}
+	if d.newRecordAdmissionGate == nil {
+		d.newRecordAdmissionGate = newProductionRecordPlatformAdmissionGate
 	}
 	if d.applyMigrations == nil {
 		d.applyMigrations = func(ctx context.Context, db postgresDB) error {

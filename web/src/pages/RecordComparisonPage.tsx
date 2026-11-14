@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { Button } from '../components/atoms'
 import { PageState } from '../components/PageState'
@@ -68,6 +69,7 @@ function windowLabel(from: string, to: string): string {
 }
 
 export function RecordComparisonPage() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { state, commands } = useComparisonWorkbench({ userId: user?.user_id ?? '' })
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -164,6 +166,7 @@ export function RecordComparisonPage() {
               title="比较不可用"
               description={state.error}
               {...(state.errorCode ? { technicalSummary: state.errorCode } : {})}
+              action={<Button variant="secondary" size="lg" onClick={() => navigate('/records')}>返回记录列表</Button>}
             />
           ) : null}
 
@@ -228,19 +231,24 @@ export function RecordComparisonPage() {
             selectionError={state.selectionError}
             onAdd={commands.addFixedItem}
           />
-          <ComparisonSaveRecord
-            blocked={state.saveBlocked}
-            {...(state.saveBlocked ? {
-              blockers: comparison?.save_eligibility.blockers ?? [],
-            } : {})}
-            title={state.title}
-            conclusion={state.conclusion}
-            saving={state.saving}
-            savedRecordId={state.savedRecordId}
-            onTitle={commands.setTitle}
-            onConclusion={commands.setConclusion}
-            onSave={() => { void commands.save() }}
-          />
+          {!state.error || comparison ? (
+            <ComparisonSaveRecord
+              blocked={state.saveBlocked}
+              {...(state.saveBlocked ? {
+                blockers: comparison?.save_eligibility.blockers ?? [],
+              } : {})}
+              title={state.title}
+              conclusion={state.conclusion}
+              saving={state.saving}
+              savedRecordId={state.savedRecordId}
+              unresolved={state.saveUnresolved}
+              feedback={state.saveFeedback}
+              onTitle={commands.setTitle}
+              onConclusion={commands.setConclusion}
+              onDiscardUnresolved={commands.discardUnresolvedSave}
+              onSave={() => { void commands.save() }}
+            />
+          ) : null}
         </div>
       </div>
     </div>

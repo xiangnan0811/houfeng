@@ -14,8 +14,9 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/http/sessionctx"
-	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordmarkdown"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
@@ -43,7 +44,10 @@ type recordHandlerApplication interface {
 }
 
 type RecordHandlerOptions struct {
-	NewRecordID          func() (string, error)
+	Birth                *recordbirth.Coordinator
+	Allocations          recordAllocationRepository
+	CreateReplay         recordCreateReplayLookup
+	ComparisonReplay     recordComparisonReplayService
 	EvidencePreparer     recordEvidencePreparationService
 	ComparisonSave       recordComparisonSaveService
 	CompletedIdempotency completedComparisonSaveLookup
@@ -69,9 +73,6 @@ func Records(application recordHandlerApplication) http.Handler {
 }
 
 func RecordsWithOptions(application recordHandlerApplication, options RecordHandlerOptions) http.Handler {
-	if options.NewRecordID == nil {
-		options.NewRecordID = func() (string, error) { return ids.New("rec") }
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Cache-Control", recordPrivateCacheControl)
 		actor, ok := sessionctx.ActorScopeFromContext(request.Context())
@@ -84,6 +85,10 @@ func RecordsWithOptions(application recordHandlerApplication, options RecordHand
 			return
 		}
 
+		if request.URL.Path == "/api/records/allocations" {
+			handleRecordAllocations(w, request, actor, options)
+			return
+		}
 		if request.URL.Path == "/api/records" {
 			handleRecordsCollection(w, request, actor, application, options)
 			return
@@ -139,6 +144,10 @@ func handleRecordsCollection(
 		if !decodeRecordsRequestJSON(w, request, &input) {
 			return
 		}
+		allocation, ok := prepareRecordCreatePublication(w, request, actor, application, options, input, idempotencyKey)
+		if !ok {
+			return
+		}
 		draft, etag, values, references, ok := prepareRecordDraftForPublish(w, request, actor, application, input)
 		if !ok {
 			return
@@ -147,18 +156,7 @@ func handleRecordsCollection(
 			writeRecordsApplicationError(w, records.ErrDraftRevisionConflict)
 			return
 		}
-		recordID := input.RecordID
-		if recordID == "" {
-			var err error
-			recordID, err = options.NewRecordID()
-			if err != nil || !validRecordTransportID(recordID) {
-				writeRecordError(w, http.StatusInternalServerError, "internal_error", "internal server error", nil)
-				return
-			}
-		} else if !validRecordTransportID(recordID) || (len(input.EvidenceItems) == 0 && input.ComparisonIntent == "") {
-			writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid server-owned record identity", nil)
-			return
-		}
+		recordID := allocation.RecordID
 		evidencePreparation, ok := prepareRecordEvidenceOrComparison(
 			w, request, actor, options, recordID, input, idempotencyKey, recordplatform.OperationKindRecordCreate,
 		)
@@ -167,6 +165,7 @@ func handleRecordsCollection(
 		}
 		result, err := application.CreateRecord(request.Context(), records.RecordCreateRequest{
 			Actor:               actor,
+			Allocation:          &allocation,
 			RecordID:            recordID,
 			DraftID:             draft.DraftID,
 			DraftETag:           etag,
@@ -353,7 +352,7 @@ func handleRecordRevisionRestore(
 		evidenceItems = append(evidenceItems, recordEvidenceItemInput{ExistingSnapshotID: snapshotID})
 	}
 	evidencePreparation, ok := prepareRecordEvidence(
-		w, request, actor, options.EvidencePreparer, recordID, evidenceItems,
+		w, request, actor, options.EvidencePreparer, recordID, "", evidenceItems,
 	)
 	if !ok {
 		return
@@ -409,6 +408,7 @@ func handleRecordLifecycle(
 }
 
 type recordPublishRequest struct {
+	Allocation       *recordAllocationResponse `json:"allocation,omitempty"`
 	RecordID         string                    `json:"record_id,omitempty"`
 	DraftID          string                    `json:"draft_id"`
 	DraftETag        string                    `json:"draft_etag"`
@@ -465,6 +465,10 @@ func prepareRecordEvidenceOrComparison(
 	idempotencyKey string,
 	operation recordplatform.OperationKind,
 ) (evidence.RevisionPreparation, bool) {
+	allocationID := ""
+	if input.Allocation != nil {
+		allocationID = input.Allocation.AllocationID
+	}
 	if input.ComparisonIntent != "" {
 		if len(input.EvidenceItems) != 0 {
 			writeRecordError(w, http.StatusBadRequest, "invalid_request", "comparison save cannot include client evidence items", nil)
@@ -476,9 +480,10 @@ func prepareRecordEvidenceOrComparison(
 		}
 		saveRequest := evidence.ComparisonSaveRequest{
 			Actor: actor, RecordID: recordID, Token: input.ComparisonIntent,
+			AllocationID: allocationID,
 		}
 		plan, err := options.ComparisonSave.PrepareComparisonSave(request.Context(), saveRequest)
-		if errors.Is(err, evidence.ErrComparisonIntentExpired) {
+		if errors.Is(err, evidence.ErrComparisonIntentExpired) && operation != recordplatform.OperationKindRecordCreate {
 			completed, peekErr := peekCompletedComparisonSave(
 				request.Context(), options, actor, operation, idempotencyKey,
 			)
@@ -504,7 +509,7 @@ func prepareRecordEvidenceOrComparison(
 		}
 		return prepared, true
 	}
-	return prepareRecordEvidence(w, request, actor, options.EvidencePreparer, recordID, input.EvidenceItems)
+	return prepareRecordEvidence(w, request, actor, options.EvidencePreparer, recordID, allocationID, input.EvidenceItems)
 }
 
 func peekCompletedComparisonSave(
@@ -526,6 +531,7 @@ func prepareRecordEvidence(
 	actor recordauth.ActorScope,
 	preparer recordEvidencePreparationService,
 	recordID string,
+	allocationID string,
 	inputs []recordEvidenceItemInput,
 ) (evidence.RevisionPreparation, bool) {
 	items := make([]evidence.RevisionPreparationItem, 0, len(inputs))
@@ -555,6 +561,7 @@ func prepareRecordEvidence(
 	}
 	prepared, err := preparer.Prepare(request.Context(), actor, evidence.RevisionPreparationRequest{
 		RecordID: recordID, Items: items,
+		AllocationID: allocationID,
 	})
 	if err != nil {
 		writeRecordsApplicationError(w, err)
@@ -825,15 +832,16 @@ type recordTemplateResponse struct {
 }
 
 type recordMutationResponse struct {
-	RecordID           string            `json:"record_id"`
-	RevisionID         string            `json:"revision_id"`
-	RevisionNo         uint64            `json:"revision_no"`
-	LockVersion        uint64            `json:"lock_version"`
-	AuthorizationEpoch uint64            `json:"authorization_epoch"`
-	Lifecycle          records.Lifecycle `json:"lifecycle"`
-	Created            bool              `json:"created"`
-	Replayed           bool              `json:"replayed"`
-	CommittedAt        time.Time         `json:"committed_at"`
+	RecordID             string            `json:"record_id"`
+	RevisionID           string            `json:"revision_id"`
+	RevisionNo           uint64            `json:"revision_no"`
+	LockVersion          uint64            `json:"lock_version"`
+	AuthorizationEpoch   uint64            `json:"authorization_epoch"`
+	Lifecycle            records.Lifecycle `json:"lifecycle"`
+	Created              bool              `json:"created"`
+	Replayed             bool              `json:"replayed"`
+	CertificationPending bool              `json:"certification_pending,omitempty"`
+	CommittedAt          time.Time         `json:"committed_at"`
 }
 
 type recordLifecycleResponse struct {
@@ -935,7 +943,8 @@ func newRecordMutationResponse(result records.RevisionCommitResult) recordMutati
 		RecordID: result.RecordID, RevisionID: result.RevisionID, RevisionNo: result.RevisionNo,
 		LockVersion: result.LockVersion, AuthorizationEpoch: result.AuthorizationEpoch,
 		Lifecycle: result.Lifecycle, Created: result.Created, Replayed: result.Replayed,
-		CommittedAt: result.CommittedAt.UTC(),
+		CertificationPending: result.CertificationPending,
+		CommittedAt:          result.CommittedAt.UTC(),
 	}
 }
 
@@ -1138,7 +1147,7 @@ type recordCursorEnvelope struct {
 }
 
 func encodeRecordCursor(cursor records.RecordCursor) (string, error) {
-	if cursor.UpdatedAt.IsZero() || !validRecordTransportID(cursor.RecordID) {
+	if cursor.UpdatedAt.IsZero() || !recordidentity.IsValid(cursor.RecordID) {
 		return "", errors.New("invalid record cursor")
 	}
 	encoded, err := json.Marshal(recordCursorEnvelope{
@@ -1157,7 +1166,7 @@ func decodeRecordCursor(value string) (records.RecordCursor, error) {
 	}
 	var envelope recordCursorEnvelope
 	if err := decodeJSONValue(bytes.NewReader(raw), &envelope); err != nil ||
-		envelope.Version != recordCursorVersion || envelope.UpdatedAt.IsZero() || !validRecordTransportID(envelope.RecordID) {
+		envelope.Version != recordCursorVersion || envelope.UpdatedAt.IsZero() || !recordidentity.IsValid(envelope.RecordID) {
 		return records.RecordCursor{}, errors.New("invalid record cursor")
 	}
 	return records.RecordCursor{UpdatedAt: envelope.UpdatedAt.UTC(), RecordID: envelope.RecordID}, nil
@@ -1186,14 +1195,10 @@ func recordPathSegments(path string) ([]string, bool) {
 		return nil, false
 	}
 	segments := strings.Split(trimmed, "/")
-	if !validRecordTransportID(segments[0]) {
+	if !recordidentity.IsValid(segments[0]) {
 		return nil, false
 	}
 	return segments, true
-}
-
-func validRecordTransportID(value string) bool {
-	return validPrefixedTransportID(value, "rec_")
 }
 
 func validRevisionTransportID(value string) bool {

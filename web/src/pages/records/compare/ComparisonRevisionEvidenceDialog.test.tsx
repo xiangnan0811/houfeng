@@ -6,6 +6,12 @@ import { ApiError } from '../../../lib/apiRequest'
 import type { EvidenceSnapshotRead, RecordRevision } from '../../../lib/types'
 import { ComparisonRevisionEvidenceDialog } from './ComparisonRevisionEvidenceDialog'
 
+vi.mock('../../../lib/auth-context', () => ({ useAuth: () => ({ user: { user_id: 'usr_compare' } }) }))
+vi.mock('../draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../draftBuffer')>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
+
 const api = vi.hoisted(() => ({
   revision: vi.fn(),
   snapshot: vi.fn(),
@@ -37,6 +43,7 @@ function revision(ids: string[]): RecordRevision {
 function snapshot(id: string): EvidenceSnapshotRead {
   return {
     snapshot_id: id,
+    record_id: 'rec_1',
     title: id === 'evs_bad' ? '' : `快照 ${id}`,
     kind: 'monitoring.probe',
     observed_at: '2026-07-01T08:00:00Z',

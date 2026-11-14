@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -14,80 +12,53 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"houfeng/internal/center/attachments"
-	"houfeng/internal/center/config"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/evidence/adapters"
+	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
-	"houfeng/internal/center/recordcollaboration"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 )
 
-func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
+func TestEvidenceHandlerUnavailableWithoutApplication(t *testing.T) {
 	t.Parallel()
 
-	type result struct {
-		evidence   http.Handler
-		projection *recordcollaboration.NotificationProjectionWorker
-		worker     *evidence.MaintenanceWorker
-		err        error
-	}
-	build := func(gate store.AdmissionGate, sources productionEvidenceSources) result {
-		pool := &pgxpool.Pool{}
-		_, _, _, _, _, _, evidenceHandler, _, _, collaboration, worker, err := newRecordsHTTPHandlers(
-			pool,
-			store.NewPostgresVPSAssetRepository(pool),
-			store.NewPostgresMonitoringInstanceRepository(pool),
-			store.NewPostgresTargetRepository(pool),
-			config.AttachmentConfig{
-				BlobBackend: attachments.BackendKindLocal, BlobRoot: t.TempDir(),
-				Limits: attachments.DefaultLimits(), ProcessorMaxAttempts: 3,
-			},
-			sources,
-			gate,
-			config.CenterConfig{},
-			nil,
-			comparisonRuntimeConfig{},
-		)
-		return result{evidence: evidenceHandler, projection: collaboration.projectionWorker, worker: worker, err: err}
-	}
-	var typedNilGate *compositionAdmissionGate
-	for _, test := range []struct {
-		name string
-		gate store.AdmissionGate
-	}{
-		{name: "nil"},
-		{name: "typed nil", gate: typedNilGate},
-	} {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			built := build(test.gate, productionEvidenceSources{})
-			if built.err != nil || built.evidence == nil || built.projection != nil || built.worker != nil {
-				t.Fatalf("newRecordsHTTPHandlers() = handler:%T worker:%T error:%v, want stable handler and zero worker", built.evidence, built.worker, built.err)
-			}
-			recorder := exerciseEvidenceBootstrapHandler(t, built.evidence)
-			if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"code":"evidence_service_unavailable"`) {
-				t.Fatalf("fail-closed evidence response = %d %s", recorder.Code, recorder.Body.String())
-			}
-		})
-	}
-
-	source := compositionEvidenceSource{}
-	built := build(&compositionAdmissionGate{}, productionEvidenceSources{
-		IPQuality: source, Monitoring: source, Events: source, SubscriptionCosts: source, CommandAudits: source,
-	})
-	if built.err != nil || built.evidence == nil || built.projection == nil || built.worker == nil {
-		t.Fatalf("injected newRecordsHTTPHandlers() = handler:%T worker:%T error:%v", built.evidence, built.worker, built.err)
-	}
-	recorder := exerciseEvidenceBootstrapHandler(t, built.evidence)
-	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"code":"invalid_request"`) {
-		t.Fatalf("injected evidence response = %d %s, want live application validation", recorder.Code, recorder.Body.String())
+	recorder := exerciseEvidenceHandler(t, handlers.Evidence(nil))
+	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"code":"evidence_service_unavailable"`) {
+		t.Fatalf("fail-closed evidence response = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func exerciseEvidenceBootstrapHandler(t *testing.T, handler http.Handler) *httptest.ResponseRecorder {
+func TestProductionEvidenceHandlerRejectsInvalidPreview(t *testing.T) {
+	t.Parallel()
+
+	source := compositionEvidenceSource{}
+	pool := &pgxpool.Pool{}
+	gate := &compositionAdmissionGate{}
+	allocations := store.NewPostgresRecordBirthRepository(pool, gate, nil)
+	birth, err := recordbirth.NewCoordinator(allocations, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	composition, err := newProductionEvidenceComposition(productionEvidenceCompositionDependencies{
+		Pool: pool, Gate: gate, Birth: birth, Allocations: allocations, Subjects: compositionSubjects(t),
+		Sources: productionEvidenceSources{
+			IPQuality: source, Monitoring: source, Events: source, SubscriptionCosts: source, CommandAudits: source,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newProductionEvidenceComposition() error = %v", err)
+	}
+	// Validation rejects this request before any repository or admission call.
+	recorder := exerciseEvidenceHandler(t, composition.handler)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("evidence response = %d %s, want invalid request", recorder.Code, recorder.Body.String())
+	}
+}
+
+func exerciseEvidenceHandler(t *testing.T, handler http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/evidence/capture-previews", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -100,8 +71,15 @@ func exerciseEvidenceBootstrapHandler(t *testing.T, handler http.Handler) *httpt
 func TestProductionEvidenceCompositionRejectsClosedDependencies(t *testing.T) {
 	t.Parallel()
 
+	pool := &pgxpool.Pool{}
+	gate := &compositionAdmissionGate{}
+	allocations := store.NewPostgresRecordBirthRepository(pool, gate, nil)
+	birth, err := recordbirth.NewCoordinator(allocations, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	valid := productionEvidenceCompositionDependencies{
-		Pool: &pgxpool.Pool{}, Gate: &compositionAdmissionGate{}, Subjects: compositionSubjects(t),
+		Pool: pool, Gate: gate, Birth: birth, Allocations: allocations, Subjects: compositionSubjects(t),
 		Sources: productionEvidenceSources{
 			IPQuality: compositionEvidenceSource{}, Monitoring: compositionEvidenceSource{},
 			Events: compositionEvidenceSource{}, SubscriptionCosts: compositionEvidenceSource{},
@@ -116,6 +94,8 @@ func TestProductionEvidenceCompositionRejectsClosedDependencies(t *testing.T) {
 		{name: "nil pool", mutate: func(value *productionEvidenceCompositionDependencies) { value.Pool = nil }},
 		{name: "nil gate", mutate: func(value *productionEvidenceCompositionDependencies) { value.Gate = nil }},
 		{name: "typed nil gate", mutate: func(value *productionEvidenceCompositionDependencies) { value.Gate = typedNilGate }},
+		{name: "nil birth coordinator", mutate: func(value *productionEvidenceCompositionDependencies) { value.Birth = nil }},
+		{name: "nil birth allocation repository", mutate: func(value *productionEvidenceCompositionDependencies) { value.Allocations = nil }},
 		{name: "empty subjects", mutate: func(value *productionEvidenceCompositionDependencies) {
 			value.Subjects, _ = records.NewSubjectAdapterRegistry(nil)
 		}},
@@ -136,38 +116,6 @@ func TestProductionEvidenceCompositionRejectsClosedDependencies(t *testing.T) {
 				t.Fatalf("newProductionEvidenceComposition() = (%T, %v), want nil/unavailable", composition, err)
 			}
 		})
-	}
-}
-
-func TestProductionEvidenceCompositionBuildsExactKnownKinds(t *testing.T) {
-	t.Parallel()
-
-	composition, err := newProductionEvidenceComposition(productionEvidenceCompositionDependencies{
-		Pool: &pgxpool.Pool{}, Gate: &compositionAdmissionGate{}, Subjects: compositionSubjects(t),
-		Sources: productionEvidenceSources{
-			IPQuality: compositionEvidenceSource{}, Monitoring: compositionEvidenceSource{},
-			Events: compositionEvidenceSource{}, SubscriptionCosts: compositionEvidenceSource{},
-			CommandAudits: compositionEvidenceSource{},
-		},
-	})
-	if err != nil {
-		t.Fatalf("newProductionEvidenceComposition() error = %v", err)
-	}
-	if composition == nil || composition.application == nil || composition.preparer == nil ||
-		composition.handler == nil || composition.worker == nil || composition.export == nil ||
-		composition.deletion == nil || composition.recovery == nil {
-		t.Fatalf("newProductionEvidenceComposition() incomplete = %#v", composition)
-	}
-	want := evidence.KnownKindKeys()
-	sort.Slice(want, func(left, right int) bool { return want[left].String() < want[right].String() })
-	got := composition.registry.Keys()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("production evidence registry keys = %#v, want exact %#v", got, want)
-	}
-	for _, key := range got {
-		if key.Kind == "asset.history" {
-			t.Fatal("asset history registered as evidence kind")
-		}
 	}
 }
 

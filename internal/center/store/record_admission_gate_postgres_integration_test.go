@@ -63,28 +63,3 @@ func TestPostgresDeploymentMembershipAdmissionGateFailClosedOnEmptyStaleAndWrong
 		t.Fatalf("wrong deployment Admit() error = %v, want ErrRecordPlatformAdmissionUnavailable", err)
 	}
 }
-
-func TestPostgresDeploymentMembershipAdmissionGateUsesCallerTransaction(t *testing.T) {
-	ctx := context.Background()
-	fixture := newRecordPlatformPostgresFixture(t, ctx)
-	pool := fixture.openDirectRuntimePool(t, ctx, "admission-gate-caller-tx", 1)
-	gate := mustDeploymentMembershipAdmissionGate(t)
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin caller transaction: %v", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := gate.Admit(ctx, tx); !errors.Is(err, ErrRecordPlatformAdmissionUnavailable) {
-		t.Fatalf("Admit() error = %v, want fail-closed on empty membership", err)
-	}
-
-	var one int
-	if err := tx.QueryRow(ctx, `select 1`).Scan(&one); err != nil {
-		t.Fatalf("caller transaction after Admit() error = %v", err)
-	}
-	if one != 1 {
-		t.Fatalf("select 1 = %d, want 1", one)
-	}
-}

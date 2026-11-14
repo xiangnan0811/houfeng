@@ -93,11 +93,9 @@ func TestChild11AssemblyArtifactsRejectLeakCorpus(t *testing.T) {
 		t.Fatalf("profile report leaked: %v", err)
 	}
 
-	encodedCopies, err := EncodeExternalCopies([]recorddeletion.SurvivingCopySummary{{
-		Scope:     recorddeletion.AdapterNameRecordPortability,
-		Kind:      recorddeletion.SurvivingCopyKindDeliveredExport,
-		CopyCount: 1,
-	}})
+	encodedCopies, err := EncodeExternalCopies([]recorddeletion.SurvivingCopySummary{
+		recorddeletion.KnownSurvivingCopySummary(recorddeletion.AdapterNameRecordPortability, recorddeletion.SurvivingCopyKindDeliveredExport, 1),
+	})
 	if err != nil {
 		t.Fatalf("EncodeExternalCopies() error = %v", err)
 	}

@@ -1,17 +1,27 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"reflect"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/records"
+	"houfeng/internal/center/sourceretirement"
 )
 
 type RecordImportJob struct {
@@ -32,6 +42,8 @@ type RecordImportArtifact struct {
 	BackendKind     string
 	BlobKey         string
 	ObjectVersionID string
+	NamespaceID     string
+	ObligationID    string
 	SHA256          [32]byte
 	ByteSize        uint64
 	ExpiresAt       time.Time
@@ -43,15 +55,21 @@ type PublishRecordImportArtifactInput struct {
 	BackendKind     string
 	BlobKey         string
 	ObjectVersionID string
+	NamespaceID     string
+	ObligationID    string
 	SHA256          [32]byte
 	ByteSize        uint64
 	ExpiresAt       time.Time
 }
 
 type ImportRemap struct {
-	EntityKind string
-	SourceID   string
-	TargetID   string
+	EntityKind        string
+	SourceID          string
+	TargetID          string
+	BirthAllocationID string
+	// OwnerTargetRecordID is derived from the archive's source owner and the
+	// plan's record remap; it is required for new evidence and attachment rows.
+	OwnerTargetRecordID string
 }
 
 type ImportDocumentPlan struct {
@@ -96,10 +114,13 @@ type ClaimRecordImportJobInput struct {
 
 type SaveRecordImportPlanInput struct {
 	ImportJobID        string
+	Actor              recordauth.ActorScope
+	ArchiveDigest      [32]byte
 	PlanDigest         [32]byte
 	ObjectCount        uint64
 	RemapCount         uint64
 	Remaps             []ImportRemap
+	Allocations        []recordbirth.Allocation
 	Quarantine         []QuarantinedEvidence
 	Documents          []ImportDocumentPlan
 	DestinationSubject records.SubjectReference
@@ -265,19 +286,161 @@ func (repository *PostgresRecordPortabilityRepository) SaveImportPlan(
 	ctx context.Context,
 	input SaveRecordImportPlanInput,
 ) (RecordImportPlan, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || input.ImportJobID == "" ||
-		input.PlanDigest == [32]byte{} || !validImportDestination(input.DestinationSubject) {
+	actor, actorErr := recordauth.NormalizeActorScope(input.Actor)
+	if ctx == nil || repository == nil || repository.platform == nil || repository.witness == nil || input.ImportJobID == "" || actorErr != nil ||
+		input.ArchiveDigest == ([32]byte{}) || input.PlanDigest == ([32]byte{}) || !validImportDestination(input.DestinationSubject) {
 		return RecordImportPlan{}, ErrRecordPortabilityUnavailable
 	}
+	if input.RemapCount != uint64(len(input.Remaps)) || input.ObjectCount < input.RemapCount {
+		return RecordImportPlan{}, ErrRecordImportCASConflict
+	}
+	recordsBySource := make(map[string]ImportRemap)
+	for _, remap := range input.Remaps {
+		if remap.SourceID == "" || remap.TargetID == "" {
+			return RecordImportPlan{}, ErrRecordImportCASConflict
+		}
+		switch remap.EntityKind {
+		case "record":
+			if remap.BirthAllocationID == "" || remap.OwnerTargetRecordID != "" {
+				return RecordImportPlan{}, ErrRecordImportCASConflict
+			}
+			if _, exists := recordsBySource[remap.SourceID]; exists {
+				return RecordImportPlan{}, ErrRecordImportCASConflict
+			}
+			recordsBySource[remap.SourceID] = remap
+		case "evidence", "attachment":
+			if remap.BirthAllocationID != "" || remap.OwnerTargetRecordID == "" {
+				return RecordImportPlan{}, ErrRecordImportCASConflict
+			}
+		default:
+			if remap.BirthAllocationID != "" || remap.OwnerTargetRecordID != "" {
+				return RecordImportPlan{}, ErrRecordImportCASConflict
+			}
+		}
+	}
+	if len(recordsBySource) == 0 || len(recordsBySource) != len(input.Documents) {
+		return RecordImportPlan{}, ErrRecordImportCASConflict
+	}
+	for _, document := range input.Documents {
+		remap, exists := recordsBySource[document.SourceID]
+		if !exists || remap.TargetID != document.TargetID {
+			return RecordImportPlan{}, ErrRecordImportCASConflict
+		}
+		delete(recordsBySource, document.SourceID)
+	}
+	targets := make([]ImportRemap, 0, len(input.Documents))
+	for _, remap := range input.Remaps {
+		if remap.EntityKind == "record" {
+			targets = append(targets, remap)
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].TargetID < targets[j].TargetID })
+	for index := 1; index < len(targets); index++ {
+		if targets[index-1].TargetID == targets[index].TargetID {
+			return RecordImportPlan{}, ErrRecordImportCASConflict
+		}
+	}
+	for _, remap := range input.Remaps {
+		if remap.EntityKind != "evidence" && remap.EntityKind != "attachment" {
+			continue
+		}
+		index := sort.Search(len(targets), func(index int) bool {
+			return targets[index].TargetID >= remap.OwnerTargetRecordID
+		})
+		if index == len(targets) || targets[index].TargetID != remap.OwnerTargetRecordID {
+			return RecordImportPlan{}, ErrRecordImportCASConflict
+		}
+	}
+	if len(input.Allocations) != len(targets) {
+		return RecordImportPlan{}, ErrRecordImportCASConflict
+	}
+	allocations := make(map[string]recordbirth.Allocation, len(input.Allocations))
+	for _, allocation := range input.Allocations {
+		if allocation.Validate() != nil || allocation.Request.ProjectID != string(actor.ProjectID) ||
+			allocation.Request.ActorID != actor.UserID || allocation.Request.ActorScopeDigest != actor.CanonicalHash() ||
+			allocation.Request.Purpose != recordbirth.PurposeImport {
+			return RecordImportPlan{}, ErrRecordImportCASConflict
+		}
+		if _, exists := allocations[allocation.RecordID]; exists {
+			return RecordImportPlan{}, ErrRecordImportCASConflict
+		}
+		allocations[allocation.RecordID] = allocation
+	}
+	for _, target := range targets {
+		allocation, ok := allocations[target.TargetID]
+		if !ok || allocation.AllocationID != target.BirthAllocationID {
+			return RecordImportPlan{}, ErrRecordImportCASConflict
+		}
+	}
+	sourceKind, ok := recordSubjectSourceKind(input.DestinationSubject.Kind)
+	if !ok {
+		return RecordImportPlan{}, ErrRecordPortabilityUnavailable
+	}
+	key := repository.witness.sourceKey(actor.ProjectID, sourceKind, input.DestinationSubject.SourceID)
+	authority, err := repository.witness.Prefetch(ctx, []sourceretirement.SourceKey{key})
+	if err != nil {
+		return RecordImportPlan{}, err
+	}
 	var saved RecordImportPlan
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runSourceAuthorizedBirthMutationTransaction(ctx, repository.continuity, func(ctx context.Context, transaction *RecordPlatformTransaction, proof []byte) error {
+		saved = RecordImportPlan{}
+		namespaces, err := revisionBatchNamespaces(ctx, transaction.tx, nil, nil, nil, input.ImportJobID)
+		if err != nil {
+			return err
+		}
+		if err := lockLocalBlobNamespaces(ctx, transaction.tx, namespaces); err != nil {
+			return err
+		}
+		if err := lockComparisonDecisionForWriter(ctx, transaction.tx); err != nil {
+			return err
+		}
+		recordIDs := make([]string, len(targets))
+		for index, target := range targets {
+			recordIDs[index] = target.TargetID
+		}
+		before, err := discoverEffectRecordResources(ctx, transaction.tx, recordIDs, []string{actor.UserID})
+		if err != nil {
+			return err
+		}
+		before.Sources = append(before.Sources, records.RevisionMutationSource{
+			ProjectID: string(actor.ProjectID), SourceKind: input.DestinationSubject.Kind, SourceID: input.DestinationSubject.SourceID,
+		})
+		for _, target := range targets {
+			allocation := allocations[target.TargetID]
+			before.Allocations = append(before.Allocations, records.RevisionMutationAllocation{
+				AllocationID: allocation.AllocationID, Request: allocation.Request, RecordID: allocation.RecordID,
+			})
+		}
+		declared, err := normalizeRecordMutationDeclarations(before)
+		if err != nil {
+			return err
+		}
+		declared.continuityProof = proof
+		if err := verifyRevisionPrefetchedRoutes(authority, declared); err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResourceRange(ctx, transaction.tx, declared, 10, 60); err != nil {
+			return err
+		}
+		lockCommand, err := json.Marshal(struct {
+			ImportJobID  string `json:"import_job_id"`
+			NamespaceIDs string `json:"namespace_ids"`
+		}{input.ImportJobID, strings.Join(namespaces, ",")})
+		if err != nil {
+			return err
+		}
+		if _, err := transaction.tx.Exec(ctx, `select public.record_import_plan_lock($1)`, lockCommand); err != nil {
+			return err
+		}
 		var destinationKind, destinationSourceID *string
+		var jobActor string
+		var archiveDigest []byte
 		if err := transaction.tx.QueryRow(ctx, `
-			select destination_subject_kind, destination_subject_source_id
+			select actor_id, archive_digest, destination_subject_kind, destination_subject_source_id
 			from public.record_import_jobs
 			where import_job_id = $1
 			for update
-		`, input.ImportJobID).Scan(&destinationKind, &destinationSourceID); err != nil {
+		`, input.ImportJobID).Scan(&jobActor, &archiveDigest, &destinationKind, &destinationSourceID); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrRecordImportNotFound
 			}
@@ -287,8 +450,54 @@ func (repository *PostgresRecordPortabilityRepository) SaveImportPlan(
 		if err != nil {
 			return err
 		}
-		if destination != input.DestinationSubject {
+		if destination != input.DestinationSubject || jobActor != actor.UserID || !bytes.Equal(archiveDigest, input.ArchiveDigest[:]) {
 			return ErrRecordImportCASConflict
+		}
+		after, err := discoverEffectRecordResources(ctx, transaction.tx, recordIDs, []string{actor.UserID})
+		if err != nil {
+			return err
+		}
+		after.Sources = append(after.Sources, records.RevisionMutationSource{
+			ProjectID: string(actor.ProjectID), SourceKind: input.DestinationSubject.Kind, SourceID: input.DestinationSubject.SourceID,
+		})
+		after.Allocations = before.Allocations
+		if !reflect.DeepEqual(before, after) {
+			return &pgconn.PgError{Code: "40001", Message: "import planning route changed; restart transaction"}
+		}
+		member, err := NewPostgresCollaborationMembershipReader().ReadMemberActor(ctx, transaction.tx, actor.ProjectID, actor.UserID)
+		if err != nil || member.CanonicalHash() != actor.CanonicalHash() {
+			return recordauth.ErrDenied
+		}
+		resolver, err := revisionTransactionSubjectResolver(transaction.tx, authority)
+		if err != nil {
+			return err
+		}
+		live, err := resolver.live.Resolve(ctx, member, input.DestinationSubject)
+		if err != nil {
+			return err
+		}
+		resolved, err := resolver.Resolve(ctx, member, RecordSubjectReadInput{
+			Reference: input.DestinationSubject, IdentitySnapshot: live.IdentitySnapshot, CaptureAuthorization: live.CaptureAuthorization,
+		})
+		if err != nil {
+			return err
+		}
+		if resolved.CaptureAuthorization.State != recordauth.SourceStateLive || resolved.CaptureAuthorization.Digest != live.CaptureAuthorization.Digest {
+			return ErrRecordSubjectUnavailable
+		}
+		values, err := records.ImportedRevisionValues(member, "", "")
+		if err != nil {
+			return err
+		}
+		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityImport, records.RecordAuthorizationEvidence{
+			ProjectID: resolved.ProjectID, Visibility: values.VisibilityScope, Sources: []recordauth.SourceAuthorization{resolved.CaptureAuthorization},
+		}); err != nil {
+			return err
+		}
+		for _, root := range after.RootObservations {
+			if root.Exists {
+				return ErrRecordImportCASConflict
+			}
 		}
 		planID, err := ids.New("rip")
 		if err != nil {
@@ -303,14 +512,30 @@ func (repository *PostgresRecordPortabilityRepository) SaveImportPlan(
 			input.ExpiresAt.UTC(), now); err != nil {
 			return err
 		}
-		for _, remap := range input.Remaps {
-			source := sha256SumString(remap.SourceID)
-			if _, err := transaction.tx.Exec(ctx, `
-				insert into public.record_import_entity_mappings (
-					import_plan_id, entity_kind, source_id, source_identity_digest, target_id, created_at
-				) values ($1, $2, $3, $4, $5, $6)
-			`, planID, remap.EntityKind, remap.SourceID, source[:], remap.TargetID, now); err != nil {
-				return err
+		// Dependent mappings refer to a record mapping already registered in
+		// this transaction. The digest retains the original archive order.
+		for pass := range 2 {
+			for _, remap := range input.Remaps {
+				if (remap.EntityKind == "record") != (pass == 0) {
+					continue
+				}
+				source := sha256SumString(remap.SourceID)
+				body, err := json.Marshal(struct {
+					PlanID              string    `json:"import_plan_id"`
+					EntityKind          string    `json:"entity_kind"`
+					SourceID            string    `json:"source_id"`
+					SourceDigest        string    `json:"source_identity_digest"`
+					TargetID            string    `json:"target_id"`
+					CreatedAt           time.Time `json:"created_at"`
+					BirthAllocationID   string    `json:"birth_allocation_id"`
+					OwnerTargetRecordID string    `json:"owner_target_record_id"`
+				}{planID, remap.EntityKind, remap.SourceID, hex.EncodeToString(source[:]), remap.TargetID, now, remap.BirthAllocationID, remap.OwnerTargetRecordID})
+				if err != nil {
+					return err
+				}
+				if _, err := transaction.tx.Exec(ctx, `select public.record_import_mapping_insert($1)`, body); err != nil {
+					return err
+				}
 			}
 		}
 		saved = RecordImportPlan{
@@ -365,7 +590,7 @@ func (repository *PostgresRecordPortabilityRepository) LoadImportPlan(
 		plan.RemapCount = uint64(remapCount)
 		plan.DestinationSubject = destination
 		rows, err := transaction.tx.Query(ctx, `
-			select entity_kind, source_id, target_id
+			select entity_kind, source_id, target_id, coalesce(birth_allocation_id, ''), coalesce(owner_target_record_id, '')
 			from public.record_import_entity_mappings
 			where import_plan_id = $1
 			order by entity_kind, source_id
@@ -376,7 +601,7 @@ func (repository *PostgresRecordPortabilityRepository) LoadImportPlan(
 		defer rows.Close()
 		for rows.Next() {
 			var remap ImportRemap
-			if err := rows.Scan(&remap.EntityKind, &remap.SourceID, &remap.TargetID); err != nil {
+			if err := rows.Scan(&remap.EntityKind, &remap.SourceID, &remap.TargetID, &remap.BirthAllocationID, &remap.OwnerTargetRecordID); err != nil {
 				return err
 			}
 			plan.Remaps = append(plan.Remaps, remap)
@@ -390,6 +615,147 @@ func (repository *PostgresRecordPortabilityRepository) LoadImportPlan(
 		return RecordImportPlan{}, err
 	}
 	return plan, nil
+}
+
+// CheckImportReplayReadFence reauthorizes the destination and every imported
+// record against current APP membership after acquiring the read fences.
+// Callers supply the entire record set ordered by record ID.
+func (repository *PostgresRecordPortabilityRepository) CheckImportReplayReadFence(
+	ctx context.Context,
+	actor recordauth.ActorScope,
+	destination records.SubjectReference,
+	current []records.CurrentRecordAuthorization,
+) error {
+	actor, actorErr := recordauth.NormalizeActorScope(actor)
+	if ctx == nil || repository == nil || repository.platform == nil || repository.authorization == nil ||
+		repository.witness == nil || actorErr != nil || !validImportDestination(destination) || len(current) == 0 {
+		return ErrRecordPortabilityUnavailable
+	}
+	ids := make([]string, 0, len(current))
+	previous := ""
+	for _, binding := range current {
+		if binding.RecordID == "" || binding.RecordID <= previous || binding.Evidence.ProjectID != actor.ProjectID {
+			return records.ErrRecordRevisionConflict
+		}
+		ids = append(ids, binding.RecordID)
+		previous = binding.RecordID
+	}
+	prepared, err := repository.authorization.prepareCurrentAuthorization(ctx, ids)
+	if err != nil {
+		return err
+	}
+	kind, ok := recordSubjectSourceKind(destination.Kind)
+	if !ok {
+		return ErrRecordSubjectUnavailable
+	}
+	authority, err := repository.witness.Prefetch(ctx, []sourceretirement.SourceKey{
+		repository.witness.sourceKey(actor.ProjectID, kind, destination.SourceID),
+	})
+	if err != nil {
+		return err
+	}
+	return repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		// Protected membership row acquisition requires the comparison fence at
+		// rank 5, before the actor and group rows acquired at rank 10.
+		if err := lockComparisonDecisionForWriter(ctx, transaction.tx); err != nil {
+			return err
+		}
+		// Lock the current actor route at rank 10, before waiting on any record
+		// fence. The table lock covers membership rows that do not yet exist.
+		resources, err := discoverEffectRecordResources(ctx, transaction.tx, nil, []string{actor.UserID})
+		if err != nil {
+			var missing *recordMutationPrincipalMissing
+			if errors.As(err, &missing) {
+				return recordauth.ErrDenied
+			}
+			return err
+		}
+		declared, err := normalizeRecordMutationDeclarations(resources)
+		if err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResourceRange(ctx, transaction.tx, declared, 10, 10); err != nil {
+			return err
+		}
+		if _, err := transaction.tx.Exec(ctx, `lock table public.record_access_group_members in share mode nowait`); err != nil {
+			var postgresError *pgconn.PgError
+			if errors.As(err, &postgresError) && postgresError.Code == "55P03" {
+				return ErrRecordSubjectUnavailable
+			}
+			return err
+		}
+		for _, binding := range current {
+			if err := assertRecordReadFence(ctx, transaction.tx, binding.RecordID); err != nil {
+				return err
+			}
+		}
+		for _, binding := range current {
+			var recordID string
+			err := transaction.tx.QueryRow(ctx, `
+				select roots.record_id from public.records roots
+				where roots.project_id = $1 and roots.record_id = $2
+				  and roots.current_revision_id = $3 and roots.lock_version = $4
+				  and roots.authorization_epoch = $5 and roots.lifecycle = $6
+				for share of roots`, string(actor.ProjectID), binding.RecordID,
+				binding.CurrentRevisionID, binding.LockVersion, binding.AuthorizationEpoch, string(binding.Lifecycle)).Scan(&recordID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return records.ErrRecordRevisionConflict
+			}
+			if err != nil {
+				return err
+			}
+		}
+		member, err := NewPostgresCollaborationMembershipReader().ReadMemberActor(ctx, transaction.tx, actor.ProjectID, actor.UserID)
+		if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
+			return recordauth.ErrDenied
+		}
+		if err != nil {
+			return ErrRecordSubjectUnavailable
+		}
+		if member.CanonicalHash() != actor.CanonicalHash() {
+			return recordauth.ErrDenied
+		}
+		resolver, err := revisionTransactionSubjectResolver(transaction.tx, authority)
+		if err != nil {
+			return err
+		}
+		live, err := resolver.live.Resolve(ctx, member, destination)
+		if err != nil {
+			return err
+		}
+		resolved, err := resolver.Resolve(ctx, member, RecordSubjectReadInput{
+			Reference: destination, IdentitySnapshot: live.IdentitySnapshot, CaptureAuthorization: live.CaptureAuthorization,
+		})
+		if err != nil {
+			return err
+		}
+		if resolved.CaptureAuthorization.State != recordauth.SourceStateLive || resolved.CaptureAuthorization.Digest != live.CaptureAuthorization.Digest {
+			return ErrRecordSubjectUnavailable
+		}
+		values, err := records.ImportedRevisionValues(member, "", "")
+		if err != nil {
+			return err
+		}
+		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityImport, records.RecordAuthorizationEvidence{
+			ProjectID: resolved.ProjectID, Visibility: values.VisibilityScope, Sources: []recordauth.SourceAuthorization{resolved.CaptureAuthorization},
+		}); err != nil {
+			return err
+		}
+		for _, binding := range current {
+			reloaded, err := prepared.resolveCurrentAuthorizationInTransaction(ctx, transaction.tx, member, binding.RecordID)
+			if err != nil {
+				return err
+			}
+			if reloaded.RecordID != binding.RecordID || reloaded.CurrentRevisionID != binding.CurrentRevisionID ||
+				reloaded.LockVersion != binding.LockVersion || reloaded.AuthorizationEpoch != binding.AuthorizationEpoch || reloaded.Lifecycle != binding.Lifecycle {
+				return records.ErrRecordRevisionConflict
+			}
+			if err := records.AuthorizeRecordResource(member, recordauth.CapabilityRecordRead, reloaded.Evidence); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (repository *PostgresRecordPortabilityRepository) AdvanceImportJob(
@@ -556,7 +922,7 @@ func lockImportJobForApplyOnTx(
 		}
 		return err
 	}
-	if state != RecordImportJobStatePlanned || actorID != finish.ActorID || uint64(lockVersion) != finish.JobLockVersion {
+	if state != RecordImportJobStatePlanned || actorID != finish.Actor.UserID || uint64(lockVersion) != finish.JobLockVersion {
 		return ErrRecordImportCASConflict
 	}
 	return nil
@@ -572,7 +938,7 @@ func markImportJobAppliedOnTx(
 		set job_state = $1, failure_code = '', lock_version = lock_version + 1, updated_at = now()
 		where import_job_id = $2 and lock_version = $3 and job_state = $4 and actor_id = $5
 	`, RecordImportJobStateApplied, finish.ImportJobID, finish.JobLockVersion,
-		RecordImportJobStatePlanned, finish.ActorID)
+		RecordImportJobStatePlanned, finish.Actor.UserID)
 	if err != nil {
 		return err
 	}
@@ -640,64 +1006,88 @@ func (repository *PostgresRecordPortabilityRepository) PublishImportArtifact(
 		repository.newImportArtifactID == nil || input.ImportJobID == "" ||
 		input.ArtifactRole != "archive" ||
 		(input.BackendKind != "local" && input.BackendKind != "s3") ||
-		input.BlobKey == "" || input.ObjectVersionID == "" ||
+		input.BlobKey == "" || input.ObjectVersionID == "" || input.ObligationID == "" ||
 		input.ByteSize == 0 || input.SHA256 == [32]byte{} || input.ExpiresAt.IsZero() {
 		return RecordImportArtifact{}, ErrRecordPortabilityUnavailable
 	}
-	var published RecordImportArtifact
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var existing RecordImportArtifact
-		var digest []byte
-		var byteSize int64
-		err := transaction.tx.QueryRow(ctx, `
-			select import_artifact_id, import_job_id, artifact_role, backend_kind, blob_key,
-			       object_version_id, sha256, byte_size, expires_at
-			from public.record_import_artifacts
-			where import_job_id = $1 and artifact_role = $2
-		`, input.ImportJobID, input.ArtifactRole).Scan(
-			&existing.ArtifactID, &existing.ImportJobID, &existing.ArtifactRole, &existing.BackendKind,
-			&existing.BlobKey, &existing.ObjectVersionID, &digest, &byteSize, &existing.ExpiresAt,
-		)
-		if err == nil {
-			if len(digest) != sha256.Size || byteSize <= 0 {
-				return ErrRecordPortabilityUnavailable
-			}
-			copy(existing.SHA256[:], digest)
-			existing.ByteSize = uint64(byteSize)
-			if existing.SHA256 != input.SHA256 || existing.BlobKey != input.BlobKey {
-				return ErrRecordImportCASConflict
-			}
-			published = existing
-			return nil
+	if repository.pool == nil {
+		return RecordImportArtifact{}, ErrRecordPortabilityUnavailable
+	}
+	var replay bool
+	if err := repository.pool.QueryRow(ctx, `select exists(select 1 from public.record_import_artifacts where import_job_id=$1 and artifact_role='archive')`, input.ImportJobID).Scan(&replay); err != nil {
+		return RecordImportArtifact{}, err
+	}
+	var prepared *preparedImportWrite
+	var dispatch attachments.WriteDispatch
+	if !replay {
+		dispatch.ObligationID = input.ObligationID
+		if err := repository.pool.QueryRow(ctx, `select writer_instance::text from public.record_write_obligations where obligation_id=$1 and origin_kind='import_archive' and origin_id=$2`, input.ObligationID, input.ImportJobID).Scan(&dispatch.WriterInstance); err != nil {
+			return RecordImportArtifact{}, err
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+		local := &PostgresLocalBlobRepository{pool: repository.pool, witness: repository.witness}
+		var err error
+		prepared, err = local.prepareImportWrite(ctx, dispatch)
+		if err != nil {
+			return RecordImportArtifact{}, err
+		}
+		if prepared == nil {
+			return RecordImportArtifact{}, ErrRecordPortabilityUnavailable
+		}
+	}
+	var published RecordImportArtifact
+	run := func(ctx context.Context, transaction *RecordPlatformTransaction, proof []byte) error {
+		published = RecordImportArtifact{}
+		if err := lockAttachmentWriterPrefix(ctx, transaction.tx, attachmentWriterRoute{
+			obligationIDs: []string{input.ObligationID}, namespaces: []string{input.NamespaceID},
+		}); err != nil {
 			return err
+		}
+		var exists bool
+		if err := transaction.tx.QueryRow(ctx, `select exists(select 1 from public.record_import_artifacts where import_job_id=$1 and artifact_role='archive')`, input.ImportJobID).Scan(&exists); err != nil {
+			return err
+		}
+		if replay && !exists {
+			return importWriteChanged()
+		}
+		if !exists {
+			if err := prepared.acquireRoute(ctx, transaction.tx, dispatch, proof, false); err != nil {
+				return err
+			}
 		}
 		artifactID, err := repository.newImportArtifactID()
 		if err != nil || artifactID == "" {
 			return ErrRecordPortabilityUnavailable
 		}
-		now := time.Now().UTC()
 		artifact := RecordImportArtifact{
 			ArtifactID: artifactID, ImportJobID: input.ImportJobID, ArtifactRole: input.ArtifactRole,
 			BackendKind: input.BackendKind, BlobKey: input.BlobKey, ObjectVersionID: input.ObjectVersionID,
-			SHA256: input.SHA256, ByteSize: input.ByteSize, ExpiresAt: input.ExpiresAt.UTC(),
+			NamespaceID: input.NamespaceID, ObligationID: input.ObligationID,
+			SHA256: input.SHA256, ByteSize: input.ByteSize, ExpiresAt: input.ExpiresAt.UTC().Truncate(time.Microsecond),
 		}
-		if _, err := transaction.tx.Exec(ctx, `
-			insert into public.record_import_artifacts (
-				import_artifact_id, import_job_id, artifact_role, backend_kind,
-				blob_key, object_version_id, sha256, byte_size, expires_at, created_at
-			) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`,
-			artifact.ArtifactID, artifact.ImportJobID, artifact.ArtifactRole, artifact.BackendKind,
-			artifact.BlobKey, artifact.ObjectVersionID, artifact.SHA256[:], int64(artifact.ByteSize),
-			artifact.ExpiresAt, now,
-		); err != nil {
+		command, err := json.Marshal(artifactPublicationCommand{
+			ArtifactID: artifact.ArtifactID, JobID: artifact.ImportJobID, Kind: artifact.ArtifactRole,
+			BackendKind: artifact.BackendKind, NamespaceID: artifact.NamespaceID,
+			Key: artifact.BlobKey, Version: artifact.ObjectVersionID, SHA256: hex.EncodeToString(artifact.SHA256[:]),
+			Size: artifact.ByteSize, ExpiresAt: artifact.ExpiresAt, ObligationID: artifact.ObligationID,
+		})
+		if err != nil {
+			return err
+		}
+		if err := transaction.tx.QueryRow(ctx, `select import_artifact_id from public.record_import_artifact_publish($1)`, command).
+			Scan(&artifact.ArtifactID); err != nil {
 			return err
 		}
 		published = artifact
 		return nil
-	})
+	}
+	var err error
+	if replay {
+		err = repository.platform.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+			return run(ctx, transaction, nil)
+		})
+	} else {
+		err = repository.platform.runRecordBirthMutationTransaction(ctx, repository.continuity, run)
+	}
 	if err != nil {
 		return RecordImportArtifact{}, err
 	}
@@ -717,12 +1107,13 @@ func (repository *PostgresRecordPortabilityRepository) LoadImportArtifact(
 		var byteSize int64
 		if err := transaction.tx.QueryRow(ctx, `
 			select import_artifact_id, import_job_id, artifact_role, backend_kind, blob_key,
-			       object_version_id, sha256, byte_size, expires_at
+			       object_version_id, sha256, byte_size, expires_at, coalesce(namespace_id::text, ''), coalesce(obligation_id, '')
 			from public.record_import_artifacts
 			where import_job_id = $1 and artifact_role = 'archive'
 		`, importJobID).Scan(
 			&artifact.ArtifactID, &artifact.ImportJobID, &artifact.ArtifactRole, &artifact.BackendKind,
 			&artifact.BlobKey, &artifact.ObjectVersionID, &digest, &byteSize, &artifact.ExpiresAt,
+			&artifact.NamespaceID, &artifact.ObligationID,
 		); err != nil {
 			return err
 		}

@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 var (
@@ -61,7 +62,7 @@ func PrepareExistingSnapshotReference(
 	snapshotID string,
 ) (PreparedReference, error) {
 	if ctx == nil || nilExistingSnapshotReferenceSource(source) ||
-		!validClosedPreparedID(recordID, "rec_") || !ValidSnapshotID(snapshotID) {
+		!recordidentity.IsValid(recordID) || !ValidSnapshotID(snapshotID) {
 		return PreparedReference{}, preparedReferenceError("request", nil)
 	}
 	normalizedActor, err := recordauth.NormalizeActorScope(actor)
@@ -97,7 +98,7 @@ func PrepareExistingSnapshotReference(
 }
 
 func (prepared PreparedReference) Validate() error {
-	if !validClosedPreparedID(prepared.recordID, "rec_") || !ValidSnapshotID(prepared.snapshotID) {
+	if !recordidentity.IsValid(prepared.recordID) || !ValidSnapshotID(prepared.snapshotID) {
 		return preparedReferenceError("identity", nil)
 	}
 	if err := validateKnownKindKey(prepared.key); err != nil {
@@ -179,12 +180,12 @@ func (prepared RevisionPreparation) Empty() bool {
 
 func (prepared RevisionPreparation) ValidateForRecord(recordID string) error {
 	if prepared.Empty() {
-		if !validClosedPreparedID(recordID, "rec_") {
+		if !recordidentity.IsValid(recordID) {
 			return revisionPreparationError("record identity", nil)
 		}
 		return nil
 	}
-	if !validClosedPreparedID(recordID, "rec_") || prepared.recordID != recordID {
+	if !recordidentity.IsValid(recordID) || prepared.recordID != recordID {
 		return revisionPreparationError("record identity", nil)
 	}
 	available := make(map[string]struct{}, len(prepared.captures)+len(prepared.references)+len(prepared.imported)+len(prepared.comparisonSave.Copies)+1)

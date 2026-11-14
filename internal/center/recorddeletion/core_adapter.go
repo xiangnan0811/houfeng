@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"houfeng/internal/center/recordplatform"
+	"math"
 	"time"
 )
 
@@ -15,12 +17,30 @@ const (
 
 var ErrInvalidCoreAdapter = errors.New("invalid record core deletion adapter")
 
+// OperationOwnerClaim is issued by an explicit database claim or renewal.
+// Passing it never adopts a different current owner or renews its authority.
+type OperationOwnerClaim struct {
+	OperationID string
+	Owner       recordplatform.OwnerLease
+}
+
+func (claim OperationOwnerClaim) Validate() error {
+	if !validDeletionOperationID(claim.OperationID) || claim.Owner.Validate() != nil || claim.Owner.Generation > math.MaxInt64 {
+		return ErrInvalidDeletionOperation
+	}
+	return nil
+}
+
 type PurgeTarget struct {
-	Operation DeletionOperation
+	Operation  DeletionOperation
+	OwnerClaim OperationOwnerClaim
 }
 
 func (target PurgeTarget) Validate() error {
 	if target.Operation.Validate() != nil || target.Operation.State != DeletionStateOnlinePurging {
+		return ErrInvalidDeletionOperation
+	}
+	if target.OwnerClaim.Validate() != nil || target.OwnerClaim.OperationID != target.Operation.OperationID {
 		return ErrInvalidDeletionOperation
 	}
 	return nil
@@ -53,13 +73,13 @@ func ValidateAdapterPurgeReceipt(
 }
 
 type CorePurgeCommand struct {
-	Operation     DeletionOperation
+	PurgeTarget
 	SurfaceDigest [sha256.Size]byte
 }
 
 func (command CorePurgeCommand) Validate() error {
 	descriptor, err := NewAdapterDescriptor(AdapterNameRecordCore, RecordCoreSurfaceNames())
-	if err != nil || (PurgeTarget{Operation: command.Operation}).Validate() != nil ||
+	if err != nil || command.PurgeTarget.Validate() != nil ||
 		command.SurfaceDigest != digestAdapterSurfaces(descriptor) {
 		return ErrInvalidCoreAdapter
 	}
@@ -128,7 +148,7 @@ func (adapter *CoreAdapter) PurgeDeletion(ctx context.Context, target PurgeTarge
 	if ctx == nil || adapter == nil || nilDeletionServiceDependency(adapter.store) || target.Validate() != nil {
 		return AdapterPurgeReceipt{}, ErrInvalidCoreAdapter
 	}
-	command := CorePurgeCommand{Operation: target.Operation, SurfaceDigest: digestAdapterSurfaces(adapter.descriptor)}
+	command := CorePurgeCommand{PurgeTarget: target, SurfaceDigest: digestAdapterSurfaces(adapter.descriptor)}
 	if err := command.Validate(); err != nil {
 		return AdapterPurgeReceipt{}, err
 	}
@@ -149,7 +169,7 @@ func (adapter *CoreAdapter) VerifyDeletion(ctx context.Context, target PurgeTarg
 	if err := receipt.validate(target, adapter.descriptor); err != nil {
 		return err
 	}
-	command := CorePurgeCommand{Operation: target.Operation, SurfaceDigest: digestAdapterSurfaces(adapter.descriptor)}
+	command := CorePurgeCommand{PurgeTarget: target, SurfaceDigest: digestAdapterSurfaces(adapter.descriptor)}
 	if err := adapter.store.VerifyRecordCorePurge(ctx, command, receipt); err != nil {
 		return err
 	}
@@ -170,11 +190,11 @@ func NewRegistryPurger(registry Registry) *RegistryPurger {
 	return &RegistryPurger{registry: registry}
 }
 
-func (purger *RegistryPurger) PurgeOnline(ctx context.Context, operation DeletionOperation) (OnlinePurgeReceipt, error) {
+func (purger *RegistryPurger) PurgeOnline(ctx context.Context, target PurgeTarget) (OnlinePurgeReceipt, error) {
 	if ctx == nil || purger == nil {
 		return OnlinePurgeReceipt{}, ErrDeletionSafetyUnavailable
 	}
-	target := PurgeTarget{Operation: operation}
+	operation := target.Operation
 	if err := target.Validate(); err != nil {
 		return OnlinePurgeReceipt{}, err
 	}
@@ -204,13 +224,13 @@ func (purger *RegistryPurger) PurgeOnline(ctx context.Context, operation Deletio
 		}
 		receipt, err := adapter.PurgeDeletion(ctx, target)
 		if err != nil {
-			return OnlinePurgeReceipt{}, fmt.Errorf("%w: adapter %q purge: %v", ErrDeletionSafetyUnavailable, name, err)
+			return OnlinePurgeReceipt{}, fmt.Errorf("%w: adapter %q purge: %w", ErrDeletionSafetyUnavailable, name, err)
 		}
 		if err := receipt.validate(target, registered.descriptor); err != nil {
 			return OnlinePurgeReceipt{}, err
 		}
 		if err := adapter.VerifyDeletion(ctx, target, receipt); err != nil {
-			return OnlinePurgeReceipt{}, fmt.Errorf("%w: adapter %q verify: %v", ErrDeletionSafetyUnavailable, name, err)
+			return OnlinePurgeReceipt{}, fmt.Errorf("%w: adapter %q verify: %w", ErrDeletionSafetyUnavailable, name, err)
 		}
 		receipts[name] = receipt
 	}

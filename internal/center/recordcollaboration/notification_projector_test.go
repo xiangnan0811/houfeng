@@ -79,7 +79,7 @@ func TestNotificationProjectorRoutesClosedDeliveryEventThroughSameClaimOwner(t *
 	claim := testNotificationClaim(recordplatform.OutboxEventKindRecordNotificationDelivery, 7)
 	queue := &notificationQueueStub{claim: &claim}
 	projection := &notificationProjectionStub{}
-	delivery := &externalDeliveryProcessorStub{result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete}}
+	delivery := &externalDeliveryProcessorStub{result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete, QueueFinalized: true}}
 	projector, err := NewNotificationProjectorWithExternalDelivery(queue, projection, delivery, time.Second)
 	if err != nil {
 		t.Fatalf("NewNotificationProjectorWithExternalDelivery() error = %v", err)
@@ -89,7 +89,7 @@ func TestNotificationProjectorRoutesClosedDeliveryEventThroughSameClaimOwner(t *
 	if err != nil || !processed {
 		t.Fatalf("ProjectNext() = (%v, %v)", processed, err)
 	}
-	if !reflect.DeepEqual(queue.steps, []string{"claim", "sent"}) || projection.calls != 0 || delivery.calls != 1 || delivery.claim != claim {
+	if !reflect.DeepEqual(queue.steps, []string{"claim"}) || projection.calls != 0 || delivery.calls != 1 || delivery.claim != claim {
 		t.Fatalf("steps=%#v projection_calls=%d delivery=%#v", queue.steps, projection.calls, delivery)
 	}
 }
@@ -115,6 +115,8 @@ func TestNotificationProjectorUsesDeliveryRetryAndCancelDisposition(t *testing.T
 	}{
 		{name: "retry", result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxRetry, RetryAfter: 17 * time.Second}, steps: []string{"claim", "retry"}},
 		{name: "cancel", result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxCancel}, steps: []string{"claim", "cancel"}},
+		{name: "finalized retry", result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxRetry, RetryAfter: 17 * time.Second, QueueFinalized: true, NextAttemptAt: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)}, steps: []string{"claim"}},
+		{name: "finalized complete", result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete, QueueFinalized: true}, steps: []string{"claim"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -130,6 +132,21 @@ func TestNotificationProjectorUsesDeliveryRetryAndCancelDisposition(t *testing.T
 				t.Fatalf("ProjectNext()=(%v,%v) steps=%#v want=%#v", processed, err, queue.steps, test.steps)
 			}
 		})
+	}
+}
+
+func TestNotificationProjectorLeavesDeliveryErrorForTakeover(t *testing.T) {
+	claim := testNotificationClaim(recordplatform.OutboxEventKindRecordNotificationDelivery, 7)
+	queue := &notificationQueueStub{claim: &claim}
+	providerResultErr := errors.New("delivery completion response lost")
+	delivery := &externalDeliveryProcessorStub{err: providerResultErr}
+	projector, err := NewNotificationProjectorWithExternalDelivery(queue, &notificationProjectionStub{}, delivery, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := projector.ProjectNext(context.Background(), recordplatform.OutboxClaimInputV1{OwnerID: "notification_worker", OwnerLeaseDuration: time.Minute})
+	if !processed || !errors.Is(err, providerResultErr) || !reflect.DeepEqual(queue.steps, []string{"claim"}) {
+		t.Fatalf("ProjectNext()=(%v,%v) steps=%#v", processed, err, queue.steps)
 	}
 }
 

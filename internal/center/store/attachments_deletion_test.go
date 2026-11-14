@@ -61,9 +61,9 @@ func TestPostgresAttachmentDeletionHealthAndPreviewAreDeterministic(t *testing.T
 	if preview.Validate() != nil || preview.DependencyDigest == ([32]byte{}) || preview.ImpactDigest == ([32]byte{}) {
 		t.Fatalf("PreviewAttachmentDeletion() = %#v", preview)
 	}
-	wantCopies := []recorddeletion.AdapterSurvivingCopy{{
-		Kind: recorddeletion.SurvivingCopyKindOtherRecord, CopyCount: 2,
-	}}
+	wantCopies := []recorddeletion.AdapterSurvivingCopy{
+		recorddeletion.KnownAdapterSurvivingCopy(recorddeletion.SurvivingCopyKindOtherRecord, 2),
+	}
 	if !reflect.DeepEqual(preview.SurvivingCopies, wantCopies) {
 		t.Fatalf("SurvivingCopies = %#v, want %#v", preview.SurvivingCopies, wantCopies)
 	}
@@ -92,6 +92,8 @@ func (tx *attachmentDeletionReadTx) Exec(context.Context, string, ...any) (pgcon
 func (tx *attachmentDeletionReadTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	compact := strings.ToLower(strings.Join(strings.Fields(sql), " "))
 	switch {
+	case strings.Contains(compact, "to_regprocedure"):
+		return fakeAttachmentRow{values: []any{true}}
 	case strings.Contains(compact, "from pg_catalog.pg_class"):
 		names, ok := args[0].([]string)
 		if !ok {

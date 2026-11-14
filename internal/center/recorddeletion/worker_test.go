@@ -663,7 +663,7 @@ type deletionOnlinePurgerStub struct {
 	calls   int
 }
 
-func (purger *deletionOnlinePurgerStub) PurgeOnline(context.Context, DeletionOperation) (OnlinePurgeReceipt, error) {
+func (purger *deletionOnlinePurgerStub) PurgeOnline(context.Context, PurgeTarget) (OnlinePurgeReceipt, error) {
 	purger.calls++
 	return purger.receipt, purger.err
 }

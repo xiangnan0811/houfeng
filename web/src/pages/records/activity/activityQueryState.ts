@@ -33,6 +33,8 @@ const EVENT_KINDS = new Set<SubjectActivityEventKind>([
   'record_restored',
   'record_archived',
   'record_unarchived',
+  'record_trashed',
+  'record_trash_restored',
   'record_owner_changed',
   'record_participant_changed',
   'record_follow_up_changed',

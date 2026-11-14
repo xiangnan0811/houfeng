@@ -58,9 +58,12 @@ func (target BlobPublicationTarget) Validate() error {
 
 type BlobPublicationPrepareRequest struct {
 	ProjectID        string
+	NamespaceID      string
 	OwnerKind        BlobPublicationOwnerKind
 	OwnerID          string
 	OwnerGeneration  int64
+	ClaimOwnerID     string
+	ClaimExpiresAt   time.Time
 	Target           BlobPublicationTarget
 	PublishExpiresAt time.Time
 }
@@ -73,12 +76,21 @@ func (request BlobPublicationPrepareRequest) Validate() error {
 	) || request.Target.Validate() != nil || request.PublishExpiresAt.IsZero() {
 		return ErrInvalidBlobPublicationRequest
 	}
+	if request.OwnerKind == BlobPublicationOwnerProcessorPreview {
+		if !validBlobGCPinOwnerID(request.ClaimOwnerID) || request.ClaimExpiresAt.IsZero() {
+			return ErrInvalidBlobPublicationRequest
+		}
+	} else if request.ClaimOwnerID != "" || !request.ClaimExpiresAt.IsZero() {
+		return ErrInvalidBlobPublicationRequest
+	}
 	return nil
 }
 
 type BlobPublicationIntent struct {
 	PublicationID    string
 	ProjectID        string
+	NamespaceID      string
+	ObligationID     string
 	OwnerKind        BlobPublicationOwnerKind
 	OwnerID          string
 	OwnerGeneration  int64
@@ -89,13 +101,9 @@ type BlobPublicationIntent struct {
 }
 
 func (intent BlobPublicationIntent) Validate() error {
-	prepare := BlobPublicationPrepareRequest{
-		ProjectID: intent.ProjectID, OwnerKind: intent.OwnerKind, OwnerID: intent.OwnerID,
-		OwnerGeneration: intent.OwnerGeneration, Target: intent.Target,
-		PublishExpiresAt: intent.PublishExpiresAt,
-	}
-	if !validBlobPublicationID(intent.PublicationID) || prepare.Validate() != nil ||
-		!validBlobPublicationState(intent.State) {
+	if !validBlobPublicationID(intent.PublicationID) || intent.ProjectID != "default" ||
+		!validBlobPublicationOwner(intent.OwnerKind, intent.OwnerID, intent.OwnerGeneration) ||
+		intent.Target.Validate() != nil || intent.PublishExpiresAt.IsZero() || !validBlobPublicationState(intent.State) {
 		return ErrInvalidBlobPublicationRequest
 	}
 
@@ -130,6 +138,7 @@ func (intent BlobPublicationIntent) Object() (BlobObject, bool) {
 		Key: intent.Target.Key, SHA256: intent.Target.SHA256,
 		ObjectVersion: intent.ObjectVersion, SizeBytes: intent.Target.SizeBytes,
 		BackendKind: intent.Target.BackendKind,
+		NamespaceID: intent.NamespaceID,
 	}
 	if object.Validate() != nil {
 		return BlobObject{}, false
@@ -138,8 +147,9 @@ func (intent BlobPublicationIntent) Object() (BlobObject, bool) {
 }
 
 type BlobPublicationVersionRequest struct {
-	Intent BlobPublicationIntent
-	Object ObjectVersion
+	Intent       BlobPublicationIntent
+	Object       ObjectVersion
+	ObligationID string
 }
 
 func (request BlobPublicationVersionRequest) Validate() error {

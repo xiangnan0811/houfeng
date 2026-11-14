@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -195,7 +196,7 @@ func validDownloadOwnerRoute(draftID, recordID string) bool {
 	if draftID != "" {
 		return validPrefixedID(draftID, "rdf_")
 	}
-	return validPrefixedID(recordID, "rec_")
+	return recordidentity.IsValid(recordID)
 }
 
 type DownloadRepository interface {

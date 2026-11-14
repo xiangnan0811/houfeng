@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 var (
@@ -21,15 +22,16 @@ var (
 // CaptureIntentBinding is the complete persisted preview/intent state required
 // to reauthorize and recapture one fresh snapshot outside a revision transaction.
 type CaptureIntentBinding struct {
-	RecordID   string
-	SnapshotID string
-	Intent     Intent
-	Preview    Preview
+	AllocationID string `json:"AllocationID,omitempty"`
+	RecordID     string
+	SnapshotID   string
+	Intent       Intent
+	Preview      Preview
 }
 
 func (binding CaptureIntentBinding) Validate() error {
 	if !captureIntentBindingTimestampsCanonical(binding) ||
-		!validClosedPreparedID(binding.RecordID, "rec_") || !ValidSnapshotID(binding.SnapshotID) ||
+		!recordidentity.IsValid(binding.RecordID) || !ValidSnapshotID(binding.SnapshotID) ||
 		!ValidCaptureIntentID(binding.Intent.ID) || binding.Preview.IntentID != binding.Intent.ID ||
 		validateKnownKindKey(binding.Intent.Key) != nil || binding.Preview.Key != binding.Intent.Key ||
 		binding.Intent.Selection.Key != binding.Intent.Key || binding.Preview.Selection.Key != binding.Intent.Key ||
@@ -74,11 +76,22 @@ type CaptureIntentBindingSource interface {
 	LoadCaptureIntentBinding(context.Context, string, string) (CaptureIntentBinding, error)
 }
 
-// CapturePayloadSink persists canonical bytes by their content digest. It is
-// deliberately separate from revision commit so a later rollback can leave at
-// most a reclaimable orphan payload.
+// CapturePayloadRoute preserves the identity used to prepare a payload. The
+// comparison claims describe the selected source records; they do not by
+// themselves prove that a caller is authorized or that a reservation exists.
+type CapturePayloadRoute struct {
+	Actor            ActorScope
+	AllocationID     string
+	RecordID         string
+	SnapshotID       string
+	CaptureIntentID  string
+	ComparisonClaims *ComparisonIntentClaims
+}
+
+// CapturePayloadSink persists canonical bytes by their content digest. The
+// route is required so the persistence transaction can recheck its owner.
 type CapturePayloadSink interface {
-	PersistCapturePayload(context.Context, CanonicalSnapshot) error
+	PersistCapturePayload(context.Context, CapturePayloadRoute, CanonicalSnapshot) error
 }
 
 // RevisionPreparationItem is a strict tagged union. Exactly one identity must
@@ -89,8 +102,9 @@ type RevisionPreparationItem struct {
 }
 
 type RevisionPreparationRequest struct {
-	RecordID string
-	Items    []RevisionPreparationItem
+	AllocationID string
+	RecordID     string
+	Items        []RevisionPreparationItem
 }
 
 // RevisionPreparer performs all source-facing work before revision commit.
@@ -150,7 +164,7 @@ func (preparer *RevisionPreparer) Prepare(
 		}
 		if item.CaptureIntentID != "" {
 			capture, err := preparer.prepareCapture(
-				ctx, normalizedActor, request.RecordID, item.CaptureIntentID, additionalLogicalBytes,
+				ctx, normalizedActor, request.AllocationID, request.RecordID, item.CaptureIntentID, additionalLogicalBytes,
 			)
 			if err != nil {
 				return RevisionPreparation{}, err
@@ -192,6 +206,7 @@ func (preparer *RevisionPreparer) Prepare(
 func (preparer *RevisionPreparer) prepareCapture(
 	ctx context.Context,
 	actor ActorScope,
+	allocationID string,
 	recordID string,
 	intentID string,
 	priorAdditionalBytes uint64,
@@ -200,7 +215,7 @@ func (preparer *RevisionPreparer) prepareCapture(
 	if err != nil {
 		return PreparedCapture{}, fmt.Errorf("load evidence capture intent binding: %w", err)
 	}
-	if binding.RecordID != recordID || binding.Intent.ID != intentID || binding.Validate() != nil {
+	if binding.AllocationID != allocationID || binding.RecordID != recordID || binding.Intent.ID != intentID || binding.Validate() != nil {
 		return PreparedCapture{}, ErrInvalidCaptureIntentBinding
 	}
 	binding = cloneCaptureIntentBinding(binding)
@@ -256,7 +271,10 @@ func (preparer *RevisionPreparer) prepareCapture(
 	); err != nil {
 		return PreparedCapture{}, err
 	}
-	if err := preparer.payloads.PersistCapturePayload(ctx, snapshot); err != nil {
+	if err := preparer.payloads.PersistCapturePayload(ctx, CapturePayloadRoute{
+		Actor: actor.Clone(), AllocationID: allocationID, RecordID: binding.RecordID, SnapshotID: binding.SnapshotID,
+		CaptureIntentID: binding.Intent.ID,
+	}, snapshot); err != nil {
 		return PreparedCapture{}, fmt.Errorf("persist evidence capture payload: %w", err)
 	}
 	return PrepareCapture(
@@ -280,7 +298,7 @@ func withSnapshotQuotaOutcome(snapshot CanonicalSnapshot, outcome QuotaOutcome) 
 }
 
 func validateRevisionPreparationRequest(request RevisionPreparationRequest) error {
-	if !validClosedPreparedID(request.RecordID, "rec_") {
+	if !recordidentity.IsValid(request.RecordID) {
 		return revisionPreparationRequestError("record identity", nil)
 	}
 	intentIDs := make(map[string]struct{}, len(request.Items))

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"houfeng/internal/center/evidence"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -26,6 +27,7 @@ func TestRevisionCommitCommandAcceptsClosedCreateReviseAndRestoreShapes(t *testi
 		{
 			name: "create",
 			command: RevisionCommitCommand{
+				Actor:        recordauth.ActorScope{UserID: input.AuthorID(), Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 				RecordID:     "rec_create1",
 				Input:        input,
 				ActivityKind: DomainActivityRecordCreated,
@@ -36,6 +38,7 @@ func TestRevisionCommitCommandAcceptsClosedCreateReviseAndRestoreShapes(t *testi
 		{
 			name: "revise",
 			command: RevisionCommitCommand{
+				Actor:              recordauth.ActorScope{UserID: input.AuthorID(), Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 				RecordID:           "rec_revise1",
 				BaseRevisionID:     "rrv_aaaaaaaaaaaaaaaa",
 				LockVersion:        7,
@@ -49,6 +52,7 @@ func TestRevisionCommitCommandAcceptsClosedCreateReviseAndRestoreShapes(t *testi
 		{
 			name: "restore",
 			command: RevisionCommitCommand{
+				Actor:              recordauth.ActorScope{UserID: input.AuthorID(), Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 				RecordID:           "rec_restore1",
 				BaseRevisionID:     "rrv_bbbbbbbbbbbbbbbb",
 				LockVersion:        8,
@@ -95,6 +99,7 @@ func TestRevisionCommitCommandClosesOptionalPublishedDraftShape(t *testing.T) {
 		t.Fatalf("NewDraftETag() error = %v", err)
 	}
 	base := RevisionCommitCommand{
+		Actor:        recordauth.ActorScope{UserID: input.AuthorID(), Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 		RecordID:     "rec_create1",
 		DraftID:      "rdf_0123456789abcdef",
 		DraftETag:    etag,
@@ -137,6 +142,7 @@ func TestRevisionCommitCommandRejectsMixedCreateAndUpdateShapes(t *testing.T) {
 	createFingerprint := mustRevisionCommandFingerprint(t, recordplatform.OperationKindRecordCreate, input.CanonicalHash())
 	updateFingerprint := mustRevisionCommandFingerprint(t, recordplatform.OperationKindRecordUpdate, input.CanonicalHash())
 	validCreate := RevisionCommitCommand{
+		Actor:        recordauth.ActorScope{UserID: input.AuthorID(), Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 		RecordID:     "rec_shape1",
 		Input:        input,
 		ActivityKind: DomainActivityRecordCreated,
@@ -144,6 +150,7 @@ func TestRevisionCommitCommandRejectsMixedCreateAndUpdateShapes(t *testing.T) {
 		Idempotency:  revisionCommandIdempotency(createFingerprint, recordplatform.OperationKindRecordCreate),
 	}
 	validUpdate := RevisionCommitCommand{
+		Actor:              recordauth.ActorScope{UserID: input.AuthorID(), Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 		RecordID:           "rec_shape1",
 		BaseRevisionID:     "rrv_aaaaaaaaaaaaaaaa",
 		LockVersion:        2,
@@ -158,6 +165,10 @@ func TestRevisionCommitCommandRejectsMixedCreateAndUpdateShapes(t *testing.T) {
 		mutate func(*RevisionCommitCommand)
 		base   RevisionCommitCommand
 	}{
+		{name: "missing actor", base: validCreate, mutate: func(command *RevisionCommitCommand) { command.Actor = recordauth.ActorScope{} }},
+		{name: "different author", base: validCreate, mutate: func(command *RevisionCommitCommand) { command.Actor.UserID = "usr_bbbbbbbbbbbbbbbbbbbbbbbb" }},
+		{name: "unknown actor role", base: validCreate, mutate: func(command *RevisionCommitCommand) { command.Actor.Role = "owner" }},
+		{name: "different actor project", base: validCreate, mutate: func(command *RevisionCommitCommand) { command.Actor.ProjectID = "another" }},
 		{name: "create with base", base: validCreate, mutate: func(command *RevisionCommitCommand) { command.BaseRevisionID = "rrv_aaaaaaaaaaaaaaaa" }},
 		{name: "create with lock", base: validCreate, mutate: func(command *RevisionCommitCommand) { command.LockVersion = 1 }},
 		{name: "create with update operation", base: validCreate, mutate: func(command *RevisionCommitCommand) { command.Idempotency = validUpdate.Idempotency }},
@@ -184,11 +195,14 @@ func TestRecordLifecycleCommandAcceptsArchiveAndUnarchiveTransitions(t *testing.
 	fingerprint := mustRevisionCommandFingerprint(t, recordplatform.OperationKindRecordUpdate, [32]byte{0x51})
 	tests := []struct {
 		name         string
+		from         Lifecycle
 		target       Lifecycle
 		wantActivity DomainActivityKind
 	}{
-		{name: "archive", target: LifecycleArchived, wantActivity: DomainActivityRecordArchived},
-		{name: "unarchive", target: LifecycleActive, wantActivity: DomainActivityRecordUnarchived},
+		{name: "archive", from: LifecycleActive, target: LifecycleArchived, wantActivity: DomainActivityRecordArchived},
+		{name: "unarchive", from: LifecycleArchived, target: LifecycleActive, wantActivity: DomainActivityRecordUnarchived},
+		{name: "trash", from: LifecycleActive, target: LifecycleTrashed, wantActivity: DomainActivityRecordTrashed},
+		{name: "restore trash", from: LifecycleTrashed, target: LifecycleActive, wantActivity: DomainActivityRecordTrashRestored},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -198,8 +212,9 @@ func TestRecordLifecycleCommandAcceptsArchiveAndUnarchiveTransitions(t *testing.
 				CurrentRevisionID:  "rrv_current00000001",
 				LockVersion:        7,
 				AuthorizationEpoch: 5,
+				ExpectedLifecycle:  test.from,
 				TargetLifecycle:    test.target,
-				ActorID:            "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
+				Actor:              recordauth.ActorScope{UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 				OutboxTTL:          time.Hour,
 				Idempotency:        revisionCommandIdempotency(fingerprint, recordplatform.OperationKindRecordUpdate),
 			}
@@ -227,8 +242,9 @@ func TestRecordLifecycleCommandRejectsInvalidOrNonCASShapes(t *testing.T) {
 		CurrentRevisionID:  "rrv_current00000001",
 		LockVersion:        7,
 		AuthorizationEpoch: 5,
+		ExpectedLifecycle:  LifecycleActive,
 		TargetLifecycle:    LifecycleArchived,
-		ActorID:            "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
+		Actor:              recordauth.ActorScope{UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault},
 		OutboxTTL:          time.Hour,
 		Idempotency:        revisionCommandIdempotency(fingerprint, recordplatform.OperationKindRecordUpdate),
 	}
@@ -241,7 +257,12 @@ func TestRecordLifecycleCommandRejectsInvalidOrNonCASShapes(t *testing.T) {
 		{name: "zero lock", mutate: func(command *RecordLifecycleCommand) { command.LockVersion = 0 }},
 		{name: "zero authorization epoch", mutate: func(command *RecordLifecycleCommand) { command.AuthorizationEpoch = 0 }},
 		{name: "unknown lifecycle", mutate: func(command *RecordLifecycleCommand) { command.TargetLifecycle = "deleted" }},
-		{name: "invalid actor", mutate: func(command *RecordLifecycleCommand) { command.ActorID = "usr_invalid" }},
+		{name: "missing expected lifecycle", mutate: func(command *RecordLifecycleCommand) { command.ExpectedLifecycle = "" }},
+		{name: "same state", mutate: func(command *RecordLifecycleCommand) { command.ExpectedLifecycle = command.TargetLifecycle }},
+		{name: "archive trash", mutate: func(command *RecordLifecycleCommand) { command.ExpectedLifecycle = LifecycleTrashed }},
+		{name: "invalid actor", mutate: func(command *RecordLifecycleCommand) { command.Actor.UserID = "usr_invalid" }},
+		{name: "unknown actor role", mutate: func(command *RecordLifecycleCommand) { command.Actor.Role = "owner" }},
+		{name: "different actor project", mutate: func(command *RecordLifecycleCommand) { command.Actor.ProjectID = "another" }},
 		{name: "create operation", mutate: func(command *RecordLifecycleCommand) {
 			command.Idempotency = revisionCommandIdempotency(
 				mustRevisionCommandFingerprint(t, recordplatform.OperationKindRecordCreate, [32]byte{0x52}),
@@ -468,8 +489,9 @@ func TestRevisionParticipantRegistryStopsAtFirstFailure(t *testing.T) {
 }
 
 type revisionParticipantStub struct {
-	name  string
-	apply func(context.Context, pgx.Tx, RevisionCommitted) error
+	name      string
+	apply     func(context.Context, pgx.Tx, RevisionCommitted) error
+	resources func(context.Context, pgx.Tx, RevisionCommitCommand) (RevisionMutationResources, error)
 }
 
 func (participant *revisionParticipantStub) Name() string {
@@ -477,6 +499,14 @@ func (participant *revisionParticipantStub) Name() string {
 		return ""
 	}
 	return participant.name
+}
+
+func (participant *revisionParticipantStub) MutationResources(ctx context.Context, tx pgx.Tx, command RevisionCommitCommand) (RevisionMutationResources, error) {
+	if participant.resources != nil {
+		return participant.resources(ctx, tx, command)
+	}
+	// This participant has no durable effects unless the test supplies them.
+	return RevisionMutationResources{}, nil
 }
 
 func (participant *revisionParticipantStub) ApplyRevision(ctx context.Context, tx pgx.Tx, committed RevisionCommitted) error {

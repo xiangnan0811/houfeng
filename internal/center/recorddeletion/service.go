@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -16,7 +17,7 @@ const (
 	DeletionPreviewTTL = 10 * time.Minute
 
 	deletionPreviewBindingDomainV1 = "houfeng.record-deletion.preview-binding.v1"
-	deletionAdapterPreviewDomainV1 = "houfeng.record-deletion.adapter-preview.v1"
+	deletionAdapterPreviewDomainV2 = "houfeng.record-deletion.adapter-preview.v2"
 	deletionRequestScopeDomainV1   = "houfeng.record-deletion.request-scope.v1"
 )
 
@@ -85,7 +86,7 @@ type DeletionRecordSnapshot struct {
 }
 
 func (snapshot DeletionRecordSnapshot) Validate() error {
-	if !validDeletionRecordID(snapshot.RecordID) || !validDeletionRevisionID(snapshot.CurrentRevisionID) ||
+	if !recordidentity.IsValid(snapshot.RecordID) || !validDeletionRevisionID(snapshot.CurrentRevisionID) ||
 		snapshot.LockVersion == 0 || snapshot.AuthorizationEpoch == 0 ||
 		zeroDeletionDigest(snapshot.DependencyGraphDigest) ||
 		zeroDeletionDigest(snapshot.BackupInventoryDigest) ||
@@ -113,7 +114,7 @@ type PreviewTarget struct {
 
 func (target PreviewTarget) Validate() error {
 	if err := target.Object.Validate(); err != nil || target.Object.ObjectKind != "record" ||
-		!validDeletionRecordID(target.Object.ObjectID) ||
+		!recordidentity.IsValid(target.Object.ObjectID) ||
 		!validDeletionRevisionID(target.CurrentRevisionID) || target.LockVersion == 0 ||
 		target.AuthorizationEpoch == 0 || zeroDeletionDigest(target.DependencyGraphDigest) {
 		return fmt.Errorf("%w: adapter preview target", ErrInvalidDeletionPreview)
@@ -191,7 +192,7 @@ type PreviewLookup struct {
 func (lookup PreviewLookup) Validate() error {
 	if !validDeletionReservationID(lookup.ReservationID) ||
 		lookup.Object.Validate() != nil || lookup.Object.ObjectKind != "record" ||
-		!validDeletionRecordID(lookup.Object.ObjectID) {
+		!recordidentity.IsValid(lookup.Object.ObjectID) {
 		return fmt.Errorf("%w: lookup", ErrInvalidDeletionPreview)
 	}
 	return nil
@@ -211,7 +212,7 @@ type StoredPreview struct {
 
 func (preview StoredPreview) Validate() error {
 	if !validDeletionReservationID(preview.ReservationID) || preview.Object.Validate() != nil ||
-		preview.Object.ObjectKind != "record" || !validDeletionRecordID(preview.Object.ObjectID) ||
+		preview.Object.ObjectKind != "record" || !recordidentity.IsValid(preview.Object.ObjectID) ||
 		zeroDeletionDigest(preview.ActorScopeDigest) || zeroDeletionDigest(preview.TokenCommitment) ||
 		zeroDeletionDigest(preview.BindingDigest) || preview.ExpiresAt.IsZero() ||
 		preview.RequestFingerprint.Validate() != nil || preview.WitnessHead.Validate() != nil {
@@ -264,7 +265,15 @@ func (command ReservePreviewCommand) Validate() error {
 	return nil
 }
 
+type DeletionContractVersion uint8
+
+const (
+	DeletionContractV1 DeletionContractVersion = 1
+	DeletionContractV2 DeletionContractVersion = 2
+)
+
 type DeletionOperation struct {
+	ContractVersion DeletionContractVersion
 	OperationID     string
 	ReservationID   string
 	Object          recordplatform.ObjectRef
@@ -278,11 +287,32 @@ type DeletionOperation struct {
 }
 
 func (operation DeletionOperation) Validate() error {
+	if operation.ContractVersion != DeletionContractV1 && operation.ContractVersion != DeletionContractV2 {
+		return ErrInvalidDeletionOperation
+	}
 	if !validDeletionOperationID(operation.OperationID) || !validDeletionReservationID(operation.ReservationID) ||
 		operation.Object.Validate() != nil || operation.Object.ObjectKind != "record" ||
-		!validDeletionRecordID(operation.Object.ObjectID) || !validRecordDeletionReason(operation.ReasonCode) ||
+		!recordidentity.IsValid(operation.Object.ObjectID) || !validRecordDeletionReason(operation.ReasonCode) ||
 		operation.FenceEpoch == 0 || !knownDeletionState(operation.State) {
 		return ErrInvalidDeletionOperation
+	}
+	if operation.ContractVersion == DeletionContractV2 {
+		if operation.LedgerSequence != 0 || !zeroDeletionDigest(operation.LedgerEntryHash) || operation.ReleaseEpoch != 0 {
+			return ErrInvalidDeletionOperation
+		}
+		switch operation.State {
+		case DeletionStateOnlinePurging:
+			if !zeroDeletionDigest(operation.ReceiptDigest) {
+				return ErrInvalidDeletionOperation
+			}
+		case DeletionStateOnlinePurged:
+			if zeroDeletionDigest(operation.ReceiptDigest) {
+				return ErrInvalidDeletionOperation
+			}
+		default:
+			return ErrInvalidDeletionOperation
+		}
+		return nil
 	}
 	hasLedger := operation.LedgerSequence > 0 && !zeroDeletionDigest(operation.LedgerEntryHash)
 	hasPartialLedger := (operation.LedgerSequence > 0) != !zeroDeletionDigest(operation.LedgerEntryHash)
@@ -607,7 +637,7 @@ func (service *Service) validateRequest(ctx context.Context, actorInput recordau
 		return recordauth.ActorScope{}, recordplatform.ObjectRef{}, err
 	}
 	actor, err := recordauth.NormalizeActorScope(actorInput)
-	if err != nil || !validDeletionRecordID(recordID) {
+	if err != nil || !recordidentity.IsValid(recordID) {
 		return recordauth.ActorScope{}, recordplatform.ObjectRef{}, fmt.Errorf("%w: actor or record", ErrInvalidDeletionPreview)
 	}
 	object := recordplatform.ObjectRef{ProjectID: string(actor.ProjectID), ObjectKind: "record", ObjectID: recordID}
@@ -659,13 +689,7 @@ func (registry Registry) previewSnapshot(ctx context.Context, target PreviewTarg
 	if err := target.Validate(); err != nil {
 		return adapterPreviewAggregate{}, err
 	}
-	payload := make([]byte, 0, 1024)
-	payload = appendLengthPrefixed(payload, deletionAdapterPreviewDomainV1)
-	payload = appendUint64(payload, 1)
-	aggregate := adapterPreviewAggregate{
-		onlinePurgeScopes: make([]AdapterName, 0, len(requiredAdapterNames)),
-		survivingCopies:   make([]SurvivingCopySummary, 0),
-	}
+	previews := make(map[AdapterName]AdapterPreviewSnapshot, len(requiredAdapterNames))
 	for _, name := range requiredAdapterNames {
 		registered, ok := registry.adapters[name]
 		if !ok {
@@ -688,22 +712,17 @@ func (registry Registry) previewSnapshot(ctx context.Context, target PreviewTarg
 		if err := snapshot.Validate(); err != nil {
 			return adapterPreviewAggregate{}, fmt.Errorf("%w: adapter %q preview snapshot", ErrDeletionSafetyUnavailable, name)
 		}
-		aggregate.onlinePurgeScopes = append(aggregate.onlinePurgeScopes, name)
-		payload = appendLengthPrefixed(payload, string(name))
-		payload = append(payload, snapshot.DependencyDigest[:]...)
-		payload = append(payload, snapshot.ImpactDigest[:]...)
-		payload = appendUint64(payload, uint64(len(snapshot.SurvivingCopies)))
 		for _, surviving := range snapshot.SurvivingCopies {
-			payload = appendLengthPrefixed(payload, string(surviving.Kind))
-			payload = appendUint64(payload, surviving.CopyCount)
-			aggregate.survivingCopies = append(aggregate.survivingCopies, SurvivingCopySummary{
-				Scope:     name,
-				Kind:      surviving.Kind,
-				CopyCount: surviving.CopyCount,
-			})
+			if err := (SurvivingCopySummary{Scope: name, Kind: surviving.Kind, CountStatus: surviving.CountStatus, CopyCount: surviving.CopyCount}).Validate(); err != nil {
+				return adapterPreviewAggregate{}, fmt.Errorf("%w: adapter %q surviving copy owner", ErrDeletionSafetyUnavailable, name)
+			}
 		}
+		previews[name] = snapshot
 	}
-	aggregate.digest = sha256.Sum256(payload)
+	aggregate, err := digestAdapterPreviewSnapshots(previews)
+	if err != nil {
+		return adapterPreviewAggregate{}, fmt.Errorf("%w: %w", ErrDeletionSafetyUnavailable, err)
+	}
 	return aggregate, nil
 }
 
@@ -815,10 +834,6 @@ func validRecordDeletionReason(reason DeletionReasonCode) bool {
 	default:
 		return false
 	}
-}
-
-func validDeletionRecordID(value string) bool {
-	return validPrefixedDeletionID(value, "rec_", 64)
 }
 
 func validDeletionRevisionID(value string) bool {

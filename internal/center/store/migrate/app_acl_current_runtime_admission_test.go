@@ -84,7 +84,7 @@ func TestAdmitAppACLCurrentRuntimeRejectsAllPredecessorsAndAcceptsRegisteredTarg
 	currentPrivileges, err := appACLCurrentTransitionPrivilegeBodyFor(
 		source,
 		base.DatabaseName,
-		appACLCurrentTransitionBindings,
+		appACLCurrentTransitionBindingsV2,
 		migratorRole,
 	)
 	if err != nil {
@@ -696,6 +696,9 @@ func appACLCurrentRuntimeAdmissionFixture(
 			{Name: "houfeng_migrator", Login: true},
 		},
 	}
+	if worker := roleBySubject[AppACLSubjectRecordDeletionWorker]; worker != "" {
+		catalogSnapshot.Roles = append(catalogSnapshot.Roles, AppACLEffectiveCatalogRoleStateR1{Name: worker, Login: true})
+	}
 	for _, privilege := range catalog.Privileges {
 		observation := AppACLEffectiveCatalogPrivilegeObservationR1{
 			Grantee:        roleBySubject[privilege.Subject],
@@ -750,7 +753,7 @@ func appACLCurrentRuntimeSuccessorSnapshot(
 ) AppACLManifestRuntimeSnapshotV1 {
 	t.Helper()
 	genesis := snapshot.Manifests[0]
-	privilegeSet, err := ParseCanonicalPrivilegeSetBodyV1(genesis.CanonicalPrivilegeSet)
+	privilegeSet, _, err := parseCanonicalPrivilegeSetBodyAnyVersion(genesis.CanonicalPrivilegeSet)
 	if err != nil {
 		t.Fatalf("parse current runtime genesis privileges: %v", err)
 	}
@@ -759,7 +762,7 @@ func appACLCurrentRuntimeSuccessorSnapshot(
 			privilegeSet.RoleBindings[index].CatalogRole = runtimeRole
 		}
 	}
-	privileges, err := CanonicalPrivilegeSetBodyV1(privilegeSet.RoleBindings, privilegeSet.Privileges)
+	privileges, err := canonicalPrivilegeSetBodyForBindings(privilegeSet.RoleBindings, privilegeSet.Privileges)
 	if err != nil {
 		t.Fatalf("compile current runtime successor privileges: %v", err)
 	}

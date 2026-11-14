@@ -71,8 +71,52 @@ func TestRevisionPreparerPreparesFreshCaptureAndExistingReferenceInRequestOrder(
 	if payloadSink.calls != 1 || payloadSink.snapshot.Hash() != inputs.snapshot.Hash() {
 		t.Fatalf("payload persistence = %d calls/digest %x, want 1/%x", payloadSink.calls, payloadSink.snapshot.Hash(), inputs.snapshot.Hash())
 	}
+	if payloadSink.route.RecordID != inputs.recordID || payloadSink.route.SnapshotID != inputs.snapshotID ||
+		payloadSink.route.CaptureIntentID != inputs.intent.ID || payloadSink.route.ComparisonClaims != nil ||
+		!reflect.DeepEqual(payloadSink.route.Actor, actor) {
+		t.Fatalf("payload route = %#v, want capture identity and actor", payloadSink.route)
+	}
 	if referenceSource.calls != 1 || kind.previewCalls != 0 {
 		t.Fatalf("reference/capture calls = %d reauthorizations/%d previews, want 1/0", referenceSource.calls, kind.previewCalls)
+	}
+}
+
+func TestRevisionPreparerRequiresThePersistedAllocation(t *testing.T) {
+	inputs := newPreparedCaptureTestInputs(t)
+	actor := testActor(t)
+	const allocationID = "rqa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	kind := &revisionPreparationKindStub{kindStub: &kindStub{
+		descriptor: inputs.descriptor, authorization: inputs.authorization, snapshot: inputs.snapshot,
+	}}
+	registry, err := NewRegistry([]Kind{kind})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &capturePayloadSinkStub{}
+	preparer, err := NewRevisionPreparer(registry, &captureIntentBindingSourceStub{binding: CaptureIntentBinding{
+		AllocationID: allocationID, RecordID: inputs.recordID, SnapshotID: inputs.snapshotID,
+		Intent: inputs.intent, Preview: inputs.preview,
+	}}, sink, &revisionPreparationReferenceSourceStub{},
+		mustPreparationCapacity(t, actor.ProjectID, 0, DefaultProjectEvidenceCapacityBytes, 80))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RevisionPreparationRequest{RecordID: inputs.recordID, Items: []RevisionPreparationItem{{CaptureIntentID: inputs.intent.ID}}}
+	for _, wrong := range []string{"", "rqa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"} {
+		request.AllocationID = wrong
+		if _, err := preparer.Prepare(context.Background(), actor, request); !errors.Is(err, ErrInvalidCaptureIntentBinding) {
+			t.Fatalf("Prepare with allocation %q = %v", wrong, err)
+		}
+		if sink.calls != 0 {
+			t.Fatal("mismatched allocation persisted a payload")
+		}
+	}
+	request.AllocationID = allocationID
+	if _, err := preparer.Prepare(context.Background(), actor, request); err != nil {
+		t.Fatal(err)
+	}
+	if sink.calls != 1 || sink.route.AllocationID != allocationID || sink.route.CaptureIntentID != inputs.intent.ID {
+		t.Fatalf("persisted route = %#v, calls = %d", sink.route, sink.calls)
 	}
 }
 
@@ -388,13 +432,15 @@ func (source *captureIntentBindingSourceStub) LoadCaptureIntentBinding(
 
 type capturePayloadSinkStub struct {
 	calls    int
+	route    CapturePayloadRoute
 	snapshot CanonicalSnapshot
 	err      error
 	events   *[]string
 }
 
-func (sink *capturePayloadSinkStub) PersistCapturePayload(_ context.Context, snapshot CanonicalSnapshot) error {
+func (sink *capturePayloadSinkStub) PersistCapturePayload(_ context.Context, route CapturePayloadRoute, snapshot CanonicalSnapshot) error {
 	sink.calls++
+	sink.route = route
 	sink.snapshot = snapshot
 	if sink.events != nil {
 		*sink.events = append(*sink.events, "payload")

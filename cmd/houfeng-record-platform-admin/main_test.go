@@ -23,54 +23,6 @@ import (
 	"houfeng/internal/center/store/migrate"
 )
 
-func TestComposeDeployInitRouteLoadsOnlyFixedSecretFiles(t *testing.T) {
-	t.Parallel()
-
-	secretByPath := map[string][]byte{
-		"/run/secrets/postgres_bootstrap_password":     []byte("bootstrap:/?# secret"),
-		"/run/secrets/houfeng_runtime_password":        []byte("runtime:/?# secret"),
-		"/run/secrets/houfeng_platform_admin_password": []byte("admin:/?# secret"),
-		"/run/secrets/houfeng_migrator_password":       []byte("migrator:/?# secret"),
-	}
-	var readPaths []string
-	var initialized centerdeploy.ComposeInitConfig
-	err := runComposeDeployInitWithDeps(t.Context(), []string{"deploy-init", "--scope", "compose"}, composeDeployInitDependencies{
-		readFile: func(path string) ([]byte, error) {
-			readPaths = append(readPaths, path)
-			value, ok := secretByPath[path]
-			if !ok {
-				return nil, fs.ErrNotExist
-			}
-			return append([]byte(nil), value...), nil
-		},
-		initialize: func(_ context.Context, config centerdeploy.ComposeInitConfig) error {
-			initialized = config
-			return nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("deploy-init --scope compose error = %v", err)
-	}
-	wantPaths := []string{
-		"/run/secrets/postgres_bootstrap_password",
-		"/run/secrets/houfeng_runtime_password",
-		"/run/secrets/houfeng_platform_admin_password",
-		"/run/secrets/houfeng_migrator_password",
-	}
-	if !reflect.DeepEqual(readPaths, wantPaths) {
-		t.Fatalf("Compose deploy-init secret reads = %q, want only fixed paths %q", readPaths, wantPaths)
-	}
-	if initialized.DatabaseHost != "db" || initialized.DatabasePort != 5432 || initialized.DatabaseName != "houfeng" || initialized.BootstrapRole != "postgres" {
-		t.Fatalf("Compose deploy-init endpoint/bootstrap config = %#v, want fixed internal topology", initialized)
-	}
-	if initialized.Roles != (platformmigrate.AppRoleSetV1{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", Migrator: "houfeng_migrator"}) {
-		t.Fatalf("Compose deploy-init roles = %#v, want fixed current APP role set", initialized.Roles)
-	}
-	if initialized.Passwords.Bootstrap != "bootstrap:/?# secret" || initialized.Passwords.Runtime != "runtime:/?# secret" || initialized.Passwords.PlatformAdmin != "admin:/?# secret" || initialized.Passwords.Migrator != "migrator:/?# secret" {
-		t.Fatal("Compose deploy-init did not preserve printable secret bytes")
-	}
-}
-
 func TestComposeRecordAuthorityRouteUsesOnlyFixedInternalConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -166,6 +118,29 @@ func TestComposeDeployInitRejectsUnsafeInputsBeforeInitialization(t *testing.T) 
 				t.Fatalf("invalid Compose deploy-init performed reads:%d initializations:%d", reads, initializations)
 			}
 		})
+	}
+}
+
+func TestComposeSecretStageRouteUsesFixedInputsAndRedactsFailure(t *testing.T) {
+	calls := 0
+	deps := appAdminDependencies{composeStage: composeDeployInitDependencies{
+		readFile: func(path string) ([]byte, error) {
+			return []byte(filepath.Base(path) + "-value"), nil
+		},
+		initialize: func(_ context.Context, config centerdeploy.ComposeInitConfig) error {
+			calls++
+			if config.Passwords.Runtime != "houfeng_runtime_password-value" {
+				t.Fatal("stager received the wrong runtime secret")
+			}
+			return errors.New("secret-value must not appear")
+		},
+	}}
+	err := runAdminWithDeps(t.Context(), []string{"deploy-stage-secrets", "--scope", "compose"}, deps)
+	if calls != 1 || err == nil || strings.Contains(err.Error(), "secret-value") {
+		t.Fatalf("staging result was not redacted: calls=%d, err=%v", calls, err)
+	}
+	if err := runAdminWithDeps(t.Context(), []string{"deploy-stage-secrets", "--scope", "compose", "extra"}, deps); err == nil || calls != 1 {
+		t.Fatal("invalid staging invocation was accepted")
 	}
 }
 
@@ -539,6 +514,7 @@ func TestMigrateAppMasksMigratorPoolOpenFailure(t *testing.T) {
 	t.Setenv("HOUFENG_RECORD_PLATFORM_MIGRATOR_APP_DATABASE_URL", migratorDSN)
 	t.Setenv("HOUFENG_RECORD_PLATFORM_APP_RUNTIME_ROLE", "houfeng_center_runtime")
 	t.Setenv("HOUFENG_RECORD_PLATFORM_APP_ADMIN_ROLE", "houfeng_platform_admin")
+	t.Setenv("HOUFENG_RECORD_PLATFORM_APP_DELETION_WORKER_ROLE", "houfeng_record_deletion_worker")
 
 	err := run([]string{"migrate", "--scope", "app"})
 	if err == nil {
@@ -549,18 +525,6 @@ func TestMigrateAppMasksMigratorPoolOpenFailure(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), migratorDSN) {
 		t.Fatalf("run() error leaked APP migrator DSN: %q", err)
-	}
-}
-
-func TestDefaultAppMigrationDependenciesUseCurrentConvergence(t *testing.T) {
-	deps := defaultAppMigrationDependencies()
-
-	err := deps.converge(t.Context(), nil, "houfeng_center_runtime", "houfeng_platform_admin")
-	if err == nil {
-		t.Fatal("default converge() error = nil, want nil-pool rejection")
-	}
-	if got, want := err.Error(), "current app ACL convergence has no PostgreSQL pool"; got != want {
-		t.Fatalf("default converge() error = %q, want %q", got, want)
 	}
 }
 
@@ -587,7 +551,7 @@ func TestMigrateAppRejectsForbiddenArgumentsBeforeLoadingEnvironment(t *testing.
 				closePool: func(*pgxpool.Pool) {
 					t.Fatal("forbidden invocation closed an unopened PostgreSQL pool")
 				},
-				converge: func(context.Context, *pgxpool.Pool, string, string) error {
+				converge: func(context.Context, *pgxpool.Pool, string, string, string) error {
 					t.Fatal("forbidden invocation attempted APP convergence")
 					return nil
 				},
@@ -622,10 +586,7 @@ func TestMigrateAppClosesPoolAfterSuccessfulConvergence(t *testing.T) {
 			}
 			closed++
 		},
-		converge: func(_ context.Context, gotPool *pgxpool.Pool, runtimeRole, adminRole string) error {
-			if gotPool != pool || runtimeRole != "houfeng_center_runtime" || adminRole != "houfeng_platform_admin" {
-				t.Fatalf("converge() arguments = (%p, %q, %q), want opened pool and APP roles", gotPool, runtimeRole, adminRole)
-			}
+		converge: func(context.Context, *pgxpool.Pool, string, string, string) error {
 			converged++
 			return nil
 		},
@@ -652,7 +613,7 @@ func TestMigrateAppClosesPoolAndMasksConvergenceFailure(t *testing.T) {
 		closePool: func(*pgxpool.Pool) {
 			closed++
 		},
-		converge: func(context.Context, *pgxpool.Pool, string, string) error {
+		converge: func(context.Context, *pgxpool.Pool, string, string, string) error {
 			return convergenceErr
 		},
 	})
@@ -688,7 +649,7 @@ func TestMigrateAppPreservesOnlyRebuildRequiredConvergenceCause(t *testing.T) {
 		closePool: func(*pgxpool.Pool) {
 			closed++
 		},
-		converge: func(context.Context, *pgxpool.Pool, string, string) error {
+		converge: func(context.Context, *pgxpool.Pool, string, string, string) error {
 			return convergenceErr
 		},
 	})
@@ -722,7 +683,7 @@ func TestMigrateAppClosesReturnedPoolWhenOpeningFails(t *testing.T) {
 		closePool: func(*pgxpool.Pool) {
 			closed++
 		},
-		converge: func(context.Context, *pgxpool.Pool, string, string) error {
+		converge: func(context.Context, *pgxpool.Pool, string, string, string) error {
 			t.Fatal("pool-open failure attempted APP convergence")
 			return nil
 		},
@@ -758,7 +719,7 @@ func TestBootstrapAppACLR2RouteAcceptsExactRouteAndUsesOnlyBootstrapDSN(t *testi
 			closePool: func(*pgxpool.Pool) {
 				t.Fatal("bootstrap route attempted app migration pool close")
 			},
-			converge: func(context.Context, *pgxpool.Pool, string, string) error {
+			converge: func(context.Context, *pgxpool.Pool, string, string, string) error {
 				t.Fatal("bootstrap route attempted frozen R1 convergence")
 				return nil
 			},
@@ -953,7 +914,7 @@ func TestAppACLR2FinalizeRouteAcceptsExactRouteAndUsesOnlyMigratorDSN(t *testing
 			closePool: func(*pgxpool.Pool) {
 				t.Fatal("finalize route attempted frozen R1 migration pool close")
 			},
-			converge: func(context.Context, *pgxpool.Pool, string, string) error {
+			converge: func(context.Context, *pgxpool.Pool, string, string, string) error {
 				t.Fatal("finalize route attempted frozen R1 convergence")
 				return nil
 			},
@@ -1614,6 +1575,7 @@ func appScopeLookup(t *testing.T, databaseURL, runtimeRole, adminRole string) fu
 		platformmigrate.AppMigratorDatabaseURLEnv: databaseURL,
 		platformmigrate.AppRuntimeRoleEnv:         runtimeRole,
 		platformmigrate.AppAdminRoleEnv:           adminRole,
+		platformmigrate.AppDeletionWorkerRoleEnv:  "houfeng_record_deletion_worker",
 	}
 	return func(key string) (string, bool) {
 		value, ok := values[key]

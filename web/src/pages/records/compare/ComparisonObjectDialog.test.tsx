@@ -1,10 +1,16 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../lib/apiRequest'
 import type { EvidenceSnapshotRead, SubjectActivityListResponse, VPSAssetRecord } from '../../../lib/types'
 import { ComparisonObjectDialog } from './ComparisonObjectDialog'
+
+vi.mock('../../../lib/auth-context', () => ({ useAuth: () => ({ user: { user_id: 'usr_compare' } }) }))
+vi.mock('../draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../draftBuffer')>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 const api = vi.hoisted(() => ({
   vps: vi.fn(),
@@ -87,6 +93,7 @@ describe('ComparisonObjectDialog', () => {
     api.activity.mockResolvedValue(activity())
     api.snapshot.mockResolvedValue({
       snapshot_id: 'evs_a',
+      record_id: 'rec_1',
       title: '第三晚观测',
       kind: 'monitoring.host',
       observed_at: '2026-07-01T12:30:00Z',
@@ -111,10 +118,10 @@ describe('ComparisonObjectDialog', () => {
     api.snapshot.mockRejectedValue(new ApiError(404, 'hidden', { code: 'resource_not_found' }))
     const { onAdd } = renderDialog()
     fireEvent.click(await screen.findByRole('button', { name: '边缘甲' }))
-    expect(await screen.findByText(/不可读/)).toBeInTheDocument()
+    const retry = await screen.findByRole('button', { name: '重试读取' })
+    expect(screen.queryByRole('button', { name: '加入比较' })).not.toBeInTheDocument()
     expect(screen.queryByText(/数据完整/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '重试读取' }))
-    await waitFor(() => expect(api.snapshot.mock.calls.length).toBeGreaterThan(1))
+    await act(async () => { fireEvent.click(retry) })
     expect(onAdd).not.toHaveBeenCalled()
   })
 

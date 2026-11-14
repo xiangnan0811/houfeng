@@ -43,7 +43,7 @@ func TestServicePreviewBindsAuthorizationCASDependenciesAdaptersAndWitnessWithou
 	actor := deletionTestActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa")
 	registry, adapters := deletionTestRegistry(t)
 	adapters[1].preview.SurvivingCopies = []AdapterSurvivingCopy{
-		{Kind: SurvivingCopyKindOtherRecord, CopyCount: 2},
+		KnownAdapterSurvivingCopy(SurvivingCopyKindOtherRecord, 2),
 	}
 	snapshot := deletionTestRecordSnapshot(t)
 	records := &deletionRecordSnapshotSourceStub{snapshot: snapshot}
@@ -85,9 +85,9 @@ func TestServicePreviewBindsAuthorizationCASDependenciesAdaptersAndWitnessWithou
 		t.Fatalf("Preview() summary = %#v: %v", result.Summary, err)
 	}
 	if !reflect.DeepEqual(result.Summary.OnlinePurgeScopes, RequiredAdapterNames()) ||
-		!reflect.DeepEqual(result.Summary.SurvivingCopies, []SurvivingCopySummary{{
-			Scope: AdapterNameRecordAttachments, Kind: SurvivingCopyKindOtherRecord, CopyCount: 2,
-		}}) || result.Summary.ManagedBackup != snapshot.ManagedBackup ||
+		!reflect.DeepEqual(result.Summary.SurvivingCopies, []SurvivingCopySummary{
+			KnownSurvivingCopySummary(AdapterNameRecordAttachments, SurvivingCopyKindOtherRecord, 2),
+		}) || result.Summary.ManagedBackup != snapshot.ManagedBackup ||
 		result.Summary.LedgerHealth != LedgerHealthHealthy {
 		t.Fatalf("Preview() safety summary = %#v", result.Summary)
 	}
@@ -186,7 +186,7 @@ func TestServiceExecuteRejectsRecordDependencyAndAdapterDriftWithoutReservation(
 	t.Run("surviving copy drift", func(t *testing.T) {
 		fixture := newDeletionExecutionFixture(t)
 		fixture.adapters[1].preview.SurvivingCopies = []AdapterSurvivingCopy{
-			{Kind: SurvivingCopyKindOtherRecord, CopyCount: 1},
+			KnownAdapterSurvivingCopy(SurvivingCopyKindOtherRecord, 1),
 		}
 
 		_, err := fixture.service.Execute(context.Background(), ExecuteRequest{Actor: fixture.actor, RecordID: "rec_01", ReservationID: fixture.stored.ReservationID, Token: fixture.token, ReasonCode: DeletionReasonUserConfirmed})
@@ -642,6 +642,10 @@ func deletionTestRegistry(t *testing.T) (Registry, []*deletionServiceAdapterStub
 			surfaces = RecordActivitySurfaceNames()
 		case AdapterNameRecordPortability:
 			surfaces = RecordPortabilitySurfaceNames()
+		case AdapterNameRecordMarkdownClient:
+			surfaces = RecordMarkdownClientSurfaceNames()
+		case AdapterNameRecordComparison:
+			surfaces = RecordComparisonSurfaceNames()
 		}
 		adapter := newDeletionServiceAdapterStub(t, name, surfaces, byte(index+1))
 		adapters = append(adapters, adapter)
@@ -860,9 +864,7 @@ func deletionStoredPreviewFromCommand(t *testing.T, command CreatePreviewCommand
 }
 
 func deletionTestOperation(state DeletionState) DeletionOperation {
-	operation := DeletionOperation{
-		OperationID:   "rpo_operation01",
-		ReservationID: "drs_preview01",
+	operation := DeletionOperation{ContractVersion: DeletionContractV1, OperationID: "rpo_operation01", ReservationID: "drs_preview01",
 		Object: recordplatform.ObjectRef{
 			ProjectID:  "default",
 			ObjectKind: "record",
@@ -870,8 +872,7 @@ func deletionTestOperation(state DeletionState) DeletionOperation {
 		},
 		ReasonCode: DeletionReasonUserConfirmed,
 		State:      state,
-		FenceEpoch: 7,
-	}
+		FenceEpoch: 7}
 	switch state {
 	case DeletionStateWitnessPending, DeletionStateDeleteRequested, DeletionStateFencePropagating,
 		DeletionStateReadFenced, DeletionStateOnlinePurging, DeletionStateRetryRequired:
@@ -887,4 +888,58 @@ func deletionTestOperation(state DeletionState) DeletionOperation {
 		operation.ReleaseEpoch = 3
 	}
 	return operation
+}
+
+func TestDeletionOperationSeparatesSuccessorAuthorityFromLegacyLedger(t *testing.T) {
+	legacy := deletionTestOperation(DeletionStateOnlinePurging)
+	successor := legacy
+	successor.ContractVersion = DeletionContractV2
+	successor.LedgerSequence = 0
+	successor.LedgerEntryHash = [sha256.Size]byte{}
+	for _, test := range []struct {
+		name      string
+		operation DeletionOperation
+		change    func(*DeletionOperation)
+	}{
+		{"unknown_version", legacy, func(o *DeletionOperation) { o.ContractVersion = 0 }},
+		{"legacy_without_ledger", legacy, func(o *DeletionOperation) { o.LedgerSequence = 0; o.LedgerEntryHash = [sha256.Size]byte{} }},
+		{"successor_with_ledger", successor, func(o *DeletionOperation) {
+			o.LedgerSequence = legacy.LedgerSequence
+			o.LedgerEntryHash = legacy.LedgerEntryHash
+		}},
+		{"successor_retry_state", successor, func(o *DeletionOperation) { o.State = DeletionStateRetryRequired }},
+		{"successor_release", successor, func(o *DeletionOperation) { o.ReleaseEpoch = 1 }},
+		{"successor_premature_receipt", successor, func(o *DeletionOperation) { o.ReceiptDigest = deletionTestDigest(11) }},
+		{"successor_missing_completion_receipt", successor, func(o *DeletionOperation) { o.State = DeletionStateOnlinePurged }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.change(&test.operation)
+			if err := test.operation.Validate(); !errors.Is(err, ErrInvalidDeletionOperation) {
+				t.Fatalf("invalid operation authority accepted: %v", err)
+			}
+		})
+	}
+	claim := OperationOwnerClaim{OperationID: successor.OperationID, Owner: recordplatform.OwnerLease{
+		OwnerID: "deletion_worker", Generation: 7, ExpiresAt: time.Date(2026, time.October, 29, 12, 0, 0, 0, time.UTC),
+	}}
+	if err := (PurgeTarget{Operation: successor, OwnerClaim: claim}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []OperationOwnerClaim{
+		{},
+		{OperationID: "rpo_another", Owner: claim.Owner},
+		{OperationID: claim.OperationID, Owner: recordplatform.OwnerLease{OwnerID: claim.Owner.OwnerID, ExpiresAt: claim.Owner.ExpiresAt}},
+	} {
+		if err := (PurgeTarget{Operation: successor, OwnerClaim: invalid}).Validate(); !errors.Is(err, ErrInvalidDeletionOperation) {
+			t.Fatalf("unbound successor owner accepted: %v", err)
+		}
+	}
+	successor.State = DeletionStateOnlinePurged
+	successor.ReceiptDigest = deletionTestDigest(12)
+	if err := successor.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (PurgeTarget{Operation: successor, OwnerClaim: claim}).Validate(); !errors.Is(err, ErrInvalidDeletionOperation) {
+		t.Fatalf("completed operation accepted as new purge: %v", err)
+	}
 }

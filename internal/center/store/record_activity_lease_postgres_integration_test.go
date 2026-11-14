@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ func TestPostgresIntegrationActivitySourceLeaseExcludesASecondWorker(t *testing.
 		t.Fatalf("new repository: %v", err)
 	}
 
-	claimed, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-a", time.Minute)
+	lease, claimed, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-a", time.Minute)
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
@@ -26,7 +27,7 @@ func TestPostgresIntegrationActivitySourceLeaseExcludesASecondWorker(t *testing.
 
 	// A live lease held by someone else is a refusal, not an error: with more than
 	// one process this is the normal outcome on most ticks.
-	claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-b", time.Minute)
+	_, claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-b", time.Minute)
 	if err != nil {
 		t.Fatalf("competing acquire: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestPostgresIntegrationActivitySourceLeaseExcludesASecondWorker(t *testing.
 	}
 
 	// Re-acquiring our own extends it, which is how a long pass keeps it alive.
-	claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-a", time.Minute)
+	lease, claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-a", time.Minute)
 	if err != nil {
 		t.Fatalf("re-acquire: %v", err)
 	}
@@ -43,10 +44,10 @@ func TestPostgresIntegrationActivitySourceLeaseExcludesASecondWorker(t *testing.
 		t.Fatal("the holder must be able to extend its own lease")
 	}
 
-	if err := repository.ReleaseSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-a"); err != nil {
+	if err := repository.ReleaseSourceLease(ctx, lease); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-b", time.Minute)
+	_, claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-b", time.Minute)
 	if err != nil {
 		t.Fatalf("acquire after release: %v", err)
 	}
@@ -65,9 +66,8 @@ func TestPostgresIntegrationActivitySourceLeaseIsReclaimableOnceExpired(t *testi
 		t.Fatalf("new repository: %v", err)
 	}
 
-	if _, err := repository.AcquireSourceLease(
-		ctx, 1, activity.SourceKindMonitoringEvent, "worker-dead", time.Millisecond,
-	); err != nil {
+	deadLease, _, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindMonitoringEvent, "worker-dead", time.Millisecond)
+	if err != nil {
 		t.Fatalf("acquire short lease: %v", err)
 	}
 	// Move the expiry into the past rather than sleeping, so the test does not
@@ -80,7 +80,7 @@ func TestPostgresIntegrationActivitySourceLeaseIsReclaimableOnceExpired(t *testi
 		t.Fatalf("expire the lease: %v", err)
 	}
 
-	claimed, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindMonitoringEvent, "worker-live", time.Minute)
+	_, claimed, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindMonitoringEvent, "worker-live", time.Minute)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -90,10 +90,10 @@ func TestPostgresIntegrationActivitySourceLeaseIsReclaimableOnceExpired(t *testi
 
 	// The dead worker coming back must not be able to release the new holder's
 	// lease out from under it.
-	if err := repository.ReleaseSourceLease(ctx, 1, activity.SourceKindMonitoringEvent, "worker-dead"); err != nil {
-		t.Fatalf("stale release: %v", err)
+	if err := repository.ReleaseSourceLease(ctx, deadLease); !errors.Is(err, activity.ErrSourceLeaseLost) {
+		t.Fatalf("stale release = %v, want lost lease", err)
 	}
-	claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindMonitoringEvent, "worker-third", time.Minute)
+	_, claimed, err = repository.AcquireSourceLease(ctx, 1, activity.SourceKindMonitoringEvent, "worker-third", time.Minute)
 	if err != nil {
 		t.Fatalf("acquire after stale release: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestPostgresIntegrationActivitySourceLeasesAreIndependentPerSource(t *testi
 		t.Fatalf("new repository: %v", err)
 	}
 
-	if _, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-a", time.Minute); err != nil {
+	if _, _, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindRecordDomain, "worker-a", time.Minute); err != nil {
 		t.Fatalf("acquire record domain: %v", err)
 	}
 	for _, kind := range []activity.SourceKind{
@@ -121,7 +121,7 @@ func TestPostgresIntegrationActivitySourceLeasesAreIndependentPerSource(t *testi
 		activity.SourceKindMonitoringEvent,
 		activity.SourceKindCommandAudit,
 	} {
-		claimed, err := repository.AcquireSourceLease(ctx, 1, kind, "worker-b", time.Minute)
+		_, claimed, err := repository.AcquireSourceLease(ctx, 1, kind, "worker-b", time.Minute)
 		if err != nil {
 			t.Fatalf("acquire %s: %v", kind, err)
 		}
@@ -142,10 +142,11 @@ func TestPostgresIntegrationActivityLeaseAndCheckpointDoNotClobberEachOther(t *t
 	}
 
 	position := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-	if _, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindCommandAudit, "worker-a", time.Minute); err != nil {
+	lease, _, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindCommandAudit, "worker-a", time.Minute)
+	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	if err := repository.SaveCheckpoint(ctx, 1, activity.SourceCheckpoint{
+	if err := repository.SaveCheckpoint(ctx, lease, activity.SourceCheckpoint{
 		Kind:            activity.SourceKindCommandAudit,
 		RecordedThrough: position,
 		CaughtUp:        true,
@@ -154,7 +155,7 @@ func TestPostgresIntegrationActivityLeaseAndCheckpointDoNotClobberEachOther(t *t
 	}
 
 	// Saving a position must leave the lease held.
-	claimed, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindCommandAudit, "worker-b", time.Minute)
+	_, claimed, err := repository.AcquireSourceLease(ctx, 1, activity.SourceKindCommandAudit, "worker-b", time.Minute)
 	if err != nil {
 		t.Fatalf("competing acquire: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestPostgresIntegrationActivityLeaseAndCheckpointDoNotClobberEachOther(t *t
 	}
 
 	// Releasing the lease must leave the position intact.
-	if err := repository.ReleaseSourceLease(ctx, 1, activity.SourceKindCommandAudit, "worker-a"); err != nil {
+	if err := repository.ReleaseSourceLease(ctx, lease); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	checkpoint, err := repository.LoadCheckpoint(ctx, 1, activity.SourceKindCommandAudit)

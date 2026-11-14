@@ -63,6 +63,47 @@ func TestPostgresRecordCommentRepositoryFailsClosedWithMissingAdmission(t *testi
 	}
 }
 
+func TestPostgresRecordCommentRepositoryPrefetchFailurePreventsTransaction(t *testing.T) {
+	parent := records.RevisionCommitResult{RecordID: "rec_commentparent1", RevisionID: "rrv_current1", LockVersion: 7, AuthorizationEpoch: 9}
+	command := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_comment1", 0, "comment", "", nil, "comment-prefetch")
+	read := postgresCommentReadCommand(t, parent, 25)
+	failure := errors.New("authorization prefetch failed")
+	for _, operation := range []string{"commit", "list"} {
+		t.Run(operation, func(t *testing.T) {
+			beginCalls := 0
+			prefetch := &recordAuthorizationPrefetchErrorStub{err: failure}
+			repository := &PostgresRecordCommentRepository{
+				platform: &PostgresRecordPlatformRepository{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+					beginCalls++
+					return nil, errors.New("transaction must not begin")
+				}},
+				members: &commentMembershipReaderStub{}, authorization: prefetch,
+			}
+			var err error
+			if operation == "commit" {
+				invalid := command
+				invalid.RecordID = ""
+				_, err = repository.CommitComment(context.Background(), invalid)
+			} else {
+				invalid := read
+				invalid.RecordID = ""
+				_, err = repository.ListComments(context.Background(), invalid)
+			}
+			if err == nil || prefetch.recordIDs != nil || beginCalls != 0 {
+				t.Fatalf("invalid command error=%v prefetch IDs=%v begin calls=%d", err, prefetch.recordIDs, beginCalls)
+			}
+			if operation == "commit" {
+				_, err = repository.CommitComment(context.Background(), command)
+			} else {
+				_, err = repository.ListComments(context.Background(), read)
+			}
+			if !errors.Is(err, failure) || !slices.Equal(prefetch.recordIDs, []string{parent.RecordID}) || beginCalls != 0 {
+				t.Fatalf("error=%v prefetch IDs=%v begin calls=%d", err, prefetch.recordIDs, beginCalls)
+			}
+		})
+	}
+}
+
 func TestPostgresRecordCommentRepositoryRejectsPersistedActorMismatch(t *testing.T) {
 	input := mustPostgresCommentActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", recordauth.RoleProjectAdmin)
 	tests := []struct {
@@ -77,7 +118,7 @@ func TestPostgresRecordCommentRepositoryRejectsPersistedActorMismatch(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			repository := &PostgresRecordCommentRepository{members: &commentMembershipReaderStub{actor: test.persisted}}
 			_, _, err := repository.loadCurrentCommentAuthorization(
-				context.Background(), nil, input, "rec_commentparent1", recordauth.CapabilityRecordRead,
+				context.Background(), nil, nil, input, "rec_commentparent1", recordauth.CapabilityRecordRead,
 			)
 			if !errors.Is(err, recordauth.ErrDenied) {
 				t.Fatalf("loadCurrentCommentAuthorization() error = %v, want ErrDenied", err)

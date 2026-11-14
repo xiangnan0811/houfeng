@@ -159,6 +159,7 @@ type BlobGCWorkerOptions struct {
 	OwnerLeaseDuration time.Duration
 	RetryDelay         time.Duration
 	Now                func() time.Time
+	LocalCleanup       *LocalCleanupCoordinator
 }
 
 type BlobGCWorker struct {
@@ -171,6 +172,8 @@ type BlobGCWorker struct {
 	ownerLeaseDuration time.Duration
 	retryDelay         time.Duration
 	now                func() time.Time
+	localCleanup       *LocalCleanupCoordinator
+	localDiscovery     LocalBlobGCDiscovery
 }
 
 func NewBlobGCWorker(
@@ -206,7 +209,15 @@ func NewBlobGCWorker(
 		options.RetryDelay != DefaultBlobGCRetryDelay {
 		return nil, ErrInvalidBlobGCRequest
 	}
+	var localDiscovery LocalBlobGCDiscovery
+	if options.BackendKind == BackendKindLocal {
+		localDiscovery, _ = repository.(LocalBlobGCDiscovery)
+		if options.LocalCleanup == nil || nilUploadServiceDependency(localDiscovery) {
+			return nil, ErrInvalidBlobGCRequest
+		}
+	}
 	return &BlobGCWorker{
+		localCleanup: options.LocalCleanup, localDiscovery: localDiscovery,
 		repository: repository, blob: blob, projectID: options.ProjectID,
 		backendKind: options.BackendKind, ownerID: options.OwnerID,
 		orphanGracePeriod: options.OrphanGracePeriod, ownerLeaseDuration: options.OwnerLeaseDuration,
@@ -232,7 +243,7 @@ func (worker *BlobGCWorker) RunOnce(ctx context.Context) (bool, error) {
 		return claimed, err
 	}
 	if result == nil {
-		return false, nil
+		return claimed, nil
 	}
 	return true, nil
 }
@@ -271,6 +282,37 @@ func (worker *BlobGCWorker) execute(
 ) (*BlobGCPurgeResult, bool, error) {
 	if request.Validate() != nil {
 		return nil, false, ErrInvalidBlobGCRequest
+	}
+	if worker.backendKind == BackendKindLocal {
+		candidate, err := worker.localDiscovery.DiscoverLocalBlobGC(ctx, request, worker.localCleanup.NamespaceID())
+		if err != nil || candidate == nil {
+			return nil, false, err
+		}
+		task, err := worker.localCleanup.Cleanup(ctx, candidate.Preparation, worker.ownerID)
+		if err != nil {
+			return nil, true, err
+		}
+		if task.State != "completed" || task.Outcome == nil {
+			return nil, true, ErrBlobGCConflict
+		}
+		if *task.Outcome == "retained_referenced" {
+			return nil, true, nil
+		}
+		if *task.Outcome != "deleted" && *task.Outcome != "already_absent" {
+			return nil, true, ErrBlobGCConflict
+		}
+		if *task.Outcome == "deleted" {
+			if task.Version == nil || task.Size == nil {
+				return nil, true, ErrBlobGCConflict
+			}
+			candidate.Candidate.Object.ObjectVersion = *task.Version
+			candidate.Candidate.Object.SizeBytes = *task.Size
+		}
+		if candidate.Candidate.Object.Validate() != nil {
+			return nil, true, nil
+		}
+		return &BlobGCPurgeResult{DeletionID: task.ID, Candidate: candidate.Candidate,
+			Receipt: DeletionReceipt{Version: objectVersionFromGCObject(candidate.Candidate.Object), Deleted: *task.Outcome == "deleted"}}, true, nil
 	}
 	claim, err := worker.repository.ClaimBlobGC(ctx, request)
 	if err != nil {

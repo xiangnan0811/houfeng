@@ -187,6 +187,7 @@ func (repository *PostgresAttachmentRepository) CompleteBlobGC(
 		    physical_delete_result = $7, receipt_digest = $8,
 		    completed_at = transaction_timestamp(), updated_at = transaction_timestamp()
 		where deletion_id = $1 and owner_id = $2 and owner_generation = $3
+		  and operation_id is null
 		  and lease_expires_at = $4 and lease_expires_at > transaction_timestamp()
 		  and blob_key = $5 and object_version = $6
 		  and sha256_digest = $9 and size_bytes = $10 and backend_kind = $11
@@ -237,6 +238,7 @@ func (repository *PostgresAttachmentRepository) RetryBlobGC(
 		set deletion_state = 'retry_wait', retry_at = $5,
 		    updated_at = transaction_timestamp()
 		where deletion_id = $1 and owner_id = $2 and owner_generation = $3
+		  and operation_id is null
 		  and lease_expires_at = $4 and lease_expires_at > transaction_timestamp()
 		  and deletion_state = 'claimed'
 		  and blob_key = $6 and object_version = $7
@@ -287,6 +289,7 @@ func (repository *PostgresAttachmentRepository) ResolveBlobGC(
 		       deletion.completed_at
 		from public.blob_gc_deletions as deletion
 		where deletion.deletion_id = $1
+		  and deletion.operation_id is null
 		  and deletion.blob_key = $2 and deletion.object_version = $3
 		  and deletion.sha256_digest = $4 and deletion.size_bytes = $5
 		  and deletion.backend_kind = $6 and deletion.deletion_state = 'completed'`,
@@ -338,6 +341,7 @@ func reclaimBlobGCDeletion(
 			from public.blob_gc_deletions as deletion
 			where deletion.project_id = $1 and deletion.backend_kind = $2
 			  and deletion.purge_mode = $3
+			  and deletion.operation_id is null
 			  and ((deletion.deletion_state = 'retry_wait'
 			        and deletion.retry_at <= transaction_timestamp())
 			    or (deletion.deletion_state = 'claimed'
@@ -521,6 +525,7 @@ func lockBlobGCDeletion(
 		       deletion.completed_at
 		from public.blob_gc_deletions as deletion
 		where deletion.deletion_id = $1
+		  and deletion.operation_id is null
 		for update`, deletionID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
