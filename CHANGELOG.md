@@ -44,6 +44,22 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.27.5](https://github.com/xiangnan0811/houfeng/compare/v1.27.4...v1.27.5) (2026-10-27)
+
+
+### Bug Fixes
+
+* **attachments:** fence imports against exact-version GC ([7d2f5cf](https://github.com/xiangnan0811/houfeng/commit/7d2f5cf6cf00ab63a8442f70c77e25d35c463733))
+* **attachments:** fence imports against exact-version GC ([fd1326e](https://github.com/xiangnan0811/houfeng/commit/fd1326e3e819afdf68a66ab3575040113c688a4e))
+* **web:** align probe deletion confirmation and contract docs ([ec38a48](https://github.com/xiangnan0811/houfeng/commit/ec38a48d3538735ee343698d7ed5b4ecfeb4ad12))
+* **web:** align probe deletion confirmation and contract docs ([d109d89](https://github.com/xiangnan0811/houfeng/commit/d109d892d4172331c70c7ad4901fecd26746407b))
+
+
+### Documentation
+
+* require independent GPT review and make Grok optional ([8f75ece](https://github.com/xiangnan0811/houfeng/commit/8f75eceb9e38dcce51217b7fb07cdb0f745312df))
+* require independent GPT review and make Grok optional ([46e293e](https://github.com/xiangnan0811/houfeng/commit/46e293efdc17842c0c55298c139695ddd5244bbb))
+
 ## [1.27.4](https://github.com/xiangnan0811/houfeng/compare/v1.27.3...v1.27.4) (2026-10-18)
 
 
