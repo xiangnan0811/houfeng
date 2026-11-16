@@ -1156,6 +1156,11 @@ func newRecordsHTTPHandlers(
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure local portability cleanup: %w", err)
 		}
 	}
+	if attachmentConfig.BlobBackend == attachments.BackendKindS3 {
+		if err := deletionRepository.ConfigurePortabilityDeletionBlobStore(attachmentConfig.BlobBackend, blob); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure S3 portability cleanup: %w", err)
+		}
+	}
 	activityDeletionAdapter, err := activity.NewDeletionAdapter(deletionRepository)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create activity deletion adapter: %w", err)

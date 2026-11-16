@@ -103,19 +103,19 @@ func (repository *PostgresLocalBlobRepository) RegisterLocalAnchor(ctx context.C
 }
 
 func (repository *PostgresLocalBlobRepository) RegisterWrite(ctx context.Context, request attachments.WriteRegistration) (attachments.WriteObligation, error) {
-	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex')) from public.record_write_register($1) o`, request)
+	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex'),'storage_binding',encode(o.storage_binding,'hex')) from public.record_write_register($1) o`, request)
 }
 func (repository *PostgresLocalBlobRepository) ResolveWrite(ctx context.Context, request attachments.WriteIdentity) (attachments.WriteObligation, error) {
-	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex')) from public.record_write_resolve($1) o`, request)
+	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex'),'storage_binding',encode(o.storage_binding,'hex')) from public.record_write_resolve($1) o`, request)
 }
 func (repository *PostgresLocalBlobRepository) DispatchWrite(ctx context.Context, request attachments.WriteDispatch) (attachments.WriteObligation, error) {
-	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex')) from public.record_write_dispatch($1) o`, request)
+	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex'),'storage_binding',encode(o.storage_binding,'hex')) from public.record_write_dispatch($1) o`, request)
 }
 func (repository *PostgresLocalBlobRepository) RecordWriteTemporary(ctx context.Context, request attachments.WriteTemporaryCreation) (attachments.WriteObligation, error) {
-	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex')) from public.record_write_temporary_created($1) o`, request)
+	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex'),'storage_binding',encode(o.storage_binding,'hex')) from public.record_write_temporary_created($1) o`, request)
 }
 func (repository *PostgresLocalBlobRepository) RecordWriteReturn(ctx context.Context, request attachments.WriteReturn) (attachments.WriteObligation, error) {
-	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex')) from public.record_write_return($1) o`, request)
+	return repository.writeCommand(ctx, `select to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex'),'storage_binding',encode(o.storage_binding,'hex')) from public.record_write_return($1) o`, request)
 }
 func (repository *PostgresLocalBlobRepository) writeCommand(ctx context.Context, statement string, request any) (attachments.WriteObligation, error) {
 	var result attachments.WriteObligation

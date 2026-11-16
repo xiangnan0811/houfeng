@@ -98,6 +98,7 @@ type WriteRegistration struct {
 	NamespaceID    *string     `json:"namespace_id"`
 	IncarnationID  *string     `json:"incarnation_id"`
 	BackendKind    BackendKind `json:"backend_kind"`
+	StorageBinding *string     `json:"storage_binding"`
 	Key            string      `json:"key"`
 	SHA256         string      `json:"sha256"`
 	Size           int64       `json:"size"`
@@ -140,6 +141,7 @@ type WriteObligation struct {
 	NamespaceID        *string     `json:"namespace_id"`
 	IncarnationID      *string     `json:"incarnation_id"`
 	BackendKind        BackendKind `json:"backend_kind"`
+	StorageBinding     *string     `json:"storage_binding"`
 	Key                string      `json:"canonical_key"`
 	SHA256             string      `json:"sha256"`
 	Size               int64       `json:"size_bytes"`

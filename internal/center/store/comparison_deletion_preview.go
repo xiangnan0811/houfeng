@@ -122,7 +122,9 @@ const comparisonDeletionDecisionSQL = `
 	    where namespace.nspname = 'public' and relation.relkind in ('r', 'p')
 	      and relation.relname = any($9::text[])) = cardinality($9::text[]) as surfaces_present,
 	  pg_catalog.to_regprocedure('public.record_comparison_purge(bytea)') is not null
-	    and pg_catalog.to_regprocedure('public.record_comparison_purge_verify(bytea)') is not null as functions_present,
+	    and pg_catalog.to_regprocedure('public.record_comparison_purge_verify(bytea)') is not null
+	    and pg_catalog.to_regprocedure('public.record_comparison_purge_v1(bytea)') is not null
+	    and pg_catalog.to_regprocedure('public.record_comparison_purge_verify_v1(bytea)') is not null as functions_present,
 	  case when $10::boolean then pg_catalog.convert_to(jsonb_build_object(
 	    'results', coalesce((select jsonb_agg(jsonb_build_array(snapshot_id, encode(payload_digest, 'hex'))
 	      order by snapshot_id collate "C") from owned), '[]'::jsonb),
@@ -203,6 +205,15 @@ const comparisonDeletionDecisionSQL = `
 func readComparisonDeletionDecision(ctx context.Context, tx pgx.Tx, target *recorddeletion.PreviewTarget) (comparisonDeletionDecision, error) {
 	if target != nil && !validClientDeletionPreviewTarget(*target) {
 		return comparisonDeletionDecision{}, recorddeletion.ErrInvalidDeletionPreview
+	}
+	if ctx == nil || tx == nil {
+		return comparisonDeletionDecision{}, recorddeletion.ErrInvalidDeletionPreview
+	}
+	if err := requireClientPurgeFunctionContracts(ctx, tx, []string{
+		"public.record_comparison_purge(bytea)", "public.record_comparison_purge_verify(bytea)",
+		"public.record_comparison_purge_v1(bytea)", "public.record_comparison_purge_verify_v1(bytea)",
+	}); err != nil {
+		return comparisonDeletionDecision{}, err
 	}
 	recordID := ""
 	if target != nil {

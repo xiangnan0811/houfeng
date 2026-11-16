@@ -14,9 +14,12 @@ import (
 	"time"
 
 	"houfeng/db/migrations"
+	"houfeng/internal/center/attachments"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 func TestPostgresIntegrationRecordDeletionSuccessorAuthority(t *testing.T) {
@@ -425,6 +428,9 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "attachment_purge_workspace_targets"}] = true
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "record_portability_cleanup_preparations"}] = true
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "record_portability_cleanup_targets"}] = true
+	for _, name := range []string{"record_portability_v1_preparations", "record_portability_v1_targets", "record_portability_v1_artifacts", "record_portability_v1_obligations"} {
+		objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: name}] = true
+	}
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "record_notification_delivery_starts"}] = true
 	for _, name := range []string{"record_notification_delivery_facts", "record_notification_delivery_completions", "record_notification_delivery_handoffs"} {
 		objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: name}] = true
@@ -436,6 +442,7 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: name}] = true
 	}
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: "record_external_delivery_commit_checks"}] = true
+	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: "record_portability_v1_epoch"}] = true
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: "record_birth_launch_state"}] = true
 	for _, name := range []string{"record_deletion_verified_entries", "record_deletion_effect_scopes", "record_deletion_recovery_sessions", "record_deletion_owner_commit_checks"} {
 		objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: name}] = true
@@ -449,6 +456,15 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		"record_deletion_claim_v2", "record_deletion_renew_v2", "record_deletion_finish_v2",
 		"record_activity_purge_v1", "record_activity_purge_verify_v1", "record_search_purge_v1", "record_search_purge_verify_v1",
 		"record_evidence_purge_prepare_v1", "record_evidence_purge_payload_v1", "record_evidence_purge_v1", "record_evidence_purge_verify_v1",
+		"record_markdown_client_purge_v1", "record_markdown_client_purge_verify_v1",
+		"record_comparison_purge_v1", "record_comparison_purge_verify_v1",
+		"record_collaboration_purge_v1", "record_collaboration_purge_verify_v1", "record_outbox_drain_v1",
+		"record_portability_local_prepare_v1", "record_portability_local_claim_v1", "record_portability_local_resolve_v1",
+		"record_portability_local_bind_final_v1", "record_portability_local_complete_v1",
+		"record_portability_gc_claim_v1", "record_portability_gc_claim_resolve_v1", "record_portability_gc_complete_v1",
+		"record_portability_gc_retry_v1", "record_portability_gc_resolve_v1",
+		"record_portability_purge_prepare_v1", "record_portability_purge_prepare_resolve_v1",
+		"record_portability_purge_v1", "record_portability_purge_verify_v1",
 		"record_activity_purge_v2", "record_activity_purge_verify_v2", "record_search_purge_v2", "record_search_purge_verify_v2",
 		"record_evidence_purge_prepare_v2", "record_evidence_purge_payload_v2", "record_evidence_purge_v2", "record_evidence_purge_verify_v2",
 		"record_attachment_purge_prepare_v1", "record_attachment_purge_verify_v1",
@@ -457,6 +473,7 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		"record_deletion_mark_delete_witnessed_v1", "record_deletion_mark_outcome_commit_unknown_v1",
 		"record_deletion_record_outcome_entry_v1", "record_deletion_finalize_not_committed_v1",
 		"record_deletion_promote_permanent_fence_v1", "record_deletion_mark_read_fenced_v1",
+		"record_deletion_permanent_fence_applied_v1",
 		"record_deletion_begin_online_purge_v1", "record_deletion_complete_online_purge_v1",
 		"record_deletion_mark_retry_required_v1", "record_deletion_resume_retry_v1",
 	} {
@@ -604,6 +621,12 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		{"record_platform_internal", "attachment_v1_projection", "v jsonb", true},
 		{"record_platform_internal", "record_attachment_purge_v1", "body bytea, verify_only boolean", true},
 		{"record_platform_internal", "record_attachment_gc_v1", "body bytea, kind text", true},
+		{"record_platform_internal", "record_portability_local_v1", "body bytea, kind text", true},
+		{"record_platform_internal", "record_portability_v1_gc_digest", "t record_portability_v1_targets, result text", true},
+		{"record_platform_internal", "record_portability_v1_gc_document", "t record_portability_v1_targets", true},
+		{"record_platform_internal", "record_portability_gc_v1", "body bytea, kind text", true},
+		{"record_platform_internal", "record_portability_v1_preparation_projection", "body bytea, fresh boolean", true},
+		{"record_platform_internal", "record_portability_v1_prepare_command", "body bytea", true},
 		{"public", "record_attachment_purge_prepare_v1", "bytea", true},
 		{"public", "record_attachment_purge_verify_v1", "bytea", true},
 		{"public", "record_attachment_gc_claim_v1", "bytea", true},
@@ -627,6 +650,27 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		{"public", "record_evidence_purge_payload_v1", "bytea", true},
 		{"public", "record_evidence_purge_v1", "bytea", true},
 		{"public", "record_evidence_purge_verify_v1", "bytea", true},
+		{"public", "record_markdown_client_purge_v1", "bytea", true},
+		{"public", "record_markdown_client_purge_verify_v1", "bytea", true},
+		{"public", "record_comparison_purge_v1", "bytea", true},
+		{"public", "record_comparison_purge_verify_v1", "bytea", true},
+		{"public", "record_collaboration_purge_v1", "bytea", true},
+		{"public", "record_collaboration_purge_verify_v1", "bytea", true},
+		{"public", "record_outbox_drain_v1", "bytea", true},
+		{"public", "record_portability_local_prepare_v1", "bytea", true},
+		{"public", "record_portability_local_claim_v1", "bytea", true},
+		{"public", "record_portability_local_resolve_v1", "bytea", true},
+		{"public", "record_portability_local_bind_final_v1", "bytea", true},
+		{"public", "record_portability_local_complete_v1", "bytea", true},
+		{"public", "record_portability_gc_claim_v1", "bytea", true},
+		{"public", "record_portability_gc_claim_resolve_v1", "bytea", true},
+		{"public", "record_portability_gc_complete_v1", "bytea", true},
+		{"public", "record_portability_gc_retry_v1", "bytea", true},
+		{"public", "record_portability_gc_resolve_v1", "bytea", true},
+		{"public", "record_portability_purge_prepare_v1", "bytea", true},
+		{"public", "record_portability_purge_prepare_resolve_v1", "bytea", true},
+		{"public", "record_portability_purge_v1", "bytea", true},
+		{"public", "record_portability_purge_verify_v1", "bytea", true},
 		{"public", "record_activity_purge_v2", "bytea", true},
 		{"public", "record_activity_purge_verify_v2", "bytea", true},
 		{"public", "record_search_purge_v2", "bytea", true},
@@ -646,6 +690,7 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		{"public", "record_deletion_record_outcome_entry_v1", "bytea", true},
 		{"public", "record_deletion_finalize_not_committed_v1", "bytea", true},
 		{"public", "record_deletion_promote_permanent_fence_v1", "bytea", true},
+		{"public", "record_deletion_permanent_fence_applied_v1", "bytea", true},
 		{"public", "record_deletion_mark_read_fenced_v1", "bytea", true},
 		{"public", "record_deletion_begin_online_purge_v1", "bytea", true},
 		{"public", "record_deletion_complete_online_purge_v1", "bytea", true},
@@ -731,6 +776,62 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		{"record_platform_internal", "record_external_delivery_finish", "bytea, boolean", true},
 		{"record_platform_internal", "record_outbox_observed_route", "record_outbox", true},
 		{"record_platform_internal", "record_outbox_handoff_complete", "text, text", true},
+		{"record_platform_internal", "record_outbox_drain", "bytea, bigint", true},
+		{"record_platform_internal", "record_portability_v1_target_guard", "", true},
+		{"record_platform_internal", "record_portability_v1_epoch_share", "", true},
+		{"record_platform_internal", "record_portability_v1_touch_retained", "op text, target text", true},
+		{"record_platform_internal", "record_portability_v1_carried", "p_record text, obligation text", true},
+		{"record_platform_internal", "record_portability_v1_carried_successor", "prior_op text, prior_target text, next_op text, next_target text", true},
+		{"record_platform_internal", "record_portability_v1_frame_digest", "p_op text, p_project text, p_record text, p_surface bytea, p_domain bytea, p_sequence bigint, p_entry_hash bytea, p_witness bytea, p_owners jsonb, p_removed bigint, p_pdf boolean, p_artifacts jsonb, p_obligations jsonb, p_targets jsonb", true},
+		{"record_platform_internal", "record_portability_v1_inventory_digest", "op text", true},
+		{"record_platform_internal", "record_portability_v1_source_links", "op text", true},
+		{"record_platform_internal", "record_portability_v1_s3_source_valid", "snapshot jsonb, obligation text", true},
+		{"record_platform_internal", "record_portability_v1_local_source_expected", "snapshot jsonb, obligation text", true},
+		{"record_platform_internal", "record_portability_v1_owners", "record_id text, export_jobs text[], import_jobs text[]", true},
+		{"record_platform_internal", "record_portability_v1_sources", "p_record text, p_export_jobs text[], p_import_jobs text[]", true},
+		{"record_platform_internal", "record_portability_v1_retained_candidates", "t record_portability_v1_targets, p_record text", true},
+		{"record_platform_internal", "record_portability_v1_candidate_match", "source_table text, source_row jsonb, t record_portability_v1_targets", true},
+		{"record_platform_internal", "record_portability_v1_ambiguous_references", "t record_portability_v1_targets, p_record text, p_removable_jobs text[], p_obligations text[], evidence jsonb", true},
+		{"record_platform_internal", "record_portability_v1_removable_jobs", "p_record text, p_import_jobs text[]", true},
+		{"record_platform_internal", "record_portability_v1_removed_count", "p_record text, p_export_jobs text[], p_removable_jobs text[]", true},
+		{"record_platform_internal", "record_portability_v1_inventory_candidate", "v jsonb, p_export_jobs text[], p_import_jobs text[], p_removable_jobs text[], pdf boolean", true},
+		{"record_platform_internal", "record_portability_v1_eligible", "op text", true},
+		{"record_platform_internal", "record_portability_v1_target_id", "op text, backend text, key text, version text, namespace uuid, incarnation uuid, binding bytea", true},
+		{"record_platform_internal", "record_portability_v1_owner_digest", "table_name text, pk jsonb, physical jsonb, route jsonb", true},
+		{"record_platform_internal", "record_portability_v1_local_owner_version", "o record_write_obligations", true},
+		{"record_platform_internal", "record_portability_v1_artifact_owner_digest", "op text, kind text, artifact text", true},
+		{"record_platform_internal", "record_portability_v1_live_artifact_digest", "op text, target text, kind text, artifact text", true},
+		{"record_platform_internal", "record_portability_v1_artifact_owner_survives", "op text, kind text, artifact text, digest bytea", true},
+		{"record_platform_internal", "record_portability_v1_upload_part_survives", "op text, target text, owner_key text, digest bytea", true},
+		{"record_platform_internal", "record_portability_v1_attachment_survives", "op text, target text, owner_key text, digest bytea", true},
+		{"record_platform_internal", "record_portability_v1_blob_object_survives", "op text, target text, owner_key text, digest bytea, excluded_kind text, excluded_id text", true},
+		{"record_platform_internal", "record_portability_v1_lock_parents", "source_table text, before_row jsonb, after_row jsonb", true},
+		{"record_platform_internal", "record_portability_v1_reference_identity", "source_table text, source_row jsonb", true},
+		{"record_platform_internal", "record_portability_v1_reference_owner", "source_table text, source_row jsonb", true},
+		{"record_platform_internal", "record_portability_v1_reference_match", "source_table text, source_row jsonb, target_row record_portability_v1_targets", true},
+		{"record_platform_internal", "record_portability_v1_scope_member", "source_table text, source_row jsonb, target_row record_portability_v1_targets", true},
+		{"record_platform_internal", "record_portability_v1_obligation_owner_digest", "op text, obligation text", true},
+		{"record_platform_internal", "record_portability_v1_local_expected_version", "op text, target text", true},
+		{"record_platform_internal", "record_portability_v1_live_obligation_digest", "op text, target text, obligation text", true},
+		{"record_platform_internal", "record_portability_v1_obligation_owner_survives", "op text, obligation text, digest bytea", true},
+		{"record_platform_internal", "record_portability_v1_local_successor", "op text, target text, task text", true},
+		{"record_platform_internal", "record_portability_v1_local_task_proof", "g blob_gc_deletions", true},
+		{"record_platform_internal", "record_portability_v1_retained_proof", "op text, target text, excluded_kind text, excluded_id text", true},
+		{"record_platform_internal", "record_portability_v1_finished", "op text", true},
+		{"record_platform_internal", "record_portability_finish_v1", "bytea, boolean", true},
+		{"record_platform_internal", "record_portability_v1_old_owner_valid", "op text, target text, kind text, owner_id text, expected bytea", true},
+		{"record_platform_internal", "record_portability_v1_append_fact_only", "before_row jsonb, after_row jsonb", true},
+		{"record_platform_internal", "record_portability_v1_reference_guard", "", true},
+		{"record_platform_internal", "record_portability_v1_reference_check", "", true},
+		{"record_platform_internal", "record_portability_v1_link_guard", "", true},
+		{"record_platform_internal", "record_portability_v1_control_check", "", true},
+		{"record_platform_internal", "record_portability_v1_parent_route", "source_table text, source_row jsonb", true},
+		{"record_platform_internal", "record_portability_v1_parent_guard", "", true},
+		{"record_platform_internal", "record_portability_v1_parent_check", "", true},
+		{"record_platform_internal", "record_portability_v1_gc_barrier", "backend text, namespace uuid, incarnation uuid, key text, version text, registered_deletion_id text", true},
+		{"record_platform_internal", "record_portability_v1_gc_prepare_barrier", "v jsonb, purge boolean, legacy bytea", true},
+		{"record_platform_internal", "record_portability_v1_gc_barrier_impl", "backend text, namespace uuid, incarnation uuid, key text, version text, registered_deletion_id text, bound_route bytea", true},
+		{"record_platform_internal", "record_portability_v1_gc_transition_guard", "", true},
 		{"record_platform_internal", "record_external_delivery_insert_guard", "", true},
 		{"record_platform_internal", "record_external_delivery_commit_trigger", "", true},
 		{"record_platform_internal", "record_external_delivery_queue_commit_check", "jsonb, text, bigint, timestamp with time zone", true},
@@ -753,7 +854,7 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		{"public", "record_deletion_inventory_lock", "bytea", true},
 		{"record_platform_internal", "enforce_client_purge_receipt_immutable", "", false},
 		{"record_platform_internal", "client_purge_field", "bytea", false},
-		{"record_platform_internal", "client_metadata_purge", "bytea, text, boolean", true},
+		{"record_platform_internal", "client_metadata_purge", "bytea, text, boolean, bigint", true},
 		{"public", "record_markdown_client_purge", "bytea", true},
 		{"public", "record_markdown_client_purge_verify", "bytea", true},
 		{"public", "record_comparison_purge", "bytea", true},
@@ -829,14 +930,14 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		{"record_platform_internal", "record_write_origin_handoff", "", true},
 		{"record_platform_internal", "record_write_import_target_register", "", true},
 		{"public", "record_write_bind_record", "bytea", true},
-		{"record_platform_internal", "local_blob_gc_authority", "jsonb, boolean", true},
-		{"record_platform_internal", "local_blob_gc_prepare", "bytea, boolean", true},
+		{"record_platform_internal", "local_blob_gc_authority", "jsonb, boolean, bytea, boolean", true},
+		{"record_platform_internal", "local_blob_gc_prepare", "bytea, boolean, bytea", true},
 		{"record_platform_internal", "local_blob_gc_snapshot", "text", true},
-		{"record_platform_internal", "local_blob_gc_claim", "bytea, boolean", true},
-		{"record_platform_internal", "local_blob_gc_current", "jsonb, boolean", true},
-		{"record_platform_internal", "local_blob_gc_resolve", "bytea, boolean", true},
-		{"record_platform_internal", "local_blob_gc_bind_final", "bytea, boolean", true},
-		{"record_platform_internal", "local_blob_gc_complete", "bytea, boolean", true},
+		{"record_platform_internal", "local_blob_gc_claim", "bytea, boolean, bytea", true},
+		{"record_platform_internal", "local_blob_gc_current", "jsonb, boolean, bytea", true},
+		{"record_platform_internal", "local_blob_gc_resolve", "bytea, boolean, bytea", true},
+		{"record_platform_internal", "local_blob_gc_bind_final", "bytea, boolean, bytea", true},
+		{"record_platform_internal", "local_blob_gc_complete", "bytea, boolean, bytea", true},
 		{"public", "local_blob_gc_prepare", "bytea", true},
 		{"public", "local_blob_purge_prepare", "bytea", true},
 		{"public", "local_blob_gc_claim", "bytea", true},
@@ -1304,6 +1405,60 @@ func assertComparisonInputTriggerCatalog(t *testing.T, ctx context.Context, db *
 				functionMetadata, ownerMatches, config, columns, err)
 		}
 	}
+	assertPortabilityGuardTriggerCatalog(t, ctx, db)
+}
+
+func assertPortabilityGuardTriggerCatalog(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
+	t.Helper()
+	type expectedTrigger struct {
+		table, name, function string
+		bits                  int
+		deferred              bool
+	}
+	var expected []expectedTrigger
+	for _, table := range []string{"record_export_jobs", "record_export_artifacts", "record_import_jobs", "record_import_artifacts",
+		"record_import_plans", "record_import_entity_mappings", "record_attachments", "attachment_upload_parts", "blob_gc_pins",
+		"blob_objects", "blob_publication_intents", "record_write_obligations", "record_write_obligation_targets"} {
+		expected = append(expected, expectedTrigger{table, "record_portability_v1_reference_guard", "record_portability_v1_reference_guard", 31, false},
+			expectedTrigger{table, "record_portability_v1_reference_check", "record_portability_v1_reference_check", 25, true})
+	}
+	for _, table := range []string{"attachment_uploads", "attachment_processor_jobs", "record_drafts"} {
+		expected = append(expected, expectedTrigger{table, "record_portability_v1_parent_guard", "record_portability_v1_parent_guard", 27, false},
+			expectedTrigger{table, "record_portability_v1_parent_check", "record_portability_v1_parent_check", 25, true})
+	}
+	expected = append(expected,
+		expectedTrigger{"local_blob_gc_obligations", "record_portability_v1_link_guard", "record_portability_v1_link_guard", 31, false},
+		expectedTrigger{"local_blob_gc_obligations", "record_portability_v1_control_check", "record_portability_v1_control_check", 29, true},
+		expectedTrigger{"blob_gc_deletions", "record_portability_v1_control_check", "record_portability_v1_control_check", 29, true},
+		expectedTrigger{"blob_gc_deletions", "record_portability_v1_gc_transition_guard", "record_portability_v1_gc_transition_guard", 23, false},
+		expectedTrigger{"record_portability_cleanup_preparations", "record_portability_cleanup_preparation_immutable", "local_blob_immutable_identity", 27, false},
+		expectedTrigger{"record_portability_cleanup_targets", "record_portability_cleanup_target_immutable", "local_blob_immutable_identity", 27, false},
+		expectedTrigger{"record_portability_cleanup_preparations", "record_portability_cleanup_preparation_no_truncate", "local_blob_immutable_identity", 34, false},
+		expectedTrigger{"record_portability_cleanup_targets", "record_portability_cleanup_target_no_truncate", "local_blob_immutable_identity", 34, false},
+		expectedTrigger{"record_portability_v1_preparations", "record_portability_v1_preparation_immutable", "local_blob_immutable_identity", 58, false},
+		expectedTrigger{"record_portability_v1_artifacts", "record_portability_v1_artifact_immutable", "local_blob_immutable_identity", 58, false},
+		expectedTrigger{"record_portability_v1_obligations", "record_portability_v1_obligation_immutable", "local_blob_immutable_identity", 58, false},
+		expectedTrigger{"record_portability_v1_targets", "record_portability_v1_target_no_truncate", "local_blob_immutable_identity", 34, false},
+		expectedTrigger{"record_portability_v1_targets", "record_portability_v1_target_guard", "record_portability_v1_target_guard", 27, false})
+	for _, e := range expected {
+		var valid bool
+		err := db.QueryRow(ctx, `select exists (
+			select 1 from pg_catalog.pg_trigger t join pg_catalog.pg_class c on c.oid=t.tgrelid
+			join pg_catalog.pg_proc p on p.oid=t.tgfoid join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+			left join pg_catalog.pg_constraint k on k.oid=t.tgconstraint
+			where t.tgrelid=pg_catalog.to_regclass('public.'||$1) and t.tgname=$2 and n.nspname='record_platform_internal'
+			  and p.proname=$3 and t.tgtype::integer=$4 and not t.tgisinternal and t.tgenabled='O' and t.tgparentid=0
+			  and t.tgdeferrable=$5 and t.tginitdeferred=$5 and t.tgqual is null and t.tgnargs=0
+			  and octet_length(t.tgargs)=0 and t.tgattr=''::int2vector and t.tgoldtable is null and t.tgnewtable is null
+			  and (($5 and k.contype='t' and k.conrelid=c.oid and k.condeferrable and k.condeferred) or (not $5 and t.tgconstraint=0))
+			  and p.prokind='f' and p.pronargs=0 and p.prorettype='pg_catalog.trigger'::regtype
+			  and p.prosecdef=(p.proname<>'local_blob_immutable_identity')
+			  and pg_catalog.pg_get_userbyid(c.relowner)=current_user and pg_catalog.pg_get_userbyid(p.proowner)=current_user
+		)`, e.table, e.name, e.function, e.bits, e.deferred).Scan(&valid)
+		if err != nil || !valid {
+			t.Fatalf("portability guard %s.%s is invalid: %v", e.table, e.name, err)
+		}
+	}
 }
 
 func assertV2DeletionTriggerCatalog(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
@@ -1484,12 +1639,24 @@ func seedPostgresSuccessorMutationLockRows(t *testing.T, ctx context.Context, mi
 	content := []byte("row lock export")
 	digest := sha256.Sum256(content)
 	encodedDigest := hex.EncodeToString(digest[:])
+	client, err := minio.New("127.0.0.1:9000", &minio.Options{Creds: credentials.NewStaticV4("access", "secret", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := attachments.NewS3BlobStore(client, "fixture-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := blob.GCStorageIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
 	registration, err := json.Marshal(map[string]any{
 		"obligation_id": "rwo_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "writer_instance": "c0000000-0000-4000-8000-000000000001", "request_seq": 1,
 		"project_id": "default", "origin_kind": "export_artifact", "origin_id": "rej_rowlock", "origin_generation": 1,
 		"origin_owner_id": nil, "origin_owner_generation": nil, "origin_owner_expires_at": nil,
 		"draft_id": nil, "plan_digest": nil, "archive_digest": nil,
-		"namespace_id": nil, "incarnation_id": nil, "backend_kind": "s3",
+		"namespace_id": nil, "incarnation_id": nil, "backend_kind": "s3", "storage_binding": hex.EncodeToString(route[:]),
 		"key": "sha256/" + encodedDigest, "sha256": encodedDigest, "size": len(content),
 		"publication_id": nil, "target_record_id": nil, "target_attachment_id": nil,
 	})

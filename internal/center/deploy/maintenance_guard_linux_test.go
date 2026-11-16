@@ -207,7 +207,13 @@ func TestMaintenanceGuardProvisionRejectsUnsafeExistingState(t *testing.T) {
 				mustMaintenanceGuard(t, os.WriteFile(sentinel, []byte("untouched"), 0o600))
 				mustMaintenanceGuard(t, os.Symlink(sentinel, filepath.Join(root, "maintenance.lock")))
 			case "permissive-file":
-				mustMaintenanceGuard(t, os.WriteFile(filepath.Join(root, "maintenance.lock"), nil, 0o644))
+				lock := filepath.Join(root, "maintenance.lock")
+				mustMaintenanceGuard(t, os.WriteFile(lock, nil, 0o644))
+				mustMaintenanceGuard(t, os.Chmod(lock, 0o644))
+				info, err := os.Lstat(lock)
+				if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o644 {
+					t.Fatalf("permissive lock fixture = %v, error = %v; want regular 0644", info, err)
+				}
 			}
 			if _, err := ProvisionMaintenanceGuard(root); !errors.Is(err, ErrMaintenanceGuardMismatch) {
 				t.Fatalf("unsafe provision error = %v", err)

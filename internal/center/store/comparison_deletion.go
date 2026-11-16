@@ -71,7 +71,7 @@ func (repository *PostgresEvidenceRepository) PurgeRecordComparison(
 		var err error
 		receipt, err = runClientComparisonPurgeFunction(ctx, transaction.tx, `
 			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_comparison_purge($1)`, recorddeletion.AdapterNameRecordComparison,
+			from public.record_comparison_purge($1)`, `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_comparison_purge_v1($1)`, recorddeletion.AdapterNameRecordComparison,
 			command.Operation, command.OwnerClaim, command.SurfaceDigest)
 		return err
 	})
@@ -97,7 +97,7 @@ func (repository *PostgresEvidenceRepository) VerifyRecordComparisonPurge(
 	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		actual, err := runClientComparisonPurgeFunction(ctx, transaction.tx, `
 			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_comparison_purge_verify($1)`, recorddeletion.AdapterNameRecordComparison,
+			from public.record_comparison_purge_verify($1)`, `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_comparison_purge_verify_v1($1)`, recorddeletion.AdapterNameRecordComparison,
 			command.Operation, command.OwnerClaim, command.SurfaceDigest)
 		if err != nil {
 			return err

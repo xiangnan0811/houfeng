@@ -3,6 +3,7 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -85,6 +86,11 @@ type importBirthReplayBlob struct {
 	contents map[attachments.ObjectVersion][]byte
 	writes   int
 	reads    int
+	route    [32]byte
+}
+
+func (blob *importBirthReplayBlob) GCStorageIdentity() ([32]byte, error) {
+	return blob.route, nil
 }
 
 func (blob *importBirthReplayBlob) Put(_ context.Context, request attachments.PutRequest, reader io.Reader) (attachments.ObjectVersion, error) {
@@ -259,6 +265,9 @@ func TestPostgresIntegrationImportAppliedBirthConfirmationReplay(t *testing.T) {
 			}
 			imports := store.NewPostgresRecordPortabilityRepository(fixture.Runtime, fixture.Gate, fixture.Tombstones, birth)
 			blob := &importBirthReplayBlob{contents: make(map[attachments.ObjectVersion][]byte)}
+			if _, err := rand.Read(blob.route[:]); err != nil {
+				t.Fatal(err)
+			}
 			writer, err := attachments.NewManagedBlobWriter(blob, attachments.BackendKindS3, store.NewPostgresLocalBlobRepository(fixture.Runtime, fixture.Tombstones, birth))
 			if err != nil {
 				t.Fatal(err)

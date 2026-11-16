@@ -298,13 +298,24 @@ deterministic exponential retry，最多 8 attempts。gate、事件期限或 att
 时只终结本地 queue，不改写真实 provider fact。未配置 processor 或尚未开始的取消继续使用
 当前 claim；通用 sent/retry/cancel 不得绕过已开始 attempt 的原子 completion。
 
-V2 collaboration purge 先用 worker-only `record_outbox_drain_v2(bytea)` 按 exact deletion
-owner 每事务最多处理 100 项。drain 覆盖 record/action/comment/delivery route，不受旧 queue
-lease、event TTL 或 retry 时间限制；歧义 legacy route 保持 blocker。每个真实 start 和
-predecessor unknown 先持久移交，再终结在线投影；只有可证明从未开始的 queue 才记为未发送。
-purge/verify 在相同 owner 下核完整 handoff 和 absence，保留 start/fact/completion/handoff，
-不把它们计入 removed rows。late fact 不改变原 receipt digest，邻 record 不受影响。
-V1 collaboration execution 仍关闭，不因新增 V2 drain 获得权限。
+历史 V1 continuation 与 V2 collaboration purge 分别使用 worker-only
+`record_outbox_drain_v1(bytea)`、`record_outbox_drain_v2(bytea)`，每事务最多处理 100 项。
+V1 只接受原十二字段 legacy adapter envelope，独立校验 committed reservation、verified
+delete_commit、online_purging 与 caller 提交的 live exact owner；不创建或借用 V2 gate，
+V1 新发行继续关闭。V2 保留原八字段 envelope、gate 和 compound-owner 校验。
+两条路径在同一 caller-observed claim 下执行真实 drain、purge 与 verify；每个提交后的 batch
+继续核原 owner 和期限，不在循环中采用数据库的新 owner。
+
+drain 覆盖 record/action/comment/delivery route，不受旧 queue lease、event TTL 或 retry
+时间限制；歧义 legacy route 保持 blocker。每个真实 start 和 predecessor unknown 先持久
+移交，再终结在线投影；只有可证明从未开始的 queue 才记为未发送。purge/verify 核完整
+handoff 和 absence，保留 start/fact/completion/handoff，不计入 removed rows。
+unknown 不转为 not_sent，late fact 不改变原 handoff 或 receipt，邻 record 不受影响。
+
+V1 首次真实 markdown/comparison/collaboration metadata purge 与 receipt 在同一事务发布
+exact operation/project/record/fence epoch 的 browser cleanup event，使用既有固定四 scopes。
+已有 event 必须逐字段相同才可重用，冲突以 `55000` 拒绝；verify 缺 event、handoff 或 receipt
+同样拒绝，不能补造。event/target/ack 不依赖在线 root，V1 终态必须保留该客户端清理责任。
 
 命令在取得锁后和返回前核 exact owner；普通 Go 事务保持约束 deferred 至 COMMIT，由私有
 rejecting assertion 再核 lease。直接 SQL 调用者可用 `SET CONSTRAINTS ... IMMEDIATE`

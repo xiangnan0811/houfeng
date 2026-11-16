@@ -15,9 +15,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/notify"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
+	storemigrate "houfeng/internal/center/store/migrate"
 )
 
 func TestPostgresIntegrationRecordCollaborationDeletionPurgesExactOwnedSurfacesAndReplays(t *testing.T) {
@@ -1170,5 +1172,383 @@ func TestPostgresIntegrationRecordCollaborationDeletionDoesNotCommitReceiptBefor
 	}
 	if blockedRows != 1 || blockedReceipts != 0 {
 		t.Fatalf("blocked collaboration rows/receipts = %d/%d, want 1/0 rollback", blockedRows, blockedReceipts)
+	}
+}
+
+// runV1ClientLateProvider is called by the V1 continuation matrix. Each child
+// uses an independently witnessed historical V1 operation and worker login.
+func runV1ClientLateProvider(t *testing.T) {
+	t.Run("started_late_provider_root_independent", func(t *testing.T) {
+		t.Run("late_provider", v1LateClientStartedDelivery)
+		t.Run("proven_not_started", v1LateClientNotStarted)
+	})
+	t.Run("client_comparison_rollback_atomic", v1LateClientRollbackAtomic)
+}
+
+func v1LateClientRollbackAtomic(t *testing.T) {
+	for _, surface := range []struct {
+		name, purge, verify, otherPurge string
+		digest, otherDigest             [sha256.Size]byte
+	}{
+		{"markdown", "record_markdown_client_purge_v1", "record_markdown_client_purge_verify_v1", "record_comparison_purge_v1", recorddeletion.RecordMarkdownClientSurfaceDigest(), recorddeletion.RecordComparisonSurfaceDigest()},
+		{"comparison", "record_comparison_purge_v1", "record_comparison_purge_verify_v1", "record_markdown_client_purge_v1", recorddeletion.RecordComparisonSurfaceDigest(), recorddeletion.RecordMarkdownClientSurfaceDigest()},
+	} {
+		t.Run(surface.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
+			runtime := fixture.openDirectRuntimePool(t, ctx, "v1-late-client-atomic-runtime", 2)
+			birth := ImportAttachmentGCFixture{Runtime: runtime, Gate: fixture.admissionGate}
+			record, err := newRevisionMutationAdmittedRepository(t, birth).CommitRevision(ctx,
+				revisionBirthBatchCommand(t, ctx, birth, recordsPostgresCompleteRevisionInput(t, "V1 client rollback"), "v1-late-client-atomic"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if surface.name == "markdown" {
+				_, err = fixture.db.Exec(ctx, `insert into public.markdown_client_draft_buffers
+					(user_id,browser_id,record_id,project_id,session_generation,cleanup_generation)
+					values ('usr_records1','v1atomic',$1,'default',1,0)`, record.RecordID)
+			} else {
+				_, err = fixture.db.Exec(ctx, `insert into public.comparison_client_workbenches
+					(user_id,browser_id,workbench_digest,destination_record_id,source_record_ids,generation)
+					values ('usr_records1','v1atomic',decode(repeat('ab',32),'hex'),$1,array[$1],1)`, record.RecordID)
+				if err == nil {
+					_, err = fixture.db.Exec(ctx, `insert into public.comparison_client_save_attempts
+						(user_id,browser_id,save_digest,destination_record_id,source_record_ids,idempotency_key,generation)
+						values ('usr_records1','v1atomic',decode(repeat('ab',32),'hex'),$1,array[$1],'v1atomic',1)`, record.RecordID)
+				}
+			}
+			if err != nil {
+				t.Fatalf("seed client metadata: %v", err)
+			}
+			op := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1,
+				OperationID: "rpo_v1lateatomic", ReservationID: "drs_v1lateatomic",
+				Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: record.RecordID},
+				ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging, FenceEpoch: 12}
+			target := seedVerifiedS3AttachmentDeletionOperation(t, ctx, fixture, record, op)
+			pool := fixture.openDirectRolePool(t, ctx, fixture.deletionWorker, "v1-late-client-atomic-worker", 2)
+			if err := storemigrate.AdmitAppACLCurrentDeletionWorker(ctx, pool); err != nil {
+				t.Fatal(err)
+			}
+			worker := NewPostgresRecordDeletionRepository(pool, allowRecordPlatformAdmissionGate)
+			call := func(name string, digest [sha256.Size]byte, rollback bool) (int64, error) {
+				var removed int64
+				err := worker.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, tx *RecordPlatformTransaction) error {
+					body, err := legacyAdapterPurgeEnvelope(ctx, tx.tx, target, digest)
+					if err != nil {
+						return err
+					}
+					var gotSurface, receipt []byte
+					var verified time.Time
+					if err := tx.tx.QueryRow(ctx, `select * from public.`+name+`($1)`, body).Scan(&gotSurface, &receipt, &removed, &verified); err != nil {
+						return err
+					}
+					if !reflect.DeepEqual(gotSurface, digest[:]) || len(receipt) != sha256.Size || verified.IsZero() {
+						t.Fatal("invalid in-transaction receipt")
+					}
+					if rollback {
+						return v1LateClientRollback
+					}
+					return nil
+				})
+				return removed, err
+			}
+			assertState := func(events, markdown, workbench, saves, markdownReceipts, comparisonReceipts int) {
+				t.Helper()
+				var e, m, w, s, mr, cr int
+				err := fixture.db.QueryRow(ctx, `select
+					(select count(*) from public.browser_record_cleanup_events where operation_id=$1),
+					(select count(*) from public.markdown_client_draft_buffers where record_id=$2),
+					(select count(*) from public.comparison_client_workbenches where destination_record_id=$2),
+					(select count(*) from public.comparison_client_save_attempts where destination_record_id=$2),
+					(select count(*) from public.record_markdown_client_purge_receipts where operation_id=$1),
+					(select count(*) from public.record_comparison_purge_receipts where operation_id=$1)`, target.Operation.OperationID, record.RecordID).Scan(&e, &m, &w, &s, &mr, &cr)
+				if err != nil || e != events || m != markdown || w != workbench || s != saves || mr != markdownReceipts || cr != comparisonReceipts {
+					t.Fatalf("event/metadata/receipts = %d/%d/%d/%d/%d/%d: %v", e, m, w, s, mr, cr, err)
+				}
+			}
+			m, w, s := 0, 0, 0
+			if surface.name == "markdown" {
+				m = 1
+			} else {
+				w, s = 1, 1
+			}
+			assertState(0, m, w, s, 0, 0)
+			if _, err := call(surface.verify, surface.digest, false); !v1LateClientSQLState(err, "55000") {
+				t.Fatalf("verify without event = %v", err)
+			}
+			assertState(0, m, w, s, 0, 0)
+			if removed, err := call(surface.purge, surface.digest, true); !errors.Is(err, v1LateClientRollback) || removed != int64(m+w+s) {
+				t.Fatalf("rollback initial purge removed=%d err=%v", removed, err)
+			}
+			assertState(0, m, w, s, 0, 0)
+			if removed, err := call(surface.otherPurge, surface.otherDigest, false); err != nil || removed != 0 {
+				t.Fatalf("create event using other surface removed=%d err=%v", removed, err)
+			}
+			mr, cr := 0, 0
+			if surface.name == "markdown" {
+				cr = 1
+			} else {
+				mr = 1
+			}
+			assertState(1, m, w, s, mr, cr)
+			if _, err := call(surface.verify, surface.digest, false); !v1LateClientSQLState(err, "55000") {
+				t.Fatalf("verify without receipt = %v", err)
+			}
+			assertState(1, m, w, s, mr, cr)
+			if removed, err := call(surface.purge, surface.digest, true); !errors.Is(err, v1LateClientRollback) || removed != int64(m+w+s) {
+				t.Fatalf("rollback after event removed=%d err=%v", removed, err)
+			}
+			assertState(1, m, w, s, mr, cr)
+			if removed, err := call(surface.purge, surface.digest, false); err != nil || removed != int64(m+w+s) {
+				t.Fatalf("commit purge removed=%d err=%v", removed, err)
+			}
+			assertState(1, 0, 0, 0, 1, 1)
+			if removed, err := call(surface.verify, surface.digest, false); err != nil || removed != int64(m+w+s) {
+				t.Fatalf("verify committed receipt removed=%d err=%v", removed, err)
+			}
+			assertState(1, 0, 0, 0, 1, 1)
+		})
+	}
+}
+
+var v1LateClientRollback = errors.New("v1 client fixture rollback after purge")
+
+func v1LateClientSQLState(err error, code string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == code
+}
+
+func v1LateClientStartedDelivery(t *testing.T) {
+	harness := newPostgresExternalDeliveryHarness(t)
+	ctx, fixture := harness.ctx, harness.fixture
+	runtime := fixture.openDirectRuntimePool(t, ctx, "v1-late-client-runtime", 2)
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		entered <- struct{}{}
+		<-release
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	provider, err := recordcollaboration.NewScopedNotifierProvider(notify.NewTelegramNotifierWithBaseURL("fixture-token", "fixture-chat", server.URL, server.Client()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness.bindings.provider = provider
+	processor, err := recordcollaboration.NewScopedExternalDeliveryProcessor(harness.repository, recordcollaboration.ScopedExternalDeliveryProcessorOptions{
+		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second, SendTimeout: 30 * time.Second, Clock: postgresExternalDeliveryClock{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		value recordcollaboration.ExternalDeliveryOutboxResult
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		value, err := processor.ProcessExternalDelivery(ctx, harness.claim)
+		done <- result{value, err}
+	}()
+	select {
+	case <-entered:
+	case got := <-done:
+		t.Fatalf("provider returned before barrier: %#v, %v", got.value, got.err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("provider did not start")
+	}
+
+	birth := ImportAttachmentGCFixture{Runtime: runtime, Gate: fixture.admissionGate}
+	neighborInput := collaborationRevisionInput(t, collaborationRevisionInputValues{
+		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
+	})
+	neighbor, err := newRevisionMutationAdmittedRepository(t, birth, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx,
+		revisionBirthBatchCommand(t, ctx, birth, neighborInput, "v1-late-client-neighbor"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := claimNotificationOutboxKind(t, ctx, harness.queue, recordplatform.OutboxEventKindRecordOwnerChanged, "v1_late_neighbor_parent")
+	if _, err := harness.repository.ProjectNotification(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.queue.MarkOutboxSent(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	neighborClaim := claimNotificationOutboxKind(t, ctx, harness.queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "v1_late_neighbor_delivery")
+	neighborPrepared, err := harness.repository.PrepareExternalDelivery(ctx, neighborClaim, "https://houfeng.example", time.Second)
+	if err != nil || neighborPrepared.Prepared == nil {
+		t.Fatalf("prepare neighbor: %#v, %v", neighborPrepared, err)
+	}
+	var queued int64
+	if err := fixture.db.QueryRow(ctx, `insert into public.record_outbox
+		(project_id,event_kind,subject_kind,subject_id,authorization_epoch,record_id,expires_at)
+		values ('default','record_created','record',$1,0,$1,clock_timestamp()+interval '1 hour') returning outbox_row_id`, harness.created.RecordID).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Exec(ctx, `insert into public.browser_record_cleanup_targets(user_id,browser_id,record_id,project_id)
+		values ('usr_aaaaaaaaaaaaaaaaaaaaaaaa','v1late',$1,'default'),('usr_aaaaaaaaaaaaaaaaaaaaaaaa','v1late',$2,'default')`, harness.created.RecordID, neighbor.RecordID); err != nil {
+		t.Fatal(err)
+	}
+
+	op := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1,
+		OperationID: "rpo_v1lateprovider", ReservationID: "drs_v1lateprovider",
+		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: harness.created.RecordID},
+		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging, FenceEpoch: 12}
+	target := seedVerifiedS3AttachmentDeletionOperation(t, ctx, fixture, harness.created, op)
+	pool := fixture.openDirectRolePool(t, ctx, fixture.deletionWorker, "v1-late-client-worker", 2)
+	if err := storemigrate.AdmitAppACLCurrentDeletionWorker(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewPostgresRecordDeletionRepository(pool, allowRecordPlatformAdmissionGate)
+	adapter, err := recordcollaboration.NewDeletionAdapter(worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := adapter.PurgeDeletion(ctx, target)
+	if err != nil || receipt.RemovedRowCount == 0 {
+		t.Fatalf("V1 started delivery purge: %#v, %v", receipt, err)
+	}
+	if err := adapter.VerifyDeletion(ctx, target, receipt); err != nil {
+		t.Fatalf("verify V1 collaboration: %v", err)
+	}
+	var handoffBefore string
+	if err := fixture.db.QueryRow(ctx, `select to_jsonb(h)::text from public.record_notification_delivery_handoffs h
+		where h.operation_id=$1 and h.delivery_id=$2 and h.attempt_id is not null and h.observed_status='possible_external'`,
+		target.Operation.OperationID, harness.claim.Event.SubjectID).Scan(&handoffBefore); err != nil {
+		t.Fatalf("started possible_external handoff: %v", err)
+	}
+	var classification string
+	var digest []byte
+	var mismatched bool
+	if err := runtime.QueryRow(ctx, `select classification,evidence_digest,mismatched from public.record_collaboration_delivery_inventory($1,0) where delivery_id=$2`,
+		harness.created.RecordID, harness.claim.Event.SubjectID).Scan(&classification, &digest, &mismatched); err != nil || classification != "possible_external" || len(digest) != sha256.Size || mismatched {
+		t.Fatalf("pre-report inventory=%q mismatch=%t err=%v", classification, mismatched, err)
+	}
+	core, err := recorddeletion.NewCoreAdapter(worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := core.PurgeDeletion(ctx, target); err != nil {
+		t.Fatalf("V1 core purge after handoff: %v", err)
+	}
+	var roots, epochs int
+	if err := fixture.db.QueryRow(ctx, `select (select count(*) from public.records where record_id=$1),
+		(select count(*) from public.content_delivery_epochs where project_id='default' and object_kind='record' and object_id=$1)`, harness.created.RecordID).Scan(&roots, &epochs); err != nil || roots != 0 || epochs != 0 {
+		t.Fatalf("root/epoch after purge = %d/%d: %v", roots, epochs, err)
+	}
+	cleanup := NewPostgresRecordClientCleanupRepository(runtime, fixture.admissionGate, newRecordsPostgresAuthorization(t, runtime, fixture.admissionGate))
+	actor := recordauth.ActorScope{UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", ProjectID: recordauth.ProjectIDDefault, Role: recordauth.RoleProjectAdmin}
+	event, err := cleanup.Next(ctx, actor, "v1late")
+	if err != nil || event == nil || event.OperationID != target.Operation.OperationID || event.RecordID != harness.created.RecordID {
+		t.Fatalf("root-independent event: %#v, %v", event, err)
+	}
+	if err := cleanup.Acknowledge(ctx, actor, "v1late", event.Acknowledgement()); err != nil {
+		t.Fatalf("root-independent acknowledgement: %v", err)
+	}
+	if next, err := cleanup.Next(ctx, actor, "v1late"); err != nil || next != nil {
+		t.Fatalf("acknowledged event replay: %#v, %v", next, err)
+	}
+
+	close(release)
+	select {
+	case got := <-done:
+		if got.err == nil {
+			t.Fatalf("old sender finalized after V1 drain: %#v", got.value)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("provider did not finish")
+	}
+	var handoffAfter, queuedState, neighborState string
+	var reports, observations, starts, live, pending, neighborStarts int
+	var ack, targetRetained, neighborRetained, eventValid bool
+	err = fixture.db.QueryRow(ctx, `select
+		(select to_jsonb(h)::text from public.record_notification_delivery_handoffs h where h.operation_id=$1 and h.delivery_id=$3 and h.attempt_id is not null),
+		(select status from public.record_outbox where outbox_row_id=$4),
+		(select delivery_state from public.record_notification_deliveries where record_id=$5 and delivery_id=$6),
+		(select count(*) from public.record_notification_delivery_facts where record_id=$2 and fact_kind='provider_report' and outcome='sent'),
+		(select count(*) from public.record_notification_delivery_facts where record_id=$2 and fact_kind='drain_observation' and outcome='unknown_outcome'),
+		(select count(*) from public.record_notification_delivery_starts where record_id=$2),
+		(select count(*) from public.record_notification_deliveries where record_id=$2),
+		(select count(*) from public.record_outbox where record_id=$2 and status in ('pending','processing')),
+		(select count(*) from public.record_notification_delivery_starts where record_id=$5 and delivery_id=$6),
+		exists(select 1 from public.browser_record_cleanup_receipts where operation_id=$1 and record_id=$2 and user_id='usr_aaaaaaaaaaaaaaaaaaaaaaaa' and browser_id='v1late' and cleanup_epoch=$7),
+		exists(select 1 from public.browser_record_cleanup_targets where record_id=$2 and user_id='usr_aaaaaaaaaaaaaaaaaaaaaaaa' and browser_id='v1late'),
+		exists(select 1 from public.browser_record_cleanup_targets where record_id=$5 and user_id='usr_aaaaaaaaaaaaaaaaaaaaaaaa' and browser_id='v1late'),
+		exists(select 1 from public.browser_record_cleanup_events where operation_id=$1 and record_id=$2 and cleanup_epoch=$7 and scopes=array['markdown_draft_buffer','markdown_workspace','comparison_workbench','comparison_save_attempt']::text[])
+		and not exists(select 1 from public.record_deletion_gates where operation_id=$1)`,
+		target.Operation.OperationID, harness.created.RecordID, harness.claim.Event.SubjectID, queued, neighbor.RecordID, neighborPrepared.Prepared.Attempt.DeliveryID, int64(target.Operation.FenceEpoch)).
+		Scan(&handoffAfter, &queuedState, &neighborState, &reports, &observations, &starts, &live, &pending, &neighborStarts, &ack, &targetRetained, &neighborRetained, &eventValid)
+	if err != nil || handoffAfter != handoffBefore || queuedState != "cancelled" || neighborState != "processing" || reports != 1 || observations != 1 || starts != 1 || live != 0 || pending != 0 || neighborStarts != 1 || !ack || !targetRetained || !neighborRetained || !eventValid {
+		t.Fatalf("late handoff/state changed: handoff_equal=%t queued=%q neighbor=%q reports=%d unknown=%d starts=%d live=%d pending=%d neighborStarts=%d ack/targets/event=%t/%t/%t/%t err=%v", handoffAfter == handoffBefore, queuedState, neighborState, reports, observations, starts, live, pending, neighborStarts, ack, targetRetained, neighborRetained, eventValid, err)
+	}
+	if err := fixture.db.QueryRow(ctx, `select (select count(*) from public.records where record_id=$1),
+		(select count(*) from public.content_delivery_epochs where project_id='default' and object_kind='record' and object_id=$1)`, harness.created.RecordID).Scan(&roots, &epochs); err != nil || roots != 0 || epochs != 0 {
+		t.Fatalf("late fact recreated root/epoch %d/%d: %v", roots, epochs, err)
+	}
+	if err := runtime.QueryRow(ctx, `select classification,evidence_digest,mismatched from public.record_collaboration_delivery_inventory($1,0) where delivery_id=$2`,
+		harness.created.RecordID, harness.claim.Event.SubjectID).Scan(&classification, &digest, &mismatched); err != nil || classification != "sent" || len(digest) != sha256.Size || mismatched {
+		t.Fatalf("late provider inventory=%q mismatch=%t err=%v", classification, mismatched, err)
+	}
+	if err := adapter.VerifyDeletion(ctx, target, receipt); err != nil {
+		t.Fatalf("verify after late report: %v", err)
+	}
+	if replay, err := adapter.PurgeDeletion(ctx, target); err != nil || replay != receipt {
+		t.Fatalf("late report changed receipt: %#v, %v", replay, err)
+	}
+	if prepared, err := harness.repository.PrepareExternalDelivery(ctx, harness.claim, "https://houfeng.example", time.Second); err == nil && prepared.Prepared != nil {
+		t.Fatal("late delivery reacquired a send capability")
+	}
+	select {
+	case <-entered:
+		t.Fatal("provider sent twice")
+	default:
+	}
+}
+
+func v1LateClientNotStarted(t *testing.T) {
+	harness := newPostgresExternalDeliveryHarness(t)
+	ctx, fixture := harness.ctx, harness.fixture
+	op := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1,
+		OperationID: "rpo_v1latenotstarted", ReservationID: "drs_v1latenotstarted",
+		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: harness.created.RecordID},
+		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging, FenceEpoch: 12}
+	target := seedVerifiedS3AttachmentDeletionOperation(t, ctx, fixture, harness.created, op)
+	pool := fixture.openDirectRolePool(t, ctx, fixture.deletionWorker, "v1-late-not-started-worker", 2)
+	if err := storemigrate.AdmitAppACLCurrentDeletionWorker(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewPostgresRecordDeletionRepository(pool, allowRecordPlatformAdmissionGate)
+	adapter, err := recordcollaboration.NewDeletionAdapter(worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := adapter.PurgeDeletion(ctx, target)
+	if err != nil {
+		t.Fatalf("purge unstarted delivery: %v", err)
+	}
+	var starts, handoffs, facts int
+	if err := fixture.db.QueryRow(ctx, `select
+		(select count(*) from public.record_notification_delivery_starts where record_id=$1),
+		(select count(*) from public.record_notification_delivery_handoffs where operation_id=$2 and delivery_id=$3
+		  and attempt_no=1 and attempt_id is null and legacy_observation_kind='not_started'
+		  and observed_status='not_sent' and legacy_outbox_row_id=$4),
+		(select count(*) from public.record_notification_delivery_facts where record_id=$1)`,
+		harness.created.RecordID, target.Operation.OperationID, harness.claim.Event.SubjectID, harness.claim.Event.RowID).Scan(&starts, &handoffs, &facts); err != nil || starts != 0 || handoffs != 1 || facts != 0 {
+		t.Fatalf("unstarted delivery starts=%d handoffs=%d facts=%d err=%v", starts, handoffs, facts, err)
+	}
+	prepared, err := harness.repository.PrepareExternalDelivery(ctx, harness.claim, "https://houfeng.example", time.Second)
+	if err == nil && prepared.Prepared != nil {
+		t.Fatal("drained unstarted delivery obtained send capability")
+	}
+	if err := adapter.VerifyDeletion(ctx, target, receipt); err != nil {
+		t.Fatalf("verify unstarted delivery receipt: %v", err)
 	}
 }

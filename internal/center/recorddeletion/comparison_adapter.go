@@ -19,7 +19,7 @@ type ComparisonPurgeCommand struct {
 
 func (command ComparisonPurgeCommand) Validate() error {
 	target := PurgeTarget{Operation: command.Operation, OwnerClaim: command.OwnerClaim}
-	if command.Operation.ContractVersion != DeletionContractV2 || target.Validate() != nil ||
+	if (command.Operation.ContractVersion != DeletionContractV1 && command.Operation.ContractVersion != DeletionContractV2) || target.Validate() != nil ||
 		command.SurfaceDigest != RecordComparisonSurfaceDigest() {
 		return ErrInvalidComparisonAdapter
 	}
@@ -91,7 +91,7 @@ func (adapter *ComparisonAdapter) PreviewDeletion(ctx context.Context, target Pr
 
 func (adapter *ComparisonAdapter) PurgeDeletion(ctx context.Context, target PurgeTarget) (AdapterPurgeReceipt, error) {
 	if ctx == nil || adapter == nil || nilDeletionServiceDependency(adapter.store) ||
-		target.Validate() != nil || target.Operation.ContractVersion != DeletionContractV2 {
+		target.Validate() != nil {
 		return AdapterPurgeReceipt{}, ErrInvalidComparisonAdapter
 	}
 	command := ComparisonPurgeCommand{
@@ -112,7 +112,7 @@ func (adapter *ComparisonAdapter) PurgeDeletion(ctx context.Context, target Purg
 
 func (adapter *ComparisonAdapter) VerifyDeletion(ctx context.Context, target PurgeTarget, receipt AdapterPurgeReceipt) error {
 	if ctx == nil || adapter == nil || nilDeletionServiceDependency(adapter.store) ||
-		target.Validate() != nil || target.Operation.ContractVersion != DeletionContractV2 {
+		target.Validate() != nil {
 		return ErrInvalidComparisonAdapter
 	}
 	if err := receipt.validate(target, adapter.descriptor); err != nil {

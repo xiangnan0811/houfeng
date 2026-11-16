@@ -86,11 +86,15 @@ func (repository *PostgresLocalBlobRepository) prepareImportWrite(ctx context.Co
 	case attachments.WriteDispatch:
 		obligationID = command.ObligationID
 		var raw []byte
-		if err := repository.pool.QueryRow(ctx, `select registration_command from public.record_write_obligations where obligation_id=$1 and writer_instance::text=$2`, command.ObligationID, command.WriterInstance).Scan(&raw); err != nil {
+		var binding *string
+		if err := repository.pool.QueryRow(ctx, `select registration_command,encode(storage_binding,'hex') from public.record_write_obligations where obligation_id=$1 and writer_instance::text=$2`, command.ObligationID, command.WriterInstance).Scan(&raw, &binding); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &registration); err != nil {
 			return nil, err
+		}
+		if !reflect.DeepEqual(registration.StorageBinding, binding) {
+			return nil, importWriteChanged()
 		}
 		if registration.Kind != "import_archive" && registration.Kind != "import_attachment" {
 			return nil, nil

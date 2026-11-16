@@ -1061,6 +1061,7 @@ create table public.record_write_obligations (
   namespace_id uuid,
   incarnation_id uuid,
   backend_kind text not null check (backend_kind in ('local', 's3')),
+  storage_binding bytea check (storage_binding is null or (backend_kind = 's3' and octet_length(storage_binding) = 32)),
   canonical_key text not null check (canonical_key ~ '^sha256/[0-9a-f]{64}$'),
   sha256_digest bytea not null check (octet_length(sha256_digest) = 32),
   size_bytes bigint not null check (size_bytes > 0),
@@ -1203,14 +1204,14 @@ begin
       new.project_id, new.origin_kind, new.origin_id, new.origin_generation,
       new.origin_owner_id, new.origin_owner_generation, new.origin_owner_expires_at,
       new.plan_digest, new.archive_digest, new.namespace_id, new.incarnation_id,
-      new.backend_kind, new.canonical_key, new.sha256_digest, new.size_bytes,
+      new.backend_kind, new.storage_binding, new.canonical_key, new.sha256_digest, new.size_bytes,
       new.publication_id, new.registration_command, new.temporary_key,
       new.quota_settlement_id, new.created_at)
     is distinct from row(old.obligation_id, old.writer_instance, old.request_seq, old.writer_principal,
       old.project_id, old.origin_kind, old.origin_id, old.origin_generation,
       old.origin_owner_id, old.origin_owner_generation, old.origin_owner_expires_at,
       old.plan_digest, old.archive_digest, old.namespace_id, old.incarnation_id,
-      old.backend_kind, old.canonical_key, old.sha256_digest, old.size_bytes,
+      old.backend_kind, old.storage_binding, old.canonical_key, old.sha256_digest, old.size_bytes,
       old.publication_id, old.registration_command, old.temporary_key,
       old.quota_settlement_id, old.created_at)
     or (old.object_version is not null and new.object_version is distinct from old.object_version)
@@ -1274,6 +1275,13 @@ begin
   if (protected_old or protected_new) and not pg_has_role(current_user,
     (select relowner from pg_catalog.pg_class where oid = tg_relid), 'USAGE') then
     raise exception using errcode = '42501', message = 'local cleanup requires constrained command authority';
+  end if;
+  if tg_op='UPDATE' and old.local_contract_version=2 and old.deletion_state='completed'
+    and new is distinct from old then
+    raise exception using errcode='55000',message='completed local cleanup evidence is immutable';
+  end if;
+  if tg_op='DELETE' and old.local_contract_version=2 and old.deletion_state='completed' then
+    raise exception using errcode='55000',message='completed local cleanup evidence cannot be deleted';
   end if;
   if tg_op = 'UPDATE' and row(new.operation_id, new.namespace_id) is distinct from row(old.operation_id, old.namespace_id) then
     raise exception using errcode = '55000', message = 'blob cleanup authority identity is immutable';
@@ -2778,7 +2786,7 @@ begin
   if exists (select 1 from jsonb_each(v) field where jsonb_typeof(field.value) not in ('string', 'number', 'null')
     or (field.value = 'null'::jsonb and field.key not in (
       'source_recovery_id','origin_owner_id','origin_owner_generation','origin_owner_expires_at',
-      'draft_id','plan_digest','archive_digest','namespace_id','incarnation_id','publication_id',
+      'draft_id','plan_digest','archive_digest','namespace_id','incarnation_id','storage_binding','publication_id',
       'target_record_id','target_attachment_id','anchor_inode','anchor_nonce','version',
       'cleanup_expires_at','operation_id','operation_owner_id','operation_generation','operation_expires_at',
       'expected_version','orphaned_before','preview_publication_id','preview_media_type'))) then
@@ -3172,19 +3180,34 @@ returns public.record_write_obligations language plpgsql security definer set se
 as $$
 declare v jsonb; o public.record_write_obligations; route record;
 begin
+  if $1 is null or octet_length($1) not between 1 and 65536 then
+    raise exception using errcode='22023',message='invalid write registration size';
+  end if;
+  if json_typeof(convert_from($1,'UTF8')::json) is distinct from 'object'
+    or (select count(*) from json_each(convert_from($1,'UTF8')::json)) <>
+       (select count(distinct f.key) from json_each(convert_from($1,'UTF8')::json) f) then
+    raise exception using errcode='22023',message='duplicate write registration fields';
+  end if;
   perform record_platform_internal.local_blob_direct_login();
   v := record_platform_internal.local_blob_command($1, array[
     'obligation_id','writer_instance','request_seq','project_id','origin_kind','origin_id','origin_generation',
     'origin_owner_id','origin_owner_generation','origin_owner_expires_at','draft_id','plan_digest','archive_digest',
-    'namespace_id','incarnation_id','backend_kind','key','sha256','size','publication_id','target_record_id','target_attachment_id']);
+    'namespace_id','incarnation_id','backend_kind','storage_binding','key','sha256','size','publication_id','target_record_id','target_attachment_id']);
   if v->>'project_id' is distinct from 'default' then
     raise exception using errcode = '22023', message = 'invalid write project';
+  end if;
+  if (v->>'backend_kind' = 'local' and v->'storage_binding' <> 'null'::jsonb)
+    or (v->>'backend_kind' = 's3' and (jsonb_typeof(v->'storage_binding') is distinct from 'string'
+      or v->>'storage_binding' !~ '^[0-9a-f]{64}$'))
+    or v->>'backend_kind' not in ('local','s3') then
+    raise exception using errcode='22023',message='invalid write storage binding';
   end if;
   -- Exact replay resolves an unknown registration without requiring its former
   -- owner to remain live. It cannot grant another physical dispatch.
   select * into o from public.record_write_obligations where obligation_id = v->>'obligation_id';
   if found then
-    if o.registration_command is distinct from $1 or o.writer_principal <> session_user then
+    if o.registration_command is distinct from $1 or o.writer_principal <> session_user
+      or encode(o.storage_binding,'hex') is distinct from v->>'storage_binding' then
       raise exception using errcode = '55000', message = 'write registration replay conflict';
     end if;
     return o;
@@ -3212,14 +3235,14 @@ begin
   end if;
   insert into public.record_write_obligations(obligation_id, writer_instance, request_seq, writer_principal,
     project_id, origin_kind, origin_id, origin_generation, origin_owner_id, origin_owner_generation,
-    origin_owner_expires_at, plan_digest, archive_digest, namespace_id, incarnation_id, backend_kind,
+    origin_owner_expires_at, plan_digest, archive_digest, namespace_id, incarnation_id, backend_kind, storage_binding,
     canonical_key, sha256_digest, size_bytes, publication_id, record_id, record_epoch,
     registration_command, temporary_key, quota_settlement_id)
   values (v->>'obligation_id', (v->>'writer_instance')::uuid, (v->>'request_seq')::bigint, session_user,
     v->>'project_id', v->>'origin_kind', v->>'origin_id', (v->>'origin_generation')::bigint,
     v->>'origin_owner_id', (v->>'origin_owner_generation')::bigint, (v->>'origin_owner_expires_at')::timestamptz,
     decode(v->>'plan_digest', 'hex'), decode(v->>'archive_digest', 'hex'),
-    (v->>'namespace_id')::uuid, (v->>'incarnation_id')::uuid, v->>'backend_kind', v->>'key',
+    (v->>'namespace_id')::uuid, (v->>'incarnation_id')::uuid, v->>'backend_kind', decode(v->>'storage_binding','hex'), v->>'key',
     decode(v->>'sha256', 'hex'), (v->>'size')::bigint, v->>'publication_id', route.record_id, route.record_epoch,
     $1, case when v->>'backend_kind' = 'local' then 'sha256/.blob-tmp-' || (v->>'obligation_id') end, v->>'obligation_id')
   returning * into o;
@@ -3253,6 +3276,10 @@ begin
     or v->>'dispatch_id' is null then
     raise exception using errcode = '42501', message = 'write dispatch identity conflict';
   end if;
+  original := convert_from(o.registration_command, 'UTF8')::jsonb;
+  if encode(o.storage_binding,'hex') is distinct from original->>'storage_binding' then
+    raise exception using errcode='55000',message='write dispatch storage binding conflict';
+  end if;
   -- A replay reports the original dispatch decision; it does not create a new
   -- dispatch or waive the writer's duty to avoid a second physical write.
   if o.dispatch_id is not null then
@@ -3260,6 +3287,9 @@ begin
       raise exception using errcode='55000',message='write dispatch replay conflict';
     end if;
     return o;
+  end if;
+  if o.backend_kind='s3' and o.storage_binding is null then
+    raise exception using errcode='55000',message='write dispatch storage binding unavailable';
   end if;
   if o.backend_kind = 'local' then
     perform record_platform_internal.local_blob_admission(o.namespace_id, o.incarnation_id);
@@ -3271,7 +3301,6 @@ begin
   else
     perform public.source_application_admit();
   end if;
-  original := convert_from(o.registration_command, 'UTF8')::jsonb;
   if o.origin_kind in ('import_archive','import_attachment') then
     select array(select x.record_id collate "C" from (
       select m.target_id as record_id from public.record_import_plans p
@@ -3402,6 +3431,9 @@ begin
     or v->>'outcome' is null or v->>'outcome' not in ('materialized', 'failed', 'remote_unknown') then
     raise exception using errcode = '42501', message = 'write return identity conflict';
   end if;
+  if encode(o.storage_binding,'hex') is distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding' then
+    raise exception using errcode='55000',message='write return storage binding conflict';
+  end if;
   if o.return_command is not null then
     if o.return_command is distinct from $1 then
       raise exception using errcode = '55000', message = 'write return replay conflict';
@@ -3531,6 +3563,8 @@ begin
   perform 1 from public.attachment_quota_accounts where project_id = o.project_id for update;
   lock table public.blob_objects in share row exclusive mode;
   lock table public.attachment_upload_parts in share row exclusive mode;
+  perform record_platform_internal.record_portability_v1_gc_barrier('local',o.namespace_id,o.incarnation_id,
+    o.canonical_key,o.object_version,null);
   perform 1 from public.record_write_obligations w where w.namespace_id = o.namespace_id and w.canonical_key = o.canonical_key
     order by w.obligation_id for update;
   select * into strict o from public.record_write_obligations w where w.obligation_id = o.obligation_id;
@@ -3602,6 +3636,8 @@ begin
   perform 1 from public.attachment_quota_accounts where project_id = o.project_id for update;
   lock table public.blob_objects in share row exclusive mode;
   lock table public.attachment_upload_parts in share row exclusive mode;
+  perform record_platform_internal.record_portability_v1_gc_barrier('local',o.namespace_id,o.incarnation_id,
+    o.canonical_key,o.object_version,null);
   select * into strict o from public.record_write_obligations w where w.obligation_id = o.obligation_id for update;
   if $2 then
     perform record_platform_internal.local_blob_cleanup_operation(v->>'operation_id',v->>'operation_owner_id',
@@ -3866,14 +3902,44 @@ create table public.local_blob_gc_obligations (
   primary key(deletion_id,obligation_id)
 );
 
-create function record_platform_internal.local_blob_gc_authority(jsonb,boolean)
+create function record_platform_internal.local_blob_gc_authority(jsonb,boolean,bytea,boolean)
 returns text language plpgsql security definer set search_path=pg_catalog
 as $$
-declare v alias for $1; target_record text;
+declare v alias for $1; target_record text; authority jsonb; existing public.blob_gc_deletions;
 begin
   perform record_platform_internal.local_blob_direct_login();
   perform record_platform_internal.local_blob_admission((v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid);
-  if $2 then
+  if $3 is not null then
+    if not $2 then raise exception using errcode='42501',message='legacy authority requires purge'; end if;
+    authority:=record_platform_internal.legacy_adapter_lock($3,'record_portability');
+    target_record:=authority->>'record_id';
+    if (v->>'operation_id',v->>'operation_owner_id',(v->>'operation_generation')::bigint,
+        (v->>'operation_expires_at')::timestamptz)
+      is distinct from (authority->>'operation_id',authority->>'owner_id',(authority->>'owner_generation')::bigint,
+        (authority->>'owner_expires_at')::timestamptz)
+      or not record_platform_internal.record_portability_v1_eligible(authority->>'operation_id')
+      or not exists(select 1 from public.record_portability_v1_preparations p
+        join public.record_portability_v1_targets t using(operation_id)
+        cross join lateral (select record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id) expected_version) identity
+        where p.operation_id=authority->>'operation_id' and p.record_id=target_record
+          and (p.ledger_domain,p.ledger_sequence,p.ledger_entry_hash,p.witness_proof_digest,p.surface_digest)
+            is not distinct from (decode(authority->>'ledger_domain','hex'),(authority->>'ledger_sequence')::bigint,
+              decode(authority->>'ledger_entry_hash','hex'),decode(authority->>'witness_proof_digest','hex'),decode(authority->>'surface_digest','hex'))
+          and t.disposition='local' and t.local_deletion_id=v->>'deletion_id'
+          and t.namespace_id=(v->>'namespace_id')::uuid and t.incarnation_id=(v->>'incarnation_id')::uuid
+          and identity.expected_version is not null
+          and ((v ? 'key' and t.blob_key=v->>'key'
+            and identity.expected_version is not distinct from v->>'expected_version')
+            or (not (v ? 'key') and exists(select 1 from public.blob_gc_deletions g
+              where g.deletion_id=t.local_deletion_id and g.operation_id=t.operation_id and g.local_contract_version=2
+                and (g.namespace_id,g.incarnation_id,g.blob_key) is not distinct from (t.namespace_id,t.incarnation_id,t.blob_key)
+                and (not g.final_identity_bound or not g.final_was_present
+                  or g.object_version=identity.expected_version))))
+          and (not (v ? 'version') or v->>'version' is null
+            or v->>'version'=identity.expected_version)) then
+      raise exception using errcode='42501',message='legacy local GC authority unavailable';
+    end if;
+  elsif $2 then
     select g.record_id into strict target_record from public.record_deletion_gates g where g.operation_id=v->>'operation_id';
     perform record_platform_internal.local_blob_cleanup_operation(v->>'operation_id',v->>'operation_owner_id',
       (v->>'operation_generation')::bigint,(v->>'operation_expires_at')::timestamptz,target_record);
@@ -3881,33 +3947,64 @@ begin
     or v->>'operation_generation' is not null or v->>'operation_expires_at' is not null then
     raise exception using errcode='42501',message='ordinary local GC cannot use purge authority';
   end if;
+  if $4 then
+    -- Cleanup resumes by preparing the same task again. A task that has
+    -- already left pending must satisfy the strict barrier, not the pending
+    -- creation allowance, before it can be returned for claim/replay.
+    select g.* into existing from public.blob_gc_deletions g where g.deletion_id=v->>'deletion_id';
+    if found and existing.deletion_state<>'pending' then
+      if (existing.namespace_id,existing.incarnation_id,existing.blob_key,existing.operation_id)
+        is distinct from ((v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid,v->>'key',v->>'operation_id') then
+        raise exception using errcode='55000',message='local GC task identity conflict';
+      end if;
+      perform record_platform_internal.record_portability_v1_gc_barrier(existing.backend_kind,existing.namespace_id,
+        existing.incarnation_id,existing.blob_key,existing.object_version,existing.deletion_id);
+      return target_record;
+    end if;
+    perform record_platform_internal.record_portability_v1_gc_prepare_barrier(v,$2,$3);
+    return target_record;
+  end if;
+  if v ? 'deletion_id' then
+    select g.* into existing from public.blob_gc_deletions g where g.deletion_id=v->>'deletion_id';
+    if found then
+      perform record_platform_internal.record_portability_v1_gc_barrier(existing.backend_kind,existing.namespace_id,
+        existing.incarnation_id,existing.blob_key,existing.object_version,existing.deletion_id);
+    elsif v ? 'key' then
+      perform record_platform_internal.record_portability_v1_gc_barrier('local',(v->>'namespace_id')::uuid,
+        (v->>'incarnation_id')::uuid,v->>'key',v->>'expected_version',v->>'deletion_id');
+    end if;
+  end if;
   return target_record;
 end $$;
 
-create function record_platform_internal.local_blob_gc_prepare(bytea,boolean)
+create function record_platform_internal.local_blob_gc_prepare(bytea,boolean,bytea)
 returns public.blob_gc_deletions language plpgsql security definer set search_path=pg_catalog
 as $$
 declare v jsonb; g public.blob_gc_deletions; target_record text;
 begin
   v:=record_platform_internal.local_blob_command($1,array['deletion_id','namespace_id','incarnation_id','key',
     'operation_id','operation_owner_id','operation_generation','operation_expires_at','expected_version','orphaned_before','publication_id']);
-  target_record:=record_platform_internal.local_blob_gc_authority(v,$2);
+  target_record:=record_platform_internal.local_blob_gc_authority(v,$2,$3,true);
   perform 1 from public.attachment_quota_accounts where project_id='default' for update;
   lock table public.blob_objects in share row exclusive mode;
   lock table public.attachment_upload_parts in share row exclusive mode;
   select * into g from public.blob_gc_deletions where deletion_id=v->>'deletion_id' for update;
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  perform record_platform_internal.local_blob_gc_authority(v,$2,$3,true);
   if g.deletion_id is not null then
     if g.local_contract_version<>2 or row(g.namespace_id,g.incarnation_id,g.blob_key,g.operation_id) is distinct from
       row((v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid,v->>'key',v->>'operation_id') then
       raise exception using errcode='55000',message='local GC task identity conflict';
     end if;
-    if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
     return g;
   end if;
   if v->>'expected_version' is not null and not exists(select 1 from public.blob_objects b
     where b.namespace_id=(v->>'namespace_id')::uuid and b.blob_key=v->>'key' and b.object_version=v->>'expected_version'
-      and (v->>'orphaned_before' is null or b.created_at<=(v->>'orphaned_before')::timestamptz)) then
+      and (v->>'orphaned_before' is null or b.created_at<=(v->>'orphaned_before')::timestamptz))
+    and ($3 is null or exists(select 1 from public.blob_objects b
+      where b.namespace_id=(v->>'namespace_id')::uuid and b.blob_key=v->>'key')
+      or not exists(select 1 from public.record_write_obligations o
+        where o.namespace_id=(v->>'namespace_id')::uuid and o.incarnation_id=(v->>'incarnation_id')::uuid
+          and o.canonical_key=v->>'key' and 'local-v2-'||o.obligation_id=v->>'expected_version')) then
     raise exception using errcode='55000',message='local GC discovery changed';
   end if;
   if v->>'publication_id' is not null and not exists(select 1 from public.blob_publication_intents p
@@ -3946,36 +4043,48 @@ begin
     values(v->>'deletion_id','default',case when $2 then 'permanent' else 'ordinary' end,v->>'key',
       decode(substr(v->>'key',8),'hex'),'local','pending',(v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid,
       v->>'operation_id',2) returning * into g;
-  if $2 then
-    perform record_platform_internal.local_blob_gc_authority(v,true);
+  if not $2 then
+    perform 1 from public.record_write_obligations o where o.namespace_id=g.namespace_id
+      and o.incarnation_id=g.incarnation_id and o.canonical_key=g.blob_key
+      order by o.obligation_id collate "C" for update;
+    insert into public.local_blob_gc_obligations(deletion_id,obligation_id,seal_obligation)
+      select g.deletion_id,o.obligation_id,true from public.record_write_obligations o
+      where o.namespace_id=g.namespace_id and o.incarnation_id=g.incarnation_id and o.canonical_key=g.blob_key
+        and o.cleanup_completed_at is null and o.operation_id is null
+        and coalesce(record_platform_internal.local_blob_origin_closed(o.obligation_id),false)
+      on conflict (deletion_id,obligation_id) do update set seal_obligation=true
+        where not public.local_blob_gc_obligations.seal_obligation;
   end if;
+  perform record_platform_internal.local_blob_gc_authority(v,$2,$3,true);
   return g;
 end $$;
 
 create function record_platform_internal.local_blob_gc_snapshot(text)
 returns jsonb language sql stable security definer set search_path=pg_catalog
 as $$
+  -- The claim records its inventory links before dispatch. A later writer for
+  -- the same key must not be included when a completed task is replayed.
   select jsonb_build_object('task',to_jsonb(g),'referenced',record_platform_internal.local_blob_key_referenced(g.namespace_id,g.blob_key),
     'obligations',coalesce((select jsonb_agg(to_jsonb(o)||jsonb_build_object('sha256',encode(o.sha256_digest,'hex')) order by o.obligation_id)
-      from public.record_write_obligations o where o.namespace_id=g.namespace_id and o.incarnation_id=g.incarnation_id
-        and o.canonical_key=g.blob_key),'[]'::jsonb))
+      from public.local_blob_gc_obligations l join public.record_write_obligations o on o.obligation_id=l.obligation_id
+      where l.deletion_id=g.deletion_id),'[]'::jsonb))
   from public.blob_gc_deletions g where g.deletion_id=$1
 $$;
 
-create function record_platform_internal.local_blob_gc_claim(bytea,boolean)
+create function record_platform_internal.local_blob_gc_claim(bytea,boolean,bytea)
 returns jsonb language plpgsql security definer set search_path=pg_catalog
 as $$
-declare v jsonb; g public.blob_gc_deletions; result jsonb;
+declare v jsonb; g public.blob_gc_deletions; result jsonb; expected_version text;
 begin
   v:=record_platform_internal.local_blob_command($1,array['deletion_id','namespace_id','incarnation_id',
     'anchor_inode','anchor_nonce','cleanup_owner_id','cleanup_generation','cleanup_expires_at','cleanup_dispatch_id',
     'operation_id','operation_owner_id','operation_generation','operation_expires_at']);
-  perform record_platform_internal.local_blob_gc_authority(v,$2);
+  perform record_platform_internal.local_blob_gc_authority(v,$2,$3,false);
   perform 1 from public.attachment_quota_accounts where project_id='default' for update;
   lock table public.blob_objects in share row exclusive mode;
   lock table public.attachment_upload_parts in share row exclusive mode;
   select * into strict g from public.blob_gc_deletions where deletion_id=v->>'deletion_id' for update;
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
   if g.local_contract_version<>2 or row(g.namespace_id,g.incarnation_id,g.operation_id) is distinct from
     row((v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid,v->>'operation_id')
     or not exists(select 1 from public.local_blob_key_anchors a where a.namespace_id=g.namespace_id
@@ -3985,7 +4094,7 @@ begin
   end if;
   if g.deletion_state='completed' then
     result:=record_platform_internal.local_blob_gc_snapshot(g.deletion_id);
-    if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+    if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
     return result;
   end if;
   if row(coalesce(g.owner_generation,0),g.lease_expires_at) is distinct from
@@ -4005,51 +4114,103 @@ begin
     and o.cleanup_owner_id<>v->>'cleanup_owner_id' and o.cleanup_expires_at>clock_timestamp()) then
     raise exception using errcode='55000',message='local responsibility cleanup claim is live';
   end if;
+  if $3 is not null then
+    select record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id)
+      into expected_version from public.record_portability_v1_targets t
+      where t.operation_id=g.operation_id and t.local_deletion_id=g.deletion_id and t.disposition='local';
+    if expected_version is null then
+      raise exception using errcode='55000',message='portability V1 local source identity unavailable';
+    end if;
+    -- Only an independently proven completed cleanup for a different exact
+    -- version is history. Unknown, unfinished or same-version responsibility
+    -- must remain in the current immutable inventory.
+    if exists(select 1 from public.record_write_obligations o
+      where (o.namespace_id,o.incarnation_id,o.canonical_key)=(g.namespace_id,g.incarnation_id,g.blob_key)
+        and not exists(select 1 from public.record_portability_v1_targets t
+          join public.record_portability_v1_obligations c on (c.operation_id,c.target_id)=(t.operation_id,t.target_id)
+          where t.operation_id=g.operation_id and t.local_deletion_id=g.deletion_id and c.obligation_id=o.obligation_id)
+        and not (o.cleanup_completed_at is not null and o.quota_settled_at is not null
+          and ((o.object_version is not null and o.object_version<>expected_version
+              and record_platform_internal.record_portability_v1_local_owner_version(o))
+            or (o.object_version is null
+              and record_platform_internal.record_portability_v1_local_source_expected(to_jsonb(o),o.obligation_id) is not null
+              and record_platform_internal.record_portability_v1_local_source_expected(to_jsonb(o),o.obligation_id)<>expected_version))
+          and exists(select 1 from public.local_blob_gc_obligations old_link
+            join public.blob_gc_deletions old_task on old_task.deletion_id=old_link.deletion_id
+            where old_link.obligation_id=o.obligation_id and old_link.seal_obligation
+              and old_task.deletion_id<>g.deletion_id
+              and (old_task.namespace_id,old_task.incarnation_id,old_task.blob_key,old_task.sha256_digest)
+                is not distinct from (o.namespace_id,o.incarnation_id,o.canonical_key,o.sha256_digest)
+              and ((old_task.final_was_present and old_task.object_version=case when o.object_version is not null then o.object_version
+                else record_platform_internal.record_portability_v1_local_source_expected(to_jsonb(o),o.obligation_id) end)
+                or (old_task.final_was_present is false and old_task.object_version is null))
+              and (o.cleanup_outcome,o.cleanup_receipt) is not distinct from (old_task.physical_delete_result,old_task.receipt_digest)
+              and record_platform_internal.record_portability_v1_local_task_proof(old_task)))) then
+      raise exception using errcode='55000',message='portability V1 local source inventory is incomplete';
+    end if;
+    if exists(select 1 from public.record_portability_v1_targets t
+      join public.record_portability_v1_obligations c on (c.operation_id,c.target_id)=(t.operation_id,t.target_id)
+      join public.record_write_obligations o on o.obligation_id=c.obligation_id
+      where t.operation_id=g.operation_id and t.local_deletion_id=g.deletion_id and
+        (o.operation_id is distinct from g.operation_id or o.cleanup_completed_at is not null
+          or (o.namespace_id,o.incarnation_id,o.canonical_key) is distinct from (g.namespace_id,g.incarnation_id,g.blob_key))) then
+      raise exception using errcode='55000',message='portability V1 local source assignment is incomplete';
+    end if;
+    insert into public.local_blob_gc_obligations(deletion_id,obligation_id,seal_obligation)
+      select g.deletion_id,c.obligation_id,true from public.record_portability_v1_targets t
+      join public.record_portability_v1_obligations c on (c.operation_id,c.target_id)=(t.operation_id,t.target_id)
+      where t.operation_id=g.operation_id and t.local_deletion_id=g.deletion_id and t.disposition='local'
+      on conflict (deletion_id,obligation_id) do update set seal_obligation=true
+        where not public.local_blob_gc_obligations.seal_obligation;
+  else
+    insert into public.local_blob_gc_obligations(deletion_id,obligation_id,seal_obligation)
+      select g.deletion_id,o.obligation_id,o.cleanup_completed_at is null
+        and o.operation_id is not distinct from g.operation_id
+        and (g.operation_id is not null or coalesce(record_platform_internal.local_blob_origin_closed(o.obligation_id),false))
+      from public.record_write_obligations o where o.namespace_id=g.namespace_id and o.incarnation_id=g.incarnation_id
+        and o.canonical_key=g.blob_key
+      on conflict (deletion_id,obligation_id) do update set seal_obligation=true
+        where excluded.seal_obligation and not public.local_blob_gc_obligations.seal_obligation;
+  end if;
   update public.blob_gc_deletions set deletion_state='claimed',owner_id=v->>'cleanup_owner_id',
     owner_generation=coalesce(owner_generation,0)+1,attempt=coalesce(attempt,0)+1,lease_expires_at=clock_timestamp()+interval '1 minute',
     cleanup_dispatch_id=(v->>'cleanup_dispatch_id')::uuid,retry_at=null,updated_at=clock_timestamp()
     where deletion_id=g.deletion_id returning * into g;
-  insert into public.local_blob_gc_obligations(deletion_id,obligation_id,seal_obligation)
-    select g.deletion_id,o.obligation_id,o.cleanup_completed_at is null
-      and o.operation_id is not distinct from g.operation_id
-      and (g.operation_id is not null or coalesce(record_platform_internal.local_blob_origin_closed(o.obligation_id),false))
-    from public.record_write_obligations o where o.namespace_id=g.namespace_id and o.incarnation_id=g.incarnation_id
-      and o.canonical_key=g.blob_key on conflict do nothing;
   update public.record_write_obligations o set handed_off_at=coalesce(handed_off_at,clock_timestamp()),
     outcome=case when dispatched_at is null then 'local_excluded' else outcome end
     where exists(select 1 from public.local_blob_gc_obligations l where l.deletion_id=g.deletion_id
       and l.obligation_id=o.obligation_id and l.seal_obligation) and o.cleanup_completed_at is null;
   result:=record_platform_internal.local_blob_gc_snapshot(g.deletion_id);
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
   return result;
 end $$;
 
-create function record_platform_internal.local_blob_gc_current(jsonb,boolean)
+create function record_platform_internal.local_blob_gc_current(jsonb,boolean,bytea)
 returns public.blob_gc_deletions language plpgsql security definer set search_path=pg_catalog
 as $$
 declare v alias for $1; g public.blob_gc_deletions;
 begin
-  perform record_platform_internal.local_blob_gc_authority(v,$2);
+  perform record_platform_internal.local_blob_gc_authority(v,$2,$3,false);
   select * into strict g from public.blob_gc_deletions where deletion_id=v->>'deletion_id' for update;
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
   if g.local_contract_version<>2 or row(g.namespace_id,g.incarnation_id,g.operation_id,g.owner_id,g.owner_generation,g.lease_expires_at,g.cleanup_dispatch_id)
     is distinct from row((v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid,v->>'operation_id',v->>'cleanup_owner_id',
       (v->>'cleanup_generation')::bigint,(v->>'cleanup_expires_at')::timestamptz,(v->>'cleanup_dispatch_id')::uuid)
     or (g.deletion_state<>'completed' and (g.deletion_state<>'claimed' or g.lease_expires_at<=clock_timestamp())) then
     raise exception using errcode='42501',message='local GC current claim unavailable';
   end if;
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
   return g;
 end $$;
 
-create function record_platform_internal.local_blob_gc_resolve(bytea,boolean)
+create function record_platform_internal.local_blob_gc_resolve(bytea,boolean,bytea)
 returns jsonb language plpgsql security definer set search_path=pg_catalog
 as $$
 declare v jsonb; g public.blob_gc_deletions; result jsonb;
 begin
   v:=record_platform_internal.local_blob_command($1,array['deletion_id','namespace_id','incarnation_id','cleanup_owner_id',
     'cleanup_dispatch_id','operation_id','operation_owner_id','operation_generation','operation_expires_at']);
-  perform record_platform_internal.local_blob_gc_authority(v,$2);
+  perform record_platform_internal.local_blob_gc_authority(v,$2,$3,false);
   select * into strict g from public.blob_gc_deletions where deletion_id=v->>'deletion_id';
   if g.local_contract_version<>2 or row(g.namespace_id,g.incarnation_id,g.operation_id,g.owner_id,g.cleanup_dispatch_id)
     is distinct from row((v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid,v->>'operation_id',v->>'cleanup_owner_id',(v->>'cleanup_dispatch_id')::uuid)
@@ -4057,11 +4218,11 @@ begin
     raise exception using errcode='42501',message='local GC dispatch readback unavailable';
   end if;
   result:=record_platform_internal.local_blob_gc_snapshot(g.deletion_id);
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
   return result;
 end $$;
 
-create function record_platform_internal.local_blob_gc_bind_final(bytea,boolean)
+create function record_platform_internal.local_blob_gc_bind_final(bytea,boolean,bytea)
 returns jsonb language plpgsql security definer set search_path=pg_catalog
 as $$
 declare v jsonb; g public.blob_gc_deletions; expected_size bigint; present boolean; result jsonb;
@@ -4069,10 +4230,10 @@ begin
   v:=record_platform_internal.local_blob_command($1,array['deletion_id','namespace_id','incarnation_id','cleanup_owner_id',
     'cleanup_generation','cleanup_expires_at','cleanup_dispatch_id','operation_id','operation_owner_id','operation_generation',
     'operation_expires_at','version','device','inode','inventory_digest']);
-  g:=record_platform_internal.local_blob_gc_current(v,$2);
+  g:=record_platform_internal.local_blob_gc_current(v,$2,$3);
   if g.deletion_state='completed' then
     result:=record_platform_internal.local_blob_gc_snapshot(g.deletion_id);
-    if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+    if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
     return result;
   end if;
   present:=v->>'version' is not null;
@@ -4099,11 +4260,11 @@ begin
       where deletion_id=g.deletion_id;
   end if;
   result:=record_platform_internal.local_blob_gc_snapshot(g.deletion_id);
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
   return result;
 end $$;
 
-create function record_platform_internal.local_blob_gc_complete(bytea,boolean)
+create function record_platform_internal.local_blob_gc_complete(bytea,boolean,bytea)
 returns jsonb language plpgsql security definer set search_path=pg_catalog
 as $$
 declare v jsonb; g public.blob_gc_deletions; retained boolean; removed bigint; receipt bytea; result jsonb;
@@ -4111,15 +4272,15 @@ begin
   v:=record_platform_internal.local_blob_command($1,array['deletion_id','namespace_id','incarnation_id','cleanup_owner_id',
     'cleanup_generation','cleanup_expires_at','cleanup_dispatch_id','operation_id','operation_owner_id','operation_generation',
     'operation_expires_at','outcome','inventory_digest']);
-  perform record_platform_internal.local_blob_gc_authority(v,$2);
+  perform record_platform_internal.local_blob_gc_authority(v,$2,$3,false);
   perform 1 from public.attachment_quota_accounts where project_id='default' for update;
   lock table public.blob_objects in share row exclusive mode;
   lock table public.attachment_upload_parts in share row exclusive mode;
-  g:=record_platform_internal.local_blob_gc_current(v,$2);
+  g:=record_platform_internal.local_blob_gc_current(v,$2,$3);
   if g.deletion_state='completed' then
     if g.completion_command is distinct from $1 then raise exception using errcode='55000',message='local GC completion replay conflict'; end if;
     result:=record_platform_internal.local_blob_gc_snapshot(g.deletion_id);
-    if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+    if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
     return result;
   end if;
   retained:=record_platform_internal.local_blob_key_referenced(g.namespace_id,g.blob_key);
@@ -4154,35 +4315,35 @@ begin
   update public.blob_gc_deletions set deletion_state='completed',physical_delete_result=v->>'outcome',receipt_digest=receipt,
     completion_command=$1,completed_at=clock_timestamp(),updated_at=clock_timestamp() where deletion_id=g.deletion_id;
   result:=record_platform_internal.local_blob_gc_snapshot(g.deletion_id);
-  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true); end if;
+  if $2 then perform record_platform_internal.local_blob_gc_authority(v,true,$3,false); end if;
   return result;
 end $$;
 
 create function public.local_blob_gc_prepare(bytea) returns public.blob_gc_deletions language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_prepare($1,false) $$;
+as $$ select record_platform_internal.local_blob_gc_prepare($1,false,null) $$;
 create function public.local_blob_purge_prepare(bytea) returns public.blob_gc_deletions language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_prepare($1,true) $$;
+as $$ select record_platform_internal.local_blob_gc_prepare($1,true,null) $$;
 create function public.local_blob_gc_claim(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_claim($1,false) $$;
+as $$ select record_platform_internal.local_blob_gc_claim($1,false,null) $$;
 create function public.local_blob_gc_resolve(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_resolve($1,false) $$;
+as $$ select record_platform_internal.local_blob_gc_resolve($1,false,null) $$;
 create function public.local_blob_gc_bind_final(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_bind_final($1,false) $$;
+as $$ select record_platform_internal.local_blob_gc_bind_final($1,false,null) $$;
 create function public.local_blob_gc_complete(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_complete($1,false) $$;
+as $$ select record_platform_internal.local_blob_gc_complete($1,false,null) $$;
 create function public.local_blob_purge_task_claim(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_claim($1,true) $$;
+as $$ select record_platform_internal.local_blob_gc_claim($1,true,null) $$;
 create function public.local_blob_purge_task_resolve(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_resolve($1,true) $$;
+as $$ select record_platform_internal.local_blob_gc_resolve($1,true,null) $$;
 create function public.local_blob_purge_bind_final(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_bind_final($1,true) $$;
+as $$ select record_platform_internal.local_blob_gc_bind_final($1,true,null) $$;
 create function public.local_blob_purge_task_complete(bytea) returns jsonb language sql security definer set search_path=pg_catalog
-as $$ select record_platform_internal.local_blob_gc_complete($1,true) $$;
-revoke all on function record_platform_internal.local_blob_gc_authority(jsonb,boolean),
-  record_platform_internal.local_blob_gc_prepare(bytea,boolean),record_platform_internal.local_blob_gc_snapshot(text),
-  record_platform_internal.local_blob_gc_claim(bytea,boolean),record_platform_internal.local_blob_gc_current(jsonb,boolean),
-  record_platform_internal.local_blob_gc_resolve(bytea,boolean),record_platform_internal.local_blob_gc_bind_final(bytea,boolean),
-  record_platform_internal.local_blob_gc_complete(bytea,boolean),public.local_blob_gc_prepare(bytea),public.local_blob_purge_prepare(bytea),
+as $$ select record_platform_internal.local_blob_gc_complete($1,true,null) $$;
+revoke all on function record_platform_internal.local_blob_gc_authority(jsonb,boolean,bytea,boolean),
+  record_platform_internal.local_blob_gc_prepare(bytea,boolean,bytea),record_platform_internal.local_blob_gc_snapshot(text),
+  record_platform_internal.local_blob_gc_claim(bytea,boolean,bytea),record_platform_internal.local_blob_gc_current(jsonb,boolean,bytea),
+  record_platform_internal.local_blob_gc_resolve(bytea,boolean,bytea),record_platform_internal.local_blob_gc_bind_final(bytea,boolean,bytea),
+  record_platform_internal.local_blob_gc_complete(bytea,boolean,bytea),public.local_blob_gc_prepare(bytea),public.local_blob_purge_prepare(bytea),
   public.local_blob_gc_claim(bytea),public.local_blob_gc_resolve(bytea),public.local_blob_gc_bind_final(bytea),public.local_blob_gc_complete(bytea),
   public.local_blob_purge_task_claim(bytea),public.local_blob_purge_task_resolve(bytea),public.local_blob_purge_bind_final(bytea),
   public.local_blob_purge_task_complete(bytea) from public;
@@ -4217,6 +4378,13 @@ begin
   end if;
   select * into strict o from public.record_write_obligations where obligation_id=v->>'obligation_id' for update;
   select * into strict p from public.blob_publication_intents where publication_id=v->>'publication_id' for update;
+  if encode(o.storage_binding,'hex') is distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+    or o.dispatch_id is null or o.return_command is null
+    or (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id' is distinct from o.dispatch_id::text
+    or (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome' is distinct from o.outcome
+    or (convert_from(o.return_command,'UTF8')::jsonb)->>'version' is distinct from o.object_version then
+    raise exception using errcode='55000',message='publication storage provenance conflict';
+  end if;
   if o.writer_principal<>session_user or o.outcome<>'materialized' or o.dispatched_at is null or o.returned_at is null
     or o.object_version is null or o.handed_off_at is not null or o.cleanup_completed_at is not null
     or row(o.publication_id,o.project_id,o.origin_kind,o.origin_id,o.origin_generation,o.backend_kind,o.namespace_id,
@@ -4231,6 +4399,9 @@ begin
       raise exception using errcode='55000',message='publication version replay conflict';
     end if;
     return p;
+  end if;
+  if o.backend_kind='s3' and o.storage_binding is null then
+    raise exception using errcode='55000',message='publication storage binding unavailable';
   end if;
   update public.blob_publication_intents set object_version=o.object_version,obligation_id=o.obligation_id,
     publication_state='published' where publication_id=p.publication_id returning * into p;
@@ -4256,7 +4427,15 @@ begin
   end if;
   select * into strict route from record_platform_internal.record_write_origin(convert_from(o.registration_command,'UTF8')::jsonb);
   select * into strict o from public.record_write_obligations where obligation_id=v->>'obligation_id' for update;
+  if encode(o.storage_binding,'hex') is distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+    or o.dispatch_id is null or o.dispatched_at is null or o.return_command is null
+    or (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id' is distinct from o.dispatch_id::text
+    or (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome' is distinct from o.outcome
+    or (convert_from(o.return_command,'UTF8')::jsonb)->>'version' is distinct from o.object_version then
+    raise exception using errcode='55000',message='artifact storage provenance conflict';
+  end if;
   if o.writer_principal<>session_user or o.outcome<>'materialized' or o.returned_at is null or o.object_version is null
+    or (o.backend_kind='s3' and o.storage_binding is null)
     or o.handed_off_at is not null or o.cleanup_owner_id is not null or o.cleanup_completed_at is not null
     or row(o.record_id,o.record_epoch) is distinct from row(route.record_id,route.record_epoch) then
     raise exception using errcode='55000',message='artifact publication authority unavailable';
@@ -4288,6 +4467,17 @@ begin
       is distinct from row(v->>'content_type',v->>'backend_kind',nullif(v->>'namespace_id','')::uuid,v->>'key',v->>'version',
         decode(v->>'sha256','hex'),(v->>'size')::bigint,(v->>'expires_at')::timestamptz,v->>'obligation_id') or a.revoked_at is not null then
       raise exception using errcode='55000',message='export artifact publication replay conflict';
+    end if;
+    if a.obligation_id is not null and not exists(select 1 from public.record_write_obligations w
+      where w.obligation_id=a.obligation_id and w.origin_kind='export_artifact' and w.origin_id=a.export_job_id
+        and row(w.backend_kind,w.namespace_id,w.canonical_key,w.object_version,w.sha256_digest,w.size_bytes)
+          is not distinct from row(a.backend_kind,a.namespace_id,a.blob_key,a.object_version_id,a.sha256,a.byte_size)
+        and w.outcome='materialized' and w.dispatch_id is not null and w.dispatched_at is not null and w.returned_at is not null
+        and encode(w.storage_binding,'hex') is not distinct from (convert_from(w.registration_command,'UTF8')::jsonb)->>'storage_binding'
+        and (convert_from(w.return_command,'UTF8')::jsonb)->>'dispatch_id'=w.dispatch_id::text
+        and (convert_from(w.return_command,'UTF8')::jsonb)->>'outcome'=w.outcome
+        and (convert_from(w.return_command,'UTF8')::jsonb)->>'version'=w.object_version) then
+      raise exception using errcode='55000',message='export artifact replay provenance conflict';
     end if;
     return a;
   end if;
@@ -4324,6 +4514,17 @@ begin
       is distinct from row(v->>'backend_kind',nullif(v->>'namespace_id','')::uuid,v->>'key',v->>'version',
         decode(v->>'sha256','hex'),(v->>'size')::bigint,(v->>'expires_at')::timestamptz,v->>'obligation_id') then
       raise exception using errcode='55000',message='import artifact publication replay conflict';
+    end if;
+    if a.obligation_id is not null and not exists(select 1 from public.record_write_obligations w
+      where w.obligation_id=a.obligation_id and w.origin_kind='import_archive' and w.origin_id=a.import_job_id
+        and row(w.backend_kind,w.namespace_id,w.canonical_key,w.object_version,w.sha256_digest,w.size_bytes)
+          is not distinct from row(a.backend_kind,a.namespace_id,a.blob_key,a.object_version_id,a.sha256,a.byte_size)
+        and w.outcome='materialized' and w.dispatch_id is not null and w.dispatched_at is not null and w.returned_at is not null
+        and encode(w.storage_binding,'hex') is not distinct from (convert_from(w.registration_command,'UTF8')::jsonb)->>'storage_binding'
+        and (convert_from(w.return_command,'UTF8')::jsonb)->>'dispatch_id'=w.dispatch_id::text
+        and (convert_from(w.return_command,'UTF8')::jsonb)->>'outcome'=w.outcome
+        and (convert_from(w.return_command,'UTF8')::jsonb)->>'version'=w.object_version) then
+      raise exception using errcode='55000',message='import artifact replay provenance conflict';
     end if;
     return a;
   end if;
@@ -5335,7 +5536,7 @@ begin
   end if;
   v:=record_platform_internal.local_blob_command($1,array['operation_id','operation_owner_id','operation_generation',
     'operation_expires_at','namespace_id','incarnation_id','record_id','reservation_id','fence_epoch','surface_digest']);
-  target_record:=record_platform_internal.local_blob_gc_authority(v,true);
+  target_record:=record_platform_internal.local_blob_gc_authority(v,true,null,false);
   if target_record is distinct from v->>'record_id' or not exists (
     select 1 from public.record_purge_operations o join public.deletion_reservations r using(reservation_id)
     join public.record_deletion_gates g on g.operation_id=o.operation_id
@@ -5486,7 +5687,7 @@ begin
           'namespace_id',p.namespace_id,'incarnation_id',p.incarnation_id,'key',key,
           'operation_id',p.operation_id,'operation_owner_id',v->>'operation_owner_id',
           'operation_generation',(v->>'operation_generation')::bigint,'operation_expires_at',v->>'operation_expires_at',
-          'expected_version',null,'orphaned_before',null,'publication_id',null)::text,'UTF8'),true);
+          'expected_version',null,'orphaned_before',null,'publication_id',null)::text,'UTF8'),true,null);
       end if;
       insert into public.attachment_purge_targets(operation_id,deletion_id,blob_key,metadata_present)
         values(p.operation_id,g.deletion_id,key,exists(select 1 from public.blob_objects b where b.blob_key=key and b.namespace_id=p.namespace_id));
@@ -5634,6 +5835,1092 @@ create trigger record_portability_cleanup_preparation_immutable before update or
   for each row execute function record_platform_internal.local_blob_immutable_identity();
 create trigger record_portability_cleanup_target_immutable before update or delete on public.record_portability_cleanup_targets
   for each row execute function record_platform_internal.local_blob_immutable_identity();
+create trigger record_portability_cleanup_preparation_no_truncate before truncate on public.record_portability_cleanup_preparations
+  for each statement execute function record_platform_internal.local_blob_immutable_identity();
+create trigger record_portability_cleanup_target_no_truncate before truncate on public.record_portability_cleanup_targets
+  for each statement execute function record_platform_internal.local_blob_immutable_identity();
+
+-- A committed preparation must be visible to every later reference writer,
+-- including one whose REPEATABLE READ snapshot predates that preparation.
+create table record_platform_internal.record_portability_v1_epoch (
+  singleton boolean primary key default true check(singleton), epoch bigint not null default 0
+);
+insert into record_platform_internal.record_portability_v1_epoch(singleton) values(true);
+revoke all on table record_platform_internal.record_portability_v1_epoch from public;
+
+create function record_platform_internal.record_portability_v1_epoch_share()
+returns void language plpgsql security definer set search_path=pg_catalog as $$
+begin
+  perform 1 from record_platform_internal.record_portability_v1_epoch where singleton for share nowait;
+  if not found then raise exception using errcode='55000',message='portability V1 serialization epoch unavailable'; end if;
+exception when lock_not_available then
+  raise exception using errcode='40001',message='portability V1 preparation changed; restart transaction';
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_epoch_share() from public;
+
+-- A V1 continuation owns its physical identities independently of the V2 gate.
+-- The source snapshots survive removal of the original portability rows.
+create table public.record_portability_v1_preparations (
+  operation_id text primary key references public.record_purge_operations(operation_id) on delete restrict,
+  project_id text not null check(project_id='default'), record_id text not null,
+  surface_digest bytea not null check(octet_length(surface_digest)=32),
+  ledger_domain bytea not null check(octet_length(ledger_domain)=32),
+  ledger_sequence bigint not null check(ledger_sequence>0),
+  ledger_entry_hash bytea not null check(octet_length(ledger_entry_hash)=32),
+  witness_proof_digest bytea not null check(octet_length(witness_proof_digest)=32),
+  owners jsonb not null check(jsonb_typeof(owners)='object'
+    and owners ?& array['export_jobs','import_jobs','import_plans','mappings','origins']
+    and owners - array['export_jobs','import_jobs','import_plans','mappings','origins']='{}'::jsonb
+    and jsonb_typeof(owners->'export_jobs')='array' and jsonb_typeof(owners->'import_jobs')='array'
+    and jsonb_typeof(owners->'import_plans')='array' and jsonb_typeof(owners->'mappings')='array'
+    and jsonb_typeof(owners->'origins')='array'),
+  inventory_digest bytea not null check(octet_length(inventory_digest)=32),
+  removed_rows bigint not null check(removed_rows>=0), pdf_pending boolean not null,
+  prepared_at timestamptz not null default clock_timestamp()
+);
+create table public.record_portability_v1_targets (
+  operation_id text not null references public.record_portability_v1_preparations(operation_id) on delete restrict,
+  target_id text not null unique, backend_kind text not null check(backend_kind in ('local','s3')),
+  blob_key text not null, object_version_id text, sha256 bytea check(octet_length(sha256)=32),
+  byte_size bigint check(byte_size>0), blob_created_at timestamptz not null,
+  namespace_id uuid, incarnation_id uuid, obligation_id text,
+  storage_binding bytea check(octet_length(storage_binding)=32),
+  disposition text not null check(disposition in ('local','s3','retained_shared','unresolved')),
+  retained_evidence jsonb not null check(jsonb_typeof(retained_evidence)='array'),
+  local_deletion_id text references public.blob_gc_deletions(deletion_id) on delete restrict deferrable initially deferred,
+  deletion_state text check(deletion_state in ('pending','claimed','retry_wait','completed')),
+  cleanup_owner_id text check(cleanup_owner_id ~ '^[a-z0-9_-]{1,128}$'), cleanup_owner_generation bigint, attempt bigint,
+  cleanup_expires_at timestamptz check(isfinite(cleanup_expires_at)), retry_at timestamptz check(isfinite(retry_at)), physical_delete_result text,
+  receipt_digest bytea check(octet_length(receipt_digest)=32), completed_at timestamptz check(isfinite(completed_at)),
+  primary key(operation_id,target_id),
+  check(storage_binding is null or backend_kind='s3'),
+  check(disposition='unresolved' or (sha256 is not null and byte_size is not null)),
+  check(disposition<>'local' or backend_kind='local'),
+  check(local_deletion_id is null or (disposition='local' and backend_kind='local')),
+  check((disposition='s3' and backend_kind='s3' and storage_binding is not null and deletion_state is not null)
+    or (disposition<>'s3' and deletion_state is null and cleanup_owner_id is null
+      and cleanup_owner_generation is null and attempt is null and cleanup_expires_at is null
+      and retry_at is null and physical_delete_result is null and receipt_digest is null and completed_at is null)),
+  check(deletion_state is null or
+    (deletion_state='pending' and cleanup_owner_id is null and cleanup_owner_generation is null and attempt is null
+      and cleanup_expires_at is null and retry_at is null and physical_delete_result is null and receipt_digest is null and completed_at is null) or
+    (deletion_state in ('claimed','retry_wait') and cleanup_owner_id is not null and cleanup_owner_generation is not null
+      and cleanup_owner_generation>0 and attempt is not null and attempt>0
+      and cleanup_expires_at is not null and (retry_at is not null)=(deletion_state='retry_wait')
+      and physical_delete_result is null and receipt_digest is null and completed_at is null) or
+    (deletion_state='completed' and cleanup_owner_id is not null and cleanup_owner_generation is not null
+      and cleanup_owner_generation>0 and attempt is not null and attempt>0
+      and cleanup_expires_at is not null and retry_at is null and physical_delete_result is not null
+      and physical_delete_result in ('deleted','already_absent')
+      and receipt_digest is not null and completed_at is not null))
+);
+create table public.record_portability_v1_artifacts (
+  operation_id text not null, source_kind text not null check(source_kind in ('export','import')),
+  artifact_id text not null, job_id text not null, artifact_role text not null,
+  backend_kind text not null, blob_key text not null, object_version_id text,
+  sha256 bytea not null check(octet_length(sha256)=32), byte_size bigint not null check(byte_size>0),
+  created_at timestamptz not null, namespace_id uuid, incarnation_id uuid, obligation_id text,
+  target_id text not null, primary key(operation_id,source_kind,artifact_id),
+  foreign key(operation_id,target_id) references public.record_portability_v1_targets(operation_id,target_id) on delete restrict
+);
+create table public.record_portability_v1_obligations (
+  operation_id text not null references public.record_portability_v1_preparations(operation_id) on delete restrict,
+  obligation_id text not null references public.record_write_obligations(obligation_id) on delete restrict,
+  snapshot jsonb not null, target_id text not null, primary key(operation_id,obligation_id),
+  foreign key(operation_id,target_id) references public.record_portability_v1_targets(operation_id,target_id) on delete restrict
+);
+create index idx_portability_v1_targets_local on public.record_portability_v1_targets(namespace_id,incarnation_id,blob_key) where backend_kind='local';
+create index idx_portability_v1_targets_s3 on public.record_portability_v1_targets(storage_binding,blob_key,object_version_id) where backend_kind='s3';
+create index idx_portability_v1_preparations_owners on public.record_portability_v1_preparations using gin(owners jsonb_path_ops);
+create index idx_portability_v1_targets_retained on public.record_portability_v1_targets using gin(retained_evidence jsonb_path_ops);
+create index idx_portability_v1_artifacts_source on public.record_portability_v1_artifacts(source_kind,artifact_id);
+create index idx_portability_v1_artifacts_target on public.record_portability_v1_artifacts(operation_id,target_id);
+create index idx_portability_v1_obligations_target on public.record_portability_v1_obligations(operation_id,target_id);
+create trigger record_portability_v1_preparation_immutable before update or delete or truncate on public.record_portability_v1_preparations
+  for each statement execute function record_platform_internal.local_blob_immutable_identity();
+create trigger record_portability_v1_artifact_immutable before update or delete or truncate on public.record_portability_v1_artifacts
+  for each statement execute function record_platform_internal.local_blob_immutable_identity();
+create trigger record_portability_v1_obligation_immutable before update or delete or truncate on public.record_portability_v1_obligations
+  for each statement execute function record_platform_internal.local_blob_immutable_identity();
+
+create function record_platform_internal.record_portability_v1_target_guard()
+returns trigger language plpgsql security definer set search_path=pg_catalog as $$
+begin
+  if tg_op<>'UPDATE' or (old.operation_id,old.target_id,old.backend_kind,old.blob_key,old.object_version_id,
+      old.sha256,old.byte_size,old.blob_created_at,old.namespace_id,old.incarnation_id,old.obligation_id,
+      old.storage_binding,old.disposition,old.retained_evidence,old.local_deletion_id)
+    is distinct from (new.operation_id,new.target_id,new.backend_kind,new.blob_key,new.object_version_id,
+      new.sha256,new.byte_size,new.blob_created_at,new.namespace_id,new.incarnation_id,new.obligation_id,
+      new.storage_binding,new.disposition,new.retained_evidence,new.local_deletion_id)
+    or old.deletion_state='completed' then
+    raise exception using errcode='55000',message='portability V1 target identity is immutable';
+  end if;
+  return new;
+end $$;
+create trigger record_portability_v1_target_guard before update or delete on public.record_portability_v1_targets
+  for each row execute function record_platform_internal.record_portability_v1_target_guard();
+create trigger record_portability_v1_target_no_truncate before truncate on public.record_portability_v1_targets
+  for each statement execute function record_platform_internal.local_blob_immutable_identity();
+revoke all on function record_platform_internal.record_portability_v1_target_guard() from public;
+
+-- Locking alone does not invalidate another REPEATABLE READ snapshot. A
+-- byte-identical retained target update gives competing ownership changes an
+-- MVCC serialization point without changing the immutable manifest.
+create function record_platform_internal.record_portability_v1_touch_retained(op text, target text)
+returns void language plpgsql security definer set search_path=pg_catalog as $$
+begin
+  perform 1 from public.record_portability_v1_targets t
+    where t.operation_id=op and t.target_id=target and t.disposition='retained_shared' for update nowait;
+  if not found then raise exception using errcode='55000',message='portability V1 retained target unavailable'; end if;
+  update public.record_portability_v1_targets t set retained_evidence=t.retained_evidence
+    where t.operation_id=op and t.target_id=target and t.disposition='retained_shared';
+exception when lock_not_available then
+  raise exception using errcode='40001',message='portability V1 retained owner changed; restart transaction';
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_touch_retained(text,text) from public;
+
+create function record_platform_internal.record_portability_v1_target_id(
+  op text, backend text, key text, version text, namespace uuid, incarnation uuid, binding bytea)
+returns text language sql immutable security definer set search_path=pg_catalog as $$
+  select 'bgd_'||encode(sha256(convert_to(jsonb_build_array('HOUFENG-PORTABILITY-TARGET-V1',op,backend,key,version,
+    namespace,incarnation,encode(binding,'hex'))::text,'UTF8')),'hex')
+$$;
+revoke all on function record_platform_internal.record_portability_v1_target_id(text,text,text,text,uuid,uuid,bytea) from public;
+alter table public.record_portability_v1_targets add constraint record_portability_v1_target_identity
+  check(target_id=record_platform_internal.record_portability_v1_target_id(operation_id,backend_kind,blob_key,
+    object_version_id,namespace_id,incarnation_id,storage_binding));
+
+create function record_platform_internal.record_portability_v1_frame_digest(
+  p_op text, p_project text, p_record text, p_surface bytea, p_domain bytea, p_sequence bigint,
+  p_entry_hash bytea, p_witness bytea, p_owners jsonb, p_removed bigint, p_pdf boolean,
+  p_artifacts jsonb, p_obligations jsonb, p_targets jsonb)
+returns bytea language sql immutable security definer set search_path=pg_catalog as $$
+  select sha256(convert_to(jsonb_build_array('HOUFENG-PORTABILITY-INVENTORY-V1',p_op,p_project,p_record,
+    encode(p_surface,'hex'),encode(p_domain,'hex'),p_sequence,encode(p_entry_hash,'hex'),encode(p_witness,'hex'),
+    p_owners,p_removed,p_pdf,p_artifacts,p_obligations,p_targets)::text,'UTF8'))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_frame_digest(text,text,text,bytea,bytea,bigint,bytea,bytea,jsonb,bigint,boolean,jsonb,jsonb,jsonb) from public;
+
+-- Inventory timestamp scalars are UTC timestamps without a zone; captured
+-- obligation snapshots remain their original JSON values.
+create function record_platform_internal.record_portability_v1_inventory_digest(op text)
+returns bytea language sql stable security definer set search_path=pg_catalog as $$
+  select record_platform_internal.record_portability_v1_frame_digest(p.operation_id,p.project_id,p.record_id,
+    p.surface_digest,p.ledger_domain,p.ledger_sequence,p.ledger_entry_hash,p.witness_proof_digest,
+    p.owners,p.removed_rows,p.pdf_pending,
+    coalesce((select jsonb_agg(jsonb_build_array(a.operation_id,a.source_kind,a.artifact_id,a.job_id,a.artifact_role,
+      a.backend_kind,a.blob_key,a.object_version_id,encode(a.sha256,'hex'),a.byte_size,to_jsonb(a.created_at at time zone 'UTC'),
+      a.namespace_id,a.incarnation_id,a.obligation_id,a.target_id) order by a.source_kind collate "C",a.artifact_id collate "C")
+      from public.record_portability_v1_artifacts a where a.operation_id=p.operation_id),'[]'::jsonb),
+    coalesce((select jsonb_agg(jsonb_build_array(o.operation_id,o.obligation_id,o.snapshot,o.target_id)
+      order by o.obligation_id collate "C") from public.record_portability_v1_obligations o where o.operation_id=p.operation_id),'[]'::jsonb),
+    coalesce((select jsonb_agg(jsonb_build_array(t.operation_id,t.target_id,t.backend_kind,t.blob_key,t.object_version_id,
+      encode(t.sha256,'hex'),t.byte_size,to_jsonb(t.blob_created_at at time zone 'UTC'),t.namespace_id,t.incarnation_id,t.obligation_id,
+      encode(t.storage_binding,'hex'),t.disposition,t.retained_evidence,t.local_deletion_id) order by t.target_id collate "C")
+      from public.record_portability_v1_targets t where t.operation_id=p.operation_id),'[]'::jsonb))
+  from public.record_portability_v1_preparations p where p.operation_id=op
+$$;
+revoke all on function record_platform_internal.record_portability_v1_inventory_digest(text) from public;
+
+-- Validate a captured original S3 write before treating its returned version
+-- as a physical target. The current route is never evidence of the old route.
+create function record_platform_internal.record_portability_v1_s3_source_valid(snapshot jsonb, obligation text)
+returns boolean language plpgsql stable security definer set search_path=pg_catalog as $$
+declare o public.record_write_obligations; registration json; returned json; r jsonb; result jsonb;
+begin
+  select w.* into o from public.record_write_obligations w where w.obligation_id=obligation;
+  if not found or jsonb_typeof(snapshot) is distinct from 'object' or o.backend_kind<>'s3'
+    or o.namespace_id is not null or o.incarnation_id is not null or octet_length(o.storage_binding)<>32
+    or o.storage_binding is null or o.outcome<>'materialized' or o.object_version is null or o.object_version='null'
+    or o.dispatch_id is null or o.dispatched_at is null or o.returned_at is null or o.return_command is null
+    or snapshot->>'obligation_id' is distinct from o.obligation_id
+    or snapshot->>'outcome' is distinct from 'materialized'
+    or snapshot->>'object_version' is distinct from o.object_version
+    or snapshot->>'dispatch_id' is distinct from o.dispatch_id::text
+    or (snapshot->>'dispatched_at')::timestamptz is distinct from o.dispatched_at
+    or (snapshot->>'returned_at')::timestamptz is distinct from o.returned_at
+    or snapshot->>'registration_command' is distinct from '\x'||encode(o.registration_command,'hex')
+    or snapshot->>'return_command' is distinct from '\x'||encode(o.return_command,'hex') then return false; end if;
+  registration:=convert_from(o.registration_command,'UTF8')::json;
+  returned:=convert_from(o.return_command,'UTF8')::json;
+  if json_typeof(registration) is distinct from 'object' or json_typeof(returned) is distinct from 'object'
+    or (select count(*) from json_each(registration))<>(select count(distinct x.key) from json_each(registration) x)
+    or (select count(*) from json_each(returned))<>(select count(distinct x.key) from json_each(returned) x) then return false; end if;
+  r:=record_platform_internal.local_blob_command(o.registration_command,array[
+    'obligation_id','writer_instance','request_seq','project_id','origin_kind','origin_id','origin_generation',
+    'origin_owner_id','origin_owner_generation','origin_owner_expires_at','draft_id','plan_digest','archive_digest',
+    'namespace_id','incarnation_id','backend_kind','storage_binding','key','sha256','size','publication_id','target_record_id','target_attachment_id']);
+  result:=record_platform_internal.local_blob_command(o.return_command,
+    array['obligation_id','writer_instance','dispatch_id','outcome','version','key','sha256','size']);
+  return (r->>'obligation_id',r->>'writer_instance',r->>'request_seq',r->>'project_id',r->>'origin_kind',r->>'origin_id',
+      r->>'origin_generation',r->>'namespace_id',r->>'incarnation_id',r->>'backend_kind',r->>'storage_binding',r->>'key',r->>'sha256',r->>'size')
+    is not distinct from (o.obligation_id,o.writer_instance::text,o.request_seq::text,o.project_id,o.origin_kind,o.origin_id,
+      o.origin_generation::text,null::text,null::text,'s3',encode(o.storage_binding,'hex'),o.canonical_key,encode(o.sha256_digest,'hex'),o.size_bytes::text)
+    and r->>'publication_id' is not distinct from o.publication_id
+    and r->>'origin_owner_id' is not distinct from o.origin_owner_id
+    and (r->>'origin_owner_generation')::bigint is not distinct from o.origin_owner_generation
+    and (r->>'origin_owner_expires_at')::timestamptz is not distinct from o.origin_owner_expires_at
+    and r->>'plan_digest' is not distinct from encode(o.plan_digest,'hex')
+    and r->>'archive_digest' is not distinct from encode(o.archive_digest,'hex')
+    and (result->>'obligation_id',result->>'writer_instance',result->>'dispatch_id',result->>'outcome',result->>'version',
+      result->>'key',result->>'sha256',result->>'size') is not distinct from
+      (o.obligation_id,o.writer_instance::text,o.dispatch_id::text,'materialized',o.object_version,
+       o.canonical_key,encode(o.sha256_digest,'hex'),o.size_bytes::text);
+exception when data_exception then return false;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_s3_source_valid(jsonb,text) from public;
+
+-- A digest authenticates the saved rows; it does not prove that a source
+-- belongs to the target named by that row. Validate that linkage separately.
+create function record_platform_internal.record_portability_v1_source_links(op text)
+returns boolean language sql stable security definer set search_path=pg_catalog as $$
+  select not exists (
+    select 1 from public.record_portability_v1_targets t where t.operation_id=op
+      and not exists(select 1 from public.record_portability_v1_artifacts a
+        where (a.operation_id,a.target_id)=(t.operation_id,t.target_id))
+      and not exists(select 1 from public.record_portability_v1_obligations o
+        where (o.operation_id,o.target_id)=(t.operation_id,t.target_id))
+  ) and not exists (
+    select 1 from public.record_portability_v1_obligations o
+    join public.record_portability_v1_targets t on (t.operation_id,t.target_id)=(o.operation_id,o.target_id)
+    where o.operation_id=op and (
+      jsonb_typeof(o.snapshot) is distinct from 'object'
+      or not (o.snapshot ?& array['obligation_id','backend_kind','canonical_key','object_version','namespace_id',
+        'incarnation_id','storage_binding','sha256_digest','size_bytes'])
+      or (o.snapshot->>'obligation_id',o.snapshot->>'backend_kind',o.snapshot->>'canonical_key',
+          o.snapshot->>'object_version',o.snapshot->>'namespace_id',o.snapshot->>'incarnation_id',o.snapshot->>'storage_binding')
+        is distinct from (o.obligation_id,t.backend_kind,t.blob_key,t.object_version_id,t.namespace_id::text,t.incarnation_id::text,
+          case when t.storage_binding is null then null else '\x'||encode(t.storage_binding,'hex') end)
+      or (t.disposition<>'unresolved' and (o.snapshot->>'sha256_digest',o.snapshot->>'size_bytes')
+        is distinct from ('\x'||encode(t.sha256,'hex'),t.byte_size::text)))
+  ) and not exists (
+    select 1 from public.record_portability_v1_obligations captured
+    join public.record_write_obligations source on source.obligation_id=captured.obligation_id
+    cross join lateral (select to_jsonb(source) value) current_source
+    where captured.operation_id=op and (
+      not (captured.snapshot ?& array['writer_instance','request_seq','writer_principal','project_id','origin_kind',
+        'origin_id','origin_generation','origin_owner_id','origin_owner_generation','origin_owner_expires_at',
+        'plan_digest','archive_digest','namespace_id','incarnation_id','backend_kind','storage_binding','canonical_key',
+        'sha256_digest','size_bytes','publication_id','registration_command','temporary_key','quota_settlement_id','created_at'])
+      or exists(select 1 from unnest(array['writer_instance','request_seq','writer_principal','project_id','origin_kind',
+        'origin_id','origin_generation','origin_owner_id','origin_owner_generation','plan_digest','archive_digest',
+        'namespace_id','incarnation_id','backend_kind','storage_binding','canonical_key','sha256_digest','size_bytes',
+        'publication_id','registration_command','temporary_key','quota_settlement_id']) field(name)
+        where captured.snapshot->field.name is distinct from current_source.value->field.name)
+      or (captured.snapshot->>'origin_owner_expires_at')::timestamptz is distinct from source.origin_owner_expires_at
+      or (captured.snapshot->>'created_at')::timestamptz is distinct from source.created_at)
+  ) and not exists (
+    select 1 from public.record_portability_v1_obligations captured
+    join public.record_portability_v1_targets t on (t.operation_id,t.target_id)=(captured.operation_id,captured.target_id)
+    where captured.operation_id=op and t.backend_kind='s3' and t.disposition in ('s3','retained_shared')
+      and not record_platform_internal.record_portability_v1_s3_source_valid(captured.snapshot,captured.obligation_id)
+  ) and not exists (
+    select 1 from public.record_portability_v1_artifacts a
+    join public.record_portability_v1_targets t on (t.operation_id,t.target_id)=(a.operation_id,a.target_id)
+    where a.operation_id=op and (
+      (a.backend_kind,a.blob_key,a.object_version_id,a.namespace_id,a.incarnation_id)
+        is distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.namespace_id,t.incarnation_id)
+      or (t.disposition<>'unresolved' and (a.sha256,a.byte_size) is distinct from (t.sha256,t.byte_size))
+      or (t.disposition<>'unresolved' and not exists(select 1 from public.record_portability_v1_obligations o
+        where (o.operation_id,o.target_id,o.obligation_id)=(a.operation_id,a.target_id,a.obligation_id))))
+  ) and not exists (
+    select 1 from public.record_portability_v1_targets t where t.operation_id=op and t.disposition='local'
+      and not exists(select 1 from public.record_portability_v1_obligations o
+        where (o.operation_id,o.target_id,o.obligation_id)=(t.operation_id,t.target_id,t.obligation_id))
+  )
+$$;
+revoke all on function record_platform_internal.record_portability_v1_source_links(text) from public;
+
+create function record_platform_internal.record_portability_v1_eligible(op text)
+returns boolean language sql stable security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_portability_v1_preparations p where p.operation_id=op
+    and not p.pdf_pending and p.inventory_digest=record_platform_internal.record_portability_v1_inventory_digest(op)
+    and record_platform_internal.record_portability_v1_source_links(op)
+    and not exists(select 1 from public.record_portability_v1_targets t where t.operation_id=op and not isfinite(t.blob_created_at))
+    and not exists(select 1 from public.record_portability_v1_artifacts a
+      where a.operation_id=op and not isfinite(a.created_at))
+    and not exists(select 1 from public.record_portability_v1_obligations c
+      where c.operation_id=op and isfinite((c.snapshot->>'created_at')::timestamptz) is not true)
+    and not exists(select 1 from public.record_portability_v1_targets t where t.operation_id=op and t.disposition='unresolved')
+    and not exists(select 1 from public.record_portability_v1_targets t where t.operation_id=op
+      and t.disposition='retained_shared' and (jsonb_array_length(t.retained_evidence)=0
+        or exists(select 1 from jsonb_array_elements(t.retained_evidence) e(value)
+          where case when jsonb_typeof(e.value)='array' then
+            jsonb_array_length(e.value)<>3 or jsonb_typeof(e.value->0) is distinct from 'string'
+              or jsonb_typeof(e.value->1) is distinct from 'string' or jsonb_typeof(e.value->2) is distinct from 'string'
+              or e.value->>0 not in ('export_artifact','import_artifact','attachment','upload_part','blob_object','write_obligation')
+              or coalesce(e.value->>1,'')='' or coalesce(e.value->>2,'') !~ '^[0-9a-f]{64}$'
+            else true end)
+        or exists(select 1 from (select e.value->>0 kind,e.value->>1 owner_id,
+            lag(e.value->>0) over (order by e.ordinality) previous_kind,
+            lag(e.value->>1) over (order by e.ordinality) previous_id
+          from jsonb_array_elements(t.retained_evidence) with ordinality e(value,ordinality)) ordered
+          where ordered.previous_kind is not null and
+            (ordered.previous_kind collate "C",ordered.previous_id collate "C") >=
+              (ordered.kind collate "C",ordered.owner_id collate "C")))))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_eligible(text) from public;
+
+-- Callers validate the locked source tuple before framing it. A digest alone
+-- is not proof of source membership, route provenance, or retained ownership.
+create function record_platform_internal.record_portability_v1_owner_digest(table_name text, pk jsonb, physical jsonb, route jsonb)
+returns bytea language plpgsql immutable security definer set search_path=pg_catalog as $$
+begin
+  if table_name not in ('record_export_artifacts','record_import_artifacts','record_attachments',
+      'attachment_upload_parts','blob_objects','record_write_obligations')
+    or table_name is null or jsonb_typeof(pk) is distinct from 'array'
+    or jsonb_typeof(physical) is distinct from 'array' or jsonb_typeof(route) is distinct from 'array' then
+    raise exception using errcode='22023',message='invalid portability owner digest fields';
+  end if;
+  return sha256(convert_to(jsonb_build_array('HOUFENG-PORTABILITY-OWNER-V1',table_name,pk,physical,route)::text,'UTF8'));
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_owner_digest(text,jsonb,jsonb,jsonb) from public;
+
+-- A deduplicated writer may return an already-published creator's exact
+-- local version. Authenticate the owner independently, then require the
+-- referenced creator's original registration, dispatch and return proof.
+-- This proves a live owner's physical identity; it does not derive a new
+-- expected version for a captured cleanup target.
+create function record_platform_internal.record_portability_v1_local_owner_version(o public.record_write_obligations)
+returns boolean language plpgsql volatile strict security definer set search_path=pg_catalog as $$
+declare registration json; returned_raw json; v jsonb; returned jsonb; creator_valid boolean;
+begin
+  if o.backend_kind is distinct from 'local' or o.namespace_id is null or o.incarnation_id is null
+    or o.storage_binding is not null or o.object_version is null or o.outcome is distinct from 'materialized'
+    or o.dispatch_id is null or o.dispatched_at is null or o.returned_at is null
+    or o.registration_command is null or o.return_command is null
+    or o.temporary_key is distinct from 'sha256/.blob-tmp-'||o.obligation_id
+    or o.sha256_digest is null or octet_length(o.sha256_digest)<>32 or o.size_bytes is null or o.size_bytes<=0
+    or o.canonical_key is distinct from 'sha256/'||encode(o.sha256_digest,'hex') then return false; end if;
+  registration:=convert_from(o.registration_command,'UTF8')::json;
+  returned_raw:=convert_from(o.return_command,'UTF8')::json;
+  if json_typeof(registration) is distinct from 'object' or json_typeof(returned_raw) is distinct from 'object'
+    or (select count(*) from json_each(registration))<>(select count(distinct x.key) from json_each(registration) x)
+    or (select count(*) from json_each(returned_raw))<>(select count(distinct x.key) from json_each(returned_raw) x) then
+    return false;
+  end if;
+  v:=record_platform_internal.local_blob_command(o.registration_command,array[
+    'obligation_id','writer_instance','request_seq','project_id','origin_kind','origin_id','origin_generation',
+    'origin_owner_id','origin_owner_generation','origin_owner_expires_at','draft_id','plan_digest','archive_digest',
+    'namespace_id','incarnation_id','backend_kind','storage_binding','key','sha256','size','publication_id','target_record_id','target_attachment_id']);
+  returned:=record_platform_internal.local_blob_command(o.return_command,
+    array['obligation_id','writer_instance','dispatch_id','outcome','version','key','sha256','size']);
+  if (v->>'obligation_id',v->>'writer_instance',v->>'request_seq',v->>'project_id',v->>'origin_kind',v->>'origin_id',
+      v->>'origin_generation',v->>'namespace_id',v->>'incarnation_id',v->>'backend_kind',v->>'storage_binding',v->>'key',v->>'sha256',v->>'size')
+    is distinct from (o.obligation_id,o.writer_instance::text,o.request_seq::text,o.project_id,o.origin_kind,o.origin_id,
+      o.origin_generation::text,o.namespace_id::text,o.incarnation_id::text,o.backend_kind,null::text,o.canonical_key,encode(o.sha256_digest,'hex'),o.size_bytes::text)
+    or v->>'publication_id' is distinct from o.publication_id or v->>'origin_owner_id' is distinct from o.origin_owner_id
+    or (v->>'origin_owner_generation')::bigint is distinct from o.origin_owner_generation
+    or (v->>'origin_owner_expires_at')::timestamptz is distinct from o.origin_owner_expires_at
+    or v->>'plan_digest' is distinct from encode(o.plan_digest,'hex')
+    or v->>'archive_digest' is distinct from encode(o.archive_digest,'hex')
+    or (returned->>'obligation_id',returned->>'writer_instance',returned->>'dispatch_id',returned->>'outcome',
+        returned->>'version',returned->>'key',returned->>'sha256',returned->>'size')
+      is distinct from (o.obligation_id,o.writer_instance::text,o.dispatch_id::text,'materialized',
+        o.object_version,o.canonical_key,encode(o.sha256_digest,'hex'),o.size_bytes::text) then return false; end if;
+  if o.object_version='local-v2-'||o.obligation_id then return true; end if;
+  select count(*)=1 into creator_valid from public.record_write_obligations creator
+    where (creator.backend_kind,creator.namespace_id,creator.incarnation_id,creator.canonical_key,creator.sha256_digest,creator.size_bytes)
+      is not distinct from (o.backend_kind,o.namespace_id,o.incarnation_id,o.canonical_key,o.sha256_digest,o.size_bytes)
+      and creator.object_version=o.object_version and creator.object_version='local-v2-'||creator.obligation_id
+      and creator.outcome='materialized' and creator.dispatch_id is not null and creator.dispatched_at is not null
+      and creator.returned_at is not null and creator.return_command is not null
+      and record_platform_internal.record_portability_v1_local_source_expected(to_jsonb(creator),creator.obligation_id)=creator.object_version;
+  return creator_valid;
+exception when data_exception then return false;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_local_owner_version(public.record_write_obligations) from public;
+
+-- Hash only a captured artifact whose immutable physical tuple is backed by
+-- the captured obligation and its original writer route. The job tuple is
+-- taken from the same manifest, so a deleted parent cannot be guessed later.
+create function record_platform_internal.record_portability_v1_artifact_owner_digest(op text, kind text, artifact text)
+returns bytea language sql volatile security definer set search_path=pg_catalog as $$
+  select record_platform_internal.record_portability_v1_owner_digest(
+    case a.source_kind when 'export' then 'record_export_artifacts' else 'record_import_artifacts' end,
+    jsonb_build_array(a.artifact_id),
+    jsonb_build_array(a.backend_kind,a.blob_key,a.object_version_id,encode(a.sha256,'hex'),a.byte_size,
+      to_char(a.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+      a.namespace_id,a.incarnation_id,encode(t.storage_binding,'hex'),a.obligation_id),
+    jsonb_build_array(a.job_id,a.artifact_role,j.value))
+  from public.record_portability_v1_artifacts a
+  join public.record_portability_v1_preparations p on p.operation_id=a.operation_id
+  join public.record_portability_v1_targets t on (t.operation_id,t.target_id)=(a.operation_id,a.target_id)
+  join public.record_portability_v1_obligations captured
+    on (captured.operation_id,captured.target_id,captured.obligation_id)=(a.operation_id,a.target_id,a.obligation_id)
+  join public.record_write_obligations o on o.obligation_id=captured.obligation_id
+  cross join lateral jsonb_array_elements(case a.source_kind when 'export' then p.owners->'export_jobs'
+    else p.owners->'import_jobs' end) j(value)
+  where a.operation_id=op and a.source_kind=kind and a.artifact_id=artifact
+    and jsonb_typeof(j.value)='array' and j.value->>0=a.job_id
+    and (a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.namespace_id,a.incarnation_id)
+      is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id)
+    and (o.backend_kind,o.canonical_key,o.sha256_digest,o.size_bytes,o.namespace_id,o.incarnation_id,o.storage_binding)
+      is not distinct from (t.backend_kind,t.blob_key,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+    and o.dispatched_at is not null and o.outcome='materialized' and o.returned_at is not null
+    and o.object_version is not distinct from a.object_version_id
+    and captured.snapshot->>'object_version'=o.object_version
+    and captured.snapshot->>'outcome'='materialized'
+    and (captured.snapshot->>'dispatched_at')::timestamptz=o.dispatched_at
+    and (captured.snapshot->>'returned_at')::timestamptz=o.returned_at
+    and captured.snapshot->>'storage_binding' is not distinct from
+      case when o.storage_binding is null then null else '\x'||encode(o.storage_binding,'hex') end
+    and captured.snapshot->>'registration_command'='\x'||encode(o.registration_command,'hex')
+    and captured.snapshot->>'return_command'='\x'||encode(o.return_command,'hex')
+    and captured.snapshot->>'origin_kind'=o.origin_kind and captured.snapshot->>'origin_id'=o.origin_id
+    and (captured.snapshot->>'origin_generation')::bigint=o.origin_generation
+    and captured.snapshot->>'obligation_id'=o.obligation_id and captured.snapshot->>'project_id'=o.project_id
+    and captured.snapshot->>'backend_kind'=o.backend_kind and captured.snapshot->>'canonical_key'=o.canonical_key
+    and captured.snapshot->>'sha256_digest'='\x'||encode(o.sha256_digest,'hex')
+    and (captured.snapshot->>'size_bytes')::bigint=o.size_bytes
+    and (captured.snapshot->>'namespace_id')::uuid is not distinct from o.namespace_id
+    and (captured.snapshot->>'incarnation_id')::uuid is not distinct from o.incarnation_id
+    and (captured.snapshot->>'created_at')::timestamptz=o.created_at
+    and (captured.snapshot->>'dispatch_id')::uuid=o.dispatch_id
+    and o.origin_id=a.job_id
+    and o.origin_kind=case a.source_kind when 'export' then 'export_artifact' else 'import_archive' end
+    and encode(o.storage_binding,'hex') is not distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id'=o.dispatch_id::text
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome'=o.outcome
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'version'=o.object_version
+    and ((a.backend_kind='s3' and t.storage_binding is not null and a.object_version_id is not null
+        and a.object_version_id<>'null')
+      or (a.backend_kind='local' and a.namespace_id is not null and a.incarnation_id is not null
+        and record_platform_internal.record_portability_v1_local_owner_version(o)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_artifact_owner_digest(text,text,text) from public;
+
+create function record_platform_internal.record_portability_v1_obligation_owner_digest(op text, obligation text)
+returns bytea language sql stable security definer set search_path=pg_catalog as $$
+  select record_platform_internal.record_portability_v1_owner_digest('record_write_obligations',
+    jsonb_build_array(o.obligation_id),
+    jsonb_build_array(o.backend_kind,o.canonical_key,o.object_version,encode(o.sha256_digest,'hex'),o.size_bytes,
+      to_char(o.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+      o.namespace_id,o.incarnation_id,encode(o.storage_binding,'hex')),
+    jsonb_build_array(o.project_id,o.origin_kind,o.origin_id,o.origin_generation,o.record_id,o.record_epoch,
+      o.publication_id))
+  from public.record_portability_v1_obligations captured
+  join public.record_write_obligations o on o.obligation_id=captured.obligation_id
+  join public.record_portability_v1_targets t on (t.operation_id,t.target_id)=(captured.operation_id,captured.target_id)
+  where captured.operation_id=op and captured.obligation_id=obligation
+    and (o.backend_kind,o.canonical_key,o.sha256_digest,o.size_bytes,o.namespace_id,o.incarnation_id,o.storage_binding)
+      is not distinct from (t.backend_kind,t.blob_key,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+    and (t.object_version_id is null or o.object_version=t.object_version_id)
+    and captured.snapshot->>'object_version' is not distinct from o.object_version
+    and captured.snapshot->>'backend_kind'=o.backend_kind and captured.snapshot->>'canonical_key'=o.canonical_key
+    and captured.snapshot->>'sha256_digest'='\x'||encode(o.sha256_digest,'hex')
+    and (captured.snapshot->>'size_bytes')::bigint=o.size_bytes
+    and captured.snapshot->>'storage_binding' is not distinct from
+      case when o.storage_binding is null then null else '\x'||encode(o.storage_binding,'hex') end
+    and captured.snapshot->>'registration_command'='\x'||encode(o.registration_command,'hex')
+    and captured.snapshot->>'origin_kind'=o.origin_kind and captured.snapshot->>'origin_id'=o.origin_id
+    and (captured.snapshot->>'origin_generation')::bigint=o.origin_generation
+    and captured.snapshot->>'project_id'=o.project_id
+    and captured.snapshot->>'record_id' is not distinct from o.record_id
+    and (captured.snapshot->>'record_epoch')::bigint is not distinct from o.record_epoch
+    and captured.snapshot->>'publication_id' is not distinct from o.publication_id
+    and (captured.snapshot->>'namespace_id')::uuid is not distinct from o.namespace_id
+    and (captured.snapshot->>'incarnation_id')::uuid is not distinct from o.incarnation_id
+    and (captured.snapshot->>'dispatched_at')::timestamptz is not distinct from o.dispatched_at
+    and (captured.snapshot->>'returned_at')::timestamptz is not distinct from o.returned_at
+    and (captured.snapshot->>'created_at')::timestamptz=o.created_at
+    and encode(o.storage_binding,'hex') is not distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+    and (captured.snapshot->>'outcome'<>'materialized' or
+      (o.outcome='materialized' and o.dispatch_id is not null and o.return_command is not null
+        and captured.snapshot->>'return_command'='\x'||encode(o.return_command,'hex')
+        and (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id'=o.dispatch_id::text
+        and (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome'=o.outcome
+        and (convert_from(o.return_command,'UTF8')::jsonb)->>'version'=o.object_version))
+    and ((o.backend_kind='s3' and o.storage_binding is not null and o.object_version is not null
+      and captured.snapshot->>'outcome'='materialized' and captured.snapshot->>'dispatched_at' is not null
+      and captured.snapshot->>'returned_at' is not null)
+      or (o.backend_kind='local' and captured.snapshot->>'outcome' in ('materialized','failed','local_excluded')))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_obligation_owner_digest(text,text) from public;
+
+create function record_platform_internal.record_portability_v1_carried_successor(prior_op text, prior_target text, next_op text, next_target text)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_portability_v1_targets prior
+    join public.record_portability_v1_targets successor on successor.operation_id=next_op and successor.target_id=next_target
+    cross join lateral jsonb_array_elements(prior.retained_evidence) evidence(value)
+    where prior.operation_id=prior_op and prior.target_id=prior_target and prior.disposition='retained_shared'
+      and prior.operation_id<>successor.operation_id and successor.disposition in ('local','s3')
+      and (prior.backend_kind,prior.blob_key,prior.object_version_id,prior.namespace_id,prior.incarnation_id,prior.storage_binding,prior.sha256,prior.byte_size)
+        is not distinct from (successor.backend_kind,successor.blob_key,successor.object_version_id,successor.namespace_id,successor.incarnation_id,successor.storage_binding,successor.sha256,successor.byte_size)
+      and record_platform_internal.record_portability_v1_eligible(prior.operation_id)
+      and record_platform_internal.record_portability_v1_eligible(successor.operation_id)
+      and case when jsonb_typeof(evidence.value)='array' then jsonb_array_length(evidence.value)=3 else false end
+      and evidence.value->>2 ~ '^[0-9a-f]{64}$'
+      and ((evidence.value->>0 in ('export_artifact','import_artifact')
+        and exists(select 1 from public.record_portability_v1_artifacts a where (a.operation_id,a.target_id)=(successor.operation_id,successor.target_id)
+          and a.source_kind=case evidence.value->>0 when 'export_artifact' then 'export' else 'import' end and a.artifact_id=evidence.value->>1)
+        and encode(record_platform_internal.record_portability_v1_artifact_owner_digest(successor.operation_id,
+          case evidence.value->>0 when 'export_artifact' then 'export' else 'import' end,evidence.value->>1),'hex')=evidence.value->>2)
+        or (evidence.value->>0='write_obligation' and exists(select 1 from public.record_portability_v1_obligations owner
+          where (owner.operation_id,owner.target_id,owner.obligation_id)=(successor.operation_id,successor.target_id,evidence.value->>1))
+          and encode(record_platform_internal.record_portability_v1_obligation_owner_digest(successor.operation_id,evidence.value->>1),'hex')=evidence.value->>2))
+      and exists(select 1 from public.record_portability_v1_obligations c where (c.operation_id,c.target_id)=(prior.operation_id,prior.target_id))
+      and not exists(select 1 from public.record_portability_v1_obligations c
+        left join public.record_portability_v1_obligations n on (n.operation_id,n.target_id,n.obligation_id)=(successor.operation_id,successor.target_id,c.obligation_id)
+        join public.record_write_obligations o on o.obligation_id=c.obligation_id
+        where (c.operation_id,c.target_id)=(prior.operation_id,prior.target_id) and (n.obligation_id is null
+          or o.operation_id is distinct from successor.operation_id
+          or record_platform_internal.record_portability_v1_obligation_owner_digest(prior.operation_id,c.obligation_id) is null
+          or record_platform_internal.record_portability_v1_obligation_owner_digest(prior.operation_id,c.obligation_id)
+            is distinct from record_platform_internal.record_portability_v1_obligation_owner_digest(successor.operation_id,c.obligation_id))))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_carried_successor(text,text,text,text) from public;
+
+-- Return an effective local identity only from an intact, single-source
+-- manifest and its original registered writer. NULL remains unknown; this
+-- function never asserts that the expected final object exists or is absent.
+create function record_platform_internal.record_portability_v1_local_source_expected(snapshot jsonb, obligation text)
+returns text language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare o public.record_write_obligations; current_row jsonb; registration json; return_document json;
+  v jsonb; returned jsonb; field text; expected text;
+begin
+  select w.* into o from public.record_write_obligations w where w.obligation_id=obligation;
+  if not found or jsonb_typeof(snapshot) is distinct from 'object' or jsonb_typeof(snapshot->'outcome') is distinct from 'string'
+    or o.backend_kind<>'local' or o.namespace_id is null or o.incarnation_id is null or o.storage_binding is not null
+    or o.temporary_key is distinct from 'sha256/.blob-tmp-'||o.obligation_id then return null; end if;
+  current_row:=to_jsonb(o);
+  foreach field in array array['obligation_id','writer_instance','request_seq','writer_principal','project_id',
+    'origin_kind','origin_id','origin_generation','origin_owner_id','origin_owner_generation',
+    'plan_digest','archive_digest','namespace_id','incarnation_id','backend_kind','storage_binding','canonical_key',
+    'sha256_digest','size_bytes','publication_id','registration_command','temporary_key','quota_settlement_id',
+    'dispatch_id','object_version','return_command'] loop
+    if not (snapshot ? field) or snapshot->field is distinct from current_row->field then return null; end if;
+  end loop;
+  if not (snapshot ?& array['origin_owner_expires_at','created_at','dispatched_at','returned_at'])
+    or (snapshot->>'origin_owner_expires_at')::timestamptz is distinct from o.origin_owner_expires_at
+    or (snapshot->>'created_at')::timestamptz is distinct from o.created_at
+    or (snapshot->>'dispatched_at')::timestamptz is distinct from o.dispatched_at
+    or (snapshot->>'returned_at')::timestamptz is distinct from o.returned_at then return null; end if;
+  registration:=convert_from(o.registration_command,'UTF8')::json;
+  if json_typeof(registration) is distinct from 'object'
+    or (select count(*) from json_each(registration))<>(select count(distinct j.key) from json_each(registration) j) then return null; end if;
+  v:=record_platform_internal.local_blob_command(o.registration_command,array[
+    'obligation_id','writer_instance','request_seq','project_id','origin_kind','origin_id','origin_generation',
+    'origin_owner_id','origin_owner_generation','origin_owner_expires_at','draft_id','plan_digest','archive_digest',
+    'namespace_id','incarnation_id','backend_kind','storage_binding','key','sha256','size','publication_id','target_record_id','target_attachment_id']);
+  if (v->>'obligation_id',v->>'writer_instance',v->>'request_seq',v->>'project_id',v->>'origin_kind',v->>'origin_id',
+      v->>'origin_generation',v->>'namespace_id',v->>'incarnation_id',v->>'backend_kind',v->>'storage_binding',v->>'key',v->>'sha256',v->>'size')
+    is distinct from (o.obligation_id,o.writer_instance::text,o.request_seq::text,o.project_id,o.origin_kind,o.origin_id,
+      o.origin_generation::text,o.namespace_id::text,o.incarnation_id::text,o.backend_kind,null::text,o.canonical_key,encode(o.sha256_digest,'hex'),o.size_bytes::text)
+    or v->>'publication_id' is distinct from o.publication_id or v->>'origin_owner_id' is distinct from o.origin_owner_id
+    or (v->>'origin_owner_generation')::bigint is distinct from o.origin_owner_generation
+    or (v->>'origin_owner_expires_at')::timestamptz is distinct from o.origin_owner_expires_at
+    or v->>'plan_digest' is distinct from encode(o.plan_digest,'hex')
+    or v->>'archive_digest' is distinct from encode(o.archive_digest,'hex') then return null; end if;
+  if o.return_command is not null then
+    return_document:=convert_from(o.return_command,'UTF8')::json;
+    if json_typeof(return_document) is distinct from 'object'
+      or (select count(*) from json_each(return_document))<>(select count(distinct j.key) from json_each(return_document) j) then return null; end if;
+    returned:=record_platform_internal.local_blob_command(o.return_command,
+      array['obligation_id','writer_instance','dispatch_id','outcome','version','key','sha256','size']);
+    if (returned->>'obligation_id',returned->>'writer_instance',returned->>'dispatch_id',returned->>'outcome',
+        returned->>'version',returned->>'key',returned->>'sha256',returned->>'size')
+      is distinct from (o.obligation_id,o.writer_instance::text,o.dispatch_id::text,o.outcome,
+        o.object_version,o.canonical_key,encode(o.sha256_digest,'hex'),o.size_bytes::text) then return null; end if;
+  end if;
+  expected:='local-v2-'||o.obligation_id;
+  if o.object_version is null then
+    if snapshot->>'object_version' is not null or not coalesce(record_platform_internal.local_blob_origin_closed(o.obligation_id),false)
+      or ((snapshot->>'outcome' in ('registered','local_excluded') and o.outcome in ('registered','local_excluded')
+          and o.dispatch_id is null and o.dispatched_at is null and o.returned_at is null and o.return_command is null)
+        or (snapshot->>'outcome'='failed' and o.outcome='failed' and o.dispatch_id is not null
+          and o.dispatched_at is not null and o.returned_at is not null and o.return_command is not null
+          and returned->>'dispatch_id'=o.dispatch_id::text and returned->>'outcome'='failed'
+          and returned->>'version' is null)) is not true then return null; end if;
+  elsif o.object_version<>expected or snapshot->>'outcome'<>'materialized' or o.outcome<>'materialized' or o.dispatch_id is null
+    or o.dispatched_at is null or o.returned_at is null or o.return_command is null
+    or returned->>'dispatch_id' is distinct from o.dispatch_id::text or returned->>'outcome' is distinct from 'materialized'
+    or returned->>'version' is distinct from expected then return null;
+  end if;
+  return expected;
+exception when data_exception then return null;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_local_source_expected(jsonb,text) from public;
+
+create function record_platform_internal.record_portability_v1_local_expected_version(op text, target text)
+returns text language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare t public.record_portability_v1_targets; o public.record_write_obligations;
+  snapshot jsonb; expected text;
+begin
+  select x.* into t from public.record_portability_v1_targets x
+    where x.operation_id=op and x.target_id=target and x.backend_kind='local'
+      and x.disposition in ('local','retained_shared');
+  if not found or not record_platform_internal.record_portability_v1_eligible(op)
+    or t.namespace_id is null or t.incarnation_id is null or t.obligation_id is null
+    or t.sha256 is null or t.byte_size is null or t.byte_size<=0 or t.storage_binding is not null
+    or t.blob_key is distinct from 'sha256/'||encode(t.sha256,'hex') then return null; end if;
+  select c.snapshot into snapshot from public.record_portability_v1_obligations c
+    where (c.operation_id,c.target_id,c.obligation_id)=(t.operation_id,t.target_id,t.obligation_id);
+  if not found or jsonb_typeof(snapshot) is distinct from 'object'
+    or jsonb_typeof(snapshot->'outcome') is distinct from 'string' then return null; end if;
+  select w.* into o from public.record_write_obligations w where w.obligation_id=t.obligation_id;
+  if not found or (o.backend_kind,o.namespace_id,o.incarnation_id,o.canonical_key,o.sha256_digest,o.size_bytes,o.storage_binding)
+    is distinct from ('local',t.namespace_id,t.incarnation_id,t.blob_key,t.sha256,t.byte_size,null::bytea)
+    or o.temporary_key is distinct from 'sha256/.blob-tmp-'||o.obligation_id then return null; end if;
+  expected:=record_platform_internal.record_portability_v1_local_source_expected(snapshot,o.obligation_id);
+  if expected is null or (t.object_version_id is not null and t.object_version_id<>expected)
+    or t.object_version_id is distinct from o.object_version then return null; end if;
+  if exists(select 1 from public.record_portability_v1_obligations other
+    join public.record_write_obligations w on w.obligation_id=other.obligation_id
+    where other.operation_id=op and other.obligation_id<>o.obligation_id
+      and (other.snapshot->>'backend_kind' is null or other.snapshot->>'backend_kind'='local')
+      and (other.snapshot->>'canonical_key' is null or other.snapshot->>'canonical_key'=t.blob_key)
+      and (other.snapshot->>'namespace_id' is null or other.snapshot->>'namespace_id'=t.namespace_id::text)
+      and (other.snapshot->>'incarnation_id' is null or other.snapshot->>'incarnation_id'=t.incarnation_id::text)
+      and (other.target_id<>t.target_id or w.object_version is distinct from expected
+        or record_platform_internal.record_portability_v1_obligation_owner_digest(op,w.obligation_id) is null
+        or not record_platform_internal.record_portability_v1_local_owner_version(w)))
+    or exists(select 1 from public.record_portability_v1_artifacts a where a.operation_id=op
+      and a.backend_kind='local' and a.blob_key=t.blob_key
+      and (a.namespace_id is null or a.namespace_id=t.namespace_id)
+      and (a.incarnation_id is null or a.incarnation_id=t.incarnation_id)
+      and (a.object_version_id is distinct from expected or not exists(select 1 from public.record_portability_v1_obligations c
+          where (c.operation_id,c.target_id,c.obligation_id)=(a.operation_id,t.target_id,a.obligation_id))
+        or a.sha256 is distinct from t.sha256 or a.byte_size is distinct from t.byte_size))
+    or exists(select 1 from public.record_portability_v1_targets other where other.operation_id=op
+      and other.target_id<>t.target_id and other.backend_kind='local' and other.blob_key=t.blob_key
+      and (other.namespace_id is null or other.namespace_id=t.namespace_id)
+      and (other.incarnation_id is null or other.incarnation_id=t.incarnation_id)
+      and (other.obligation_id is distinct from o.obligation_id
+        or (other.object_version_id is not null and other.object_version_id<>expected))) then return null; end if;
+  return expected;
+exception when data_exception then
+  return null;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_local_expected_version(text,text) from public;
+
+create function record_platform_internal.record_portability_v1_live_obligation_digest(op text, target text, obligation text)
+returns bytea language sql volatile security definer set search_path=pg_catalog as $$
+  select record_platform_internal.record_portability_v1_owner_digest('record_write_obligations',jsonb_build_array(o.obligation_id),
+    jsonb_build_array(o.backend_kind,o.canonical_key,o.object_version,encode(o.sha256_digest,'hex'),o.size_bytes,
+      to_char(o.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),o.namespace_id,o.incarnation_id,encode(o.storage_binding,'hex')),
+    jsonb_build_array(o.project_id,o.origin_kind,o.origin_id,o.origin_generation,o.record_id,o.record_epoch,o.publication_id))
+  from public.record_portability_v1_targets t join public.record_write_obligations o on o.obligation_id=obligation
+  where t.operation_id=op and t.target_id=target
+    and (o.backend_kind,o.canonical_key,o.sha256_digest,o.size_bytes,o.namespace_id,o.incarnation_id,o.storage_binding)
+      is not distinct from (t.backend_kind,t.blob_key,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+    and o.object_version is not distinct from (case when t.backend_kind='local'
+      then record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id)
+      else t.object_version_id end)
+    and o.outcome='materialized' and o.dispatch_id is not null and o.dispatched_at is not null
+    and o.returned_at is not null and o.return_command is not null
+    and encode(o.storage_binding,'hex') is not distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id'=o.dispatch_id::text
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome'=o.outcome
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'version'=o.object_version
+    and ((o.backend_kind='s3' and o.storage_binding is not null and o.object_version is not null and o.object_version<>'null')
+      or (o.backend_kind='local' and o.namespace_id is not null and o.incarnation_id is not null
+        and record_platform_internal.record_portability_v1_local_owner_version(o)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_live_obligation_digest(text,text,text) from public;
+
+create function record_platform_internal.record_portability_v1_obligation_owner_survives(op text, obligation text, digest bytea)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select digest is not null and exists(select 1 from public.record_write_obligations o
+      join public.record_portability_v1_preparations p on p.operation_id=op
+      join public.record_portability_v1_targets t on t.operation_id=p.operation_id and t.disposition='retained_shared'
+      where digest=record_platform_internal.record_portability_v1_live_obligation_digest(op,t.target_id,obligation)
+        and t.retained_evidence @> jsonb_build_array(jsonb_build_array('write_obligation',obligation,encode(digest,'hex')))
+        and o.obligation_id=obligation and o.outcome='materialized' and o.published_at is not null
+        and o.cleanup_completed_at is null and o.cleanup_owner_id is null and o.operation_id is null
+        and o.handed_off_at is null
+        and ((o.record_id is not null and o.record_id<>p.record_id)
+          or exists(select 1 from public.record_write_obligation_targets ot where ot.obligation_id=o.obligation_id
+            and ot.record_id<>p.record_id and ot.handed_off_at is null)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_obligation_owner_survives(text,text,bytea) from public;
+
+
+-- This is a physical completion proof, not an authorization to dispatch.
+-- Reconstruct the coordinator's exact immutable linked inventory so a
+-- retained successor cannot be established by a copied receipt or tuple.
+create function record_platform_internal.record_portability_v1_local_task_proof(g public.blob_gc_deletions)
+returns boolean language plpgsql volatile strict security definer set search_path=pg_catalog as $$
+declare anchor public.local_blob_key_anchors; raw json; command jsonb; inventory bytea;
+begin
+  if g.local_contract_version<>2 or g.backend_kind is distinct from 'local' or g.deletion_state is distinct from 'completed'
+    or g.completed_at is null or not isfinite(g.completed_at) or g.retry_at is not null or not g.final_identity_bound
+    or g.final_was_present is null or g.physical_delete_result is null or g.physical_delete_result not in ('deleted','already_absent')
+    or (g.physical_delete_result='deleted' and not g.final_was_present)
+    or g.owner_id is null or g.owner_generation is null or g.owner_generation<1
+    or g.lease_expires_at is null or g.cleanup_dispatch_id is null or g.completion_command is null
+    or g.inventory_digest is null or g.receipt_digest is distinct from
+      sha256(convert_to('HOUFENG-LOCAL-GC-V2','UTF8')||g.completion_command) then return false; end if;
+  select a.* into anchor from public.local_blob_key_anchors a
+    where (a.namespace_id,a.incarnation_id,a.canonical_key)=(g.namespace_id,g.incarnation_id,g.blob_key);
+  if not found or (g.final_was_present and (g.final_device is distinct from anchor.filesystem_device
+      or g.final_inode is null or g.final_inode<=0 or g.object_version is null or g.size_bytes is null or g.size_bytes<=0))
+    or (not g.final_was_present and (g.final_device is not null or g.final_inode is not null
+      or g.object_version is not null or g.size_bytes is not null)) then return false; end if;
+  if exists(select 1 from public.local_blob_gc_obligations l join public.record_write_obligations w using(obligation_id)
+      where l.deletion_id=g.deletion_id and (
+        (w.namespace_id,w.incarnation_id,w.canonical_key) is distinct from (g.namespace_id,g.incarnation_id,g.blob_key)
+        or w.temporary_key is distinct from 'sha256/.blob-tmp-'||w.obligation_id
+        or (l.seal_obligation and (w.cleanup_completed_at is null or w.quota_settled_at is null
+          or (w.cleanup_outcome,w.cleanup_receipt) is distinct from (g.physical_delete_result,g.receipt_digest))))) then return false; end if;
+  select sha256(convert_to('{"Namespace":'||to_json(g.namespace_id::text)::text||',"Incarnation":'||to_json(g.incarnation_id::text)::text
+    ||',"Key":'||to_json(g.blob_key)::text||',"Targets":['||coalesce(string_agg(
+      '{"ID":'||to_json(w.obligation_id)::text||',"Temporary":'||to_json(w.temporary_key)::text||'}',','
+      order by w.obligation_id collate "C"),'')||']}', 'UTF8')) into inventory
+    from public.local_blob_gc_obligations l join public.record_write_obligations w using(obligation_id)
+    where l.deletion_id=g.deletion_id;
+  if inventory is distinct from g.inventory_digest then return false; end if;
+  raw:=convert_from(g.completion_command,'UTF8')::json;
+  if json_typeof(raw) is distinct from 'object' or
+    (select count(*) from json_each(raw))<>(select count(distinct x.key) from json_each(raw) x) then return false; end if;
+  command:=record_platform_internal.local_blob_command(g.completion_command,array['deletion_id','namespace_id','incarnation_id',
+    'cleanup_owner_id','cleanup_generation','cleanup_expires_at','cleanup_dispatch_id','operation_id','operation_owner_id',
+    'operation_generation','operation_expires_at','outcome','inventory_digest']);
+  -- Historical operation owner fields describe the authority at completion;
+  -- a later takeover must not replace them with the current caller tuple.
+  if (g.operation_id is null and (command->>'operation_owner_id' is not null or command->>'operation_generation' is not null
+      or command->>'operation_expires_at' is not null))
+    or (g.operation_id is not null and (command->>'operation_owner_id' is null
+      or command->>'operation_owner_id' !~ '^[a-z0-9_-]{1,128}$'
+      or command->>'operation_generation' is null or (command->>'operation_generation')::bigint<1
+      or command->>'operation_expires_at' is null or not isfinite((command->>'operation_expires_at')::timestamptz))) then return false; end if;
+  return (command->>'deletion_id',command->>'namespace_id',command->>'incarnation_id',command->>'operation_id',
+    command->>'cleanup_owner_id',(command->>'cleanup_generation')::bigint,(command->>'cleanup_expires_at')::timestamptz,
+    (command->>'cleanup_dispatch_id')::uuid,command->>'outcome',command->>'inventory_digest') is not distinct from
+    (g.deletion_id,g.namespace_id::text,g.incarnation_id::text,g.operation_id,g.owner_id,g.owner_generation,
+      g.lease_expires_at,g.cleanup_dispatch_id,g.physical_delete_result,encode(g.inventory_digest,'hex'));
+exception when data_exception then return false;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_local_task_proof(public.blob_gc_deletions) from public;
+
+-- A successor must carry this exact captured responsibility. A registered V2
+-- task or a sealed ordinary claim can carry it before physical completion.
+create function record_platform_internal.record_portability_v1_local_successor(op text, target text, task text)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_portability_v1_targets t
+    join public.blob_gc_deletions g on g.deletion_id=task
+    join public.record_portability_v1_obligations captured on captured.operation_id=t.operation_id
+      and captured.target_id=t.target_id
+    join public.record_write_obligations o on o.obligation_id=captured.obligation_id
+    left join public.local_blob_gc_obligations link on link.deletion_id=g.deletion_id
+      and link.obligation_id=o.obligation_id and link.seal_obligation
+    where t.operation_id=op and t.target_id=target and t.disposition='retained_shared' and t.backend_kind='local'
+      and record_platform_internal.record_portability_v1_eligible(t.operation_id)
+      and g.operation_id is distinct from t.operation_id and g.local_contract_version=2 and g.backend_kind='local'
+      and g.project_id='default' and (g.namespace_id,g.incarnation_id,g.blob_key,g.sha256_digest)
+        is not distinct from (t.namespace_id,t.incarnation_id,t.blob_key,t.sha256)
+      and ((g.operation_id is null and g.purge_mode='ordinary')
+        or (g.operation_id is not null and g.purge_mode='permanent'))
+      and (t.object_version_id is null or t.object_version_id='local-v2-'||o.obligation_id)
+      and t.obligation_id=o.obligation_id
+      and record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id)='local-v2-'||o.obligation_id
+      and (not g.final_identity_bound or not g.final_was_present
+        or (g.object_version,g.size_bytes) is not distinct from ('local-v2-'||o.obligation_id,t.byte_size))
+      and ((g.deletion_state='completed' and link.obligation_id is not null
+        and record_platform_internal.record_portability_v1_local_task_proof(g)
+        and g.physical_delete_result in ('deleted','already_absent')
+      and g.completed_at is not null and g.final_identity_bound and g.final_was_present is not null
+      and g.inventory_digest is not null and g.completion_command is not null
+      and g.receipt_digest=record_platform_internal.digest(convert_to('HOUFENG-LOCAL-GC-V2','UTF8')||g.completion_command,'sha256')
+      and (not g.final_was_present or (g.object_version='local-v2-'||o.obligation_id and g.size_bytes=t.byte_size
+        and g.final_device is not null and g.final_inode is not null))
+      and (t.object_version_id is null or t.object_version_id='local-v2-'||o.obligation_id)
+      and (convert_from(g.completion_command,'UTF8')::jsonb)->>'deletion_id'=g.deletion_id
+      and ((convert_from(g.completion_command,'UTF8')::jsonb)->>'namespace_id')::uuid=g.namespace_id
+      and ((convert_from(g.completion_command,'UTF8')::jsonb)->>'incarnation_id')::uuid=g.incarnation_id
+      and (convert_from(g.completion_command,'UTF8')::jsonb)->>'outcome'=g.physical_delete_result
+      and (convert_from(g.completion_command,'UTF8')::jsonb)->>'inventory_digest'=encode(g.inventory_digest,'hex')
+      and (convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_dispatch_id'=g.cleanup_dispatch_id::text
+      and (convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_owner_id'=g.owner_id
+      and ((convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_generation')::bigint=g.owner_generation
+      and ((convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_expires_at')::timestamptz=g.lease_expires_at
+      and (convert_from(g.completion_command,'UTF8')::jsonb)->>'operation_id' is not distinct from g.operation_id
+      ) or (g.deletion_state in ('pending','claimed','retry_wait') and link.obligation_id is not null
+        and (g.deletion_state='pending' or g.cleanup_dispatch_id is not null)
+        and ((g.operation_id is not null and o.operation_id=g.operation_id and (
+          exists(select 1 from public.record_portability_cleanup_targets pt
+            join public.record_portability_cleanup_preparations pp on pp.operation_id=pt.operation_id
+            where pt.deletion_id=g.deletion_id and pt.operation_id=g.operation_id and pt.blob_key=g.blob_key
+              and (pp.namespace_id,pp.incarnation_id) is not distinct from (g.namespace_id,g.incarnation_id))
+          or exists(select 1 from public.record_portability_v1_targets successor
+            join public.record_portability_v1_obligations source
+              on (source.operation_id,source.target_id,source.obligation_id)=
+                 (successor.operation_id,successor.target_id,o.obligation_id)
+            where successor.operation_id=g.operation_id and successor.disposition='local'
+              and successor.local_deletion_id=g.deletion_id and successor.obligation_id=o.obligation_id
+              and (successor.backend_kind,successor.namespace_id,successor.incarnation_id,successor.blob_key,
+                   successor.object_version_id,successor.sha256,successor.byte_size,successor.storage_binding)
+                is not distinct from (t.backend_kind,t.namespace_id,t.incarnation_id,t.blob_key,
+                   t.object_version_id,t.sha256,t.byte_size,t.storage_binding)
+              and record_platform_internal.record_portability_v1_eligible(successor.operation_id)
+              and not exists(select 1 from public.record_portability_v1_obligations c
+                where (c.operation_id,c.target_id)=(successor.operation_id,successor.target_id) and not exists(
+                  select 1 from public.local_blob_gc_obligations l where (l.deletion_id,l.obligation_id)=(g.deletion_id,c.obligation_id)
+                    and l.seal_obligation))
+              and not exists(select 1 from public.local_blob_gc_obligations l where l.deletion_id=g.deletion_id and
+                (not l.seal_obligation or not exists(select 1 from public.record_portability_v1_obligations c
+                  where (c.operation_id,c.target_id,c.obligation_id)=(successor.operation_id,successor.target_id,l.obligation_id))))
+              and record_platform_internal.record_portability_v1_local_expected_version(successor.operation_id,successor.target_id)
+                =record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id))))
+          or (g.operation_id is null and o.operation_id is null))))
+      and not exists(select 1 from public.record_portability_v1_targets other
+        where other.local_deletion_id=g.deletion_id and not record_platform_internal.record_portability_v1_eligible(other.operation_id)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_local_successor(text,text,text) from public;
+
+-- A caller with no recorded S3 route cannot prove that a same-key/version
+-- manifest belongs to another route. Unknown components match conservatively.
+create function record_platform_internal.record_portability_v1_gc_barrier_impl(
+  backend text, namespace uuid, incarnation uuid, key text, version text, registered_deletion_id text, bound_route bytea)
+returns void language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare t public.record_portability_v1_targets;
+begin
+  for t in select x.* from public.record_portability_v1_targets x
+    cross join lateral (select case when x.backend_kind='local'
+      then record_platform_internal.record_portability_v1_local_expected_version(x.operation_id,x.target_id)
+      else x.object_version_id end expected_version) identity
+    where x.backend_kind=backend and x.blob_key=key
+      and (backend<>'local' or (x.namespace_id is null or namespace is null or x.namespace_id=namespace)
+        and (x.incarnation_id is null or incarnation is null or x.incarnation_id=incarnation))
+      and (identity.expected_version is null or version is null or identity.expected_version=version)
+      and (backend<>'s3' or bound_route is null or x.storage_binding is null or x.storage_binding=bound_route)
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    if not record_platform_internal.record_portability_v1_eligible(t.operation_id) then
+      raise exception using errcode='55000',message='portability V1 manifest is ineligible for GC';
+    end if;
+    if t.backend_kind='local' and record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id) is null then
+      raise exception using errcode='55000',message='portability V1 local version provenance unavailable';
+    end if;
+    if t.disposition='local' and (t.local_deletion_id is null or registered_deletion_id is null
+        or registered_deletion_id is distinct from t.local_deletion_id)
+      or t.disposition='s3' and (registered_deletion_id is null or registered_deletion_id is distinct from t.target_id) then
+      raise exception using errcode='55000',message='portability V1 target belongs to another GC task';
+    end if;
+    if t.disposition='local' and not exists(
+      select 1 from public.blob_gc_deletions g
+      where g.deletion_id=t.local_deletion_id and g.operation_id=t.operation_id
+        and g.project_id='default' and g.purge_mode='permanent' and g.backend_kind='local'
+        and g.local_contract_version=2 and (g.namespace_id,g.incarnation_id,g.blob_key,g.sha256_digest)
+          is not distinct from (t.namespace_id,t.incarnation_id,t.blob_key,t.sha256)
+        and (not g.final_identity_bound or not g.final_was_present
+          or (g.object_version,g.size_bytes) is not distinct from
+            (record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id),t.byte_size))) then
+      raise exception using errcode='55000',message='portability V1 registered local task unavailable';
+    end if;
+    if t.disposition='retained_shared'
+      and not record_platform_internal.record_portability_v1_local_successor(t.operation_id,t.target_id,registered_deletion_id)
+      and not exists(
+      select 1 from public.record_portability_v1_targets handoff
+      where handoff.operation_id<>t.operation_id and handoff.backend_kind=t.backend_kind
+        and (handoff.blob_key,handoff.namespace_id,handoff.incarnation_id,handoff.storage_binding,handoff.sha256,handoff.byte_size)
+          is not distinct from (t.blob_key,t.namespace_id,t.incarnation_id,t.storage_binding,t.sha256,t.byte_size)
+        and (case when t.backend_kind='local' then record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id)
+          else t.object_version_id end) is not null
+        and (case when handoff.backend_kind='local' then record_platform_internal.record_portability_v1_local_expected_version(handoff.operation_id,handoff.target_id)
+          else handoff.object_version_id end) is not distinct from
+          (case when t.backend_kind='local' then record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id)
+            else t.object_version_id end)
+        and handoff.disposition='s3' and handoff.target_id=registered_deletion_id
+        and record_platform_internal.record_portability_v1_eligible(handoff.operation_id)
+        and (exists(select 1 from jsonb_array_elements(t.retained_evidence) evidence(value)
+          where case when jsonb_typeof(evidence.value)='array' then jsonb_array_length(evidence.value)=3 else false end
+            and ((evidence.value->>0 in ('export_artifact','import_artifact')
+            and evidence.value->>2 ~ '^[0-9a-f]{64}$'
+            and exists(select 1 from public.record_portability_v1_artifacts a
+              where a.operation_id=t.operation_id and a.target_id=t.target_id
+                and a.source_kind=case evidence.value->>0 when 'export_artifact' then 'export' else 'import' end
+                and a.artifact_id=evidence.value->>1)
+            and exists(select 1 from public.record_portability_v1_artifacts a
+              where a.operation_id=handoff.operation_id and a.target_id=handoff.target_id
+                and a.source_kind=case evidence.value->>0 when 'export_artifact' then 'export' else 'import' end
+                and a.artifact_id=evidence.value->>1)
+            and encode(record_platform_internal.record_portability_v1_artifact_owner_digest(t.operation_id,
+              case evidence.value->>0 when 'export_artifact' then 'export' else 'import' end,evidence.value->>1),'hex')=evidence.value->>2
+            and record_platform_internal.record_portability_v1_artifact_owner_digest(t.operation_id,
+              case evidence.value->>0 when 'export_artifact' then 'export' else 'import' end,evidence.value->>1)
+              =record_platform_internal.record_portability_v1_artifact_owner_digest(handoff.operation_id,
+                case evidence.value->>0 when 'export_artifact' then 'export' else 'import' end,evidence.value->>1))
+              or (evidence.value->>0='write_obligation' and evidence.value->>2 ~ '^[0-9a-f]{64}$'
+                and exists(select 1 from public.record_portability_v1_obligations o
+                  where o.operation_id=t.operation_id and o.target_id=t.target_id and o.obligation_id=evidence.value->>1)
+                and exists(select 1 from public.record_portability_v1_obligations o
+                  where o.operation_id=handoff.operation_id and o.target_id=handoff.target_id and o.obligation_id=evidence.value->>1)
+                and encode(record_platform_internal.record_portability_v1_obligation_owner_digest(t.operation_id,evidence.value->>1),'hex')=evidence.value->>2
+                and record_platform_internal.record_portability_v1_obligation_owner_digest(t.operation_id,evidence.value->>1)
+                  =record_platform_internal.record_portability_v1_obligation_owner_digest(handoff.operation_id,evidence.value->>1))))
+          or record_platform_internal.record_portability_v1_carried_successor(t.operation_id,t.target_id,handoff.operation_id,handoff.target_id))) then
+      raise exception using errcode='55000',message='portability V1 retained responsibility has no exact durable handoff';
+    end if;
+  end loop;
+end $$;
+
+-- This barrier authorizes pending preparation only, never dispatch or completion.
+create function record_platform_internal.record_portability_v1_gc_prepare_barrier(v jsonb, purge boolean, legacy bytea)
+returns void language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare t public.record_portability_v1_targets; g public.blob_gc_deletions; target_record text;
+begin
+  if current_setting('transaction_isolation')<>'read committed' then
+    raise exception using errcode='25000',message='portability preparation requires read committed';
+  end if;
+  -- The shared epoch prevents a preparation from appearing after this
+  -- observation. Unrelated GC must retain its original blocking lock order.
+  perform record_platform_internal.record_portability_v1_epoch_share();
+  if not exists(select 1 from public.record_portability_v1_targets x
+    where x.backend_kind='local' and x.blob_key=v->>'key'
+      and (x.namespace_id is null or v->>'namespace_id' is null or x.namespace_id=(v->>'namespace_id')::uuid)
+      and (x.incarnation_id is null or v->>'incarnation_id' is null or x.incarnation_id=(v->>'incarnation_id')::uuid)) then
+    return;
+  end if;
+  begin
+    perform 1 from public.attachment_quota_accounts where project_id='default' for update nowait;
+    lock table public.blob_objects in share row exclusive mode nowait;
+    lock table public.attachment_upload_parts in share row exclusive mode nowait;
+    perform 1 from public.record_write_obligations o
+      where o.namespace_id=(v->>'namespace_id')::uuid and o.incarnation_id=(v->>'incarnation_id')::uuid
+        and o.canonical_key=v->>'key' order by o.obligation_id collate "C" for update nowait;
+  exception when lock_not_available then
+    raise exception using errcode='40001',message='portability preparation source changed; restart transaction';
+  end;
+  if purge and legacy is null then
+    select record_id into target_record from public.record_deletion_gates where operation_id=v->>'operation_id';
+  end if;
+  select * into g from public.blob_gc_deletions where deletion_id=v->>'deletion_id';
+  for t in select x.* from public.record_portability_v1_targets x
+    cross join lateral (select record_platform_internal.record_portability_v1_local_expected_version(x.operation_id,x.target_id) expected_version) identity
+    where x.backend_kind='local' and x.blob_key=v->>'key'
+      and (x.namespace_id is null or x.namespace_id=(v->>'namespace_id')::uuid)
+      and (x.incarnation_id is null or x.incarnation_id=(v->>'incarnation_id')::uuid)
+      and (identity.expected_version is null or v->>'expected_version' is null or identity.expected_version=v->>'expected_version')
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    if not record_platform_internal.record_portability_v1_eligible(t.operation_id) then
+      raise exception using errcode='55000',message='portability V1 manifest is ineligible for preparation';
+    end if;
+    if t.disposition='local' and (legacy is null or t.local_deletion_id is distinct from v->>'deletion_id'
+      or t.operation_id is distinct from v->>'operation_id') then
+      raise exception using errcode='55000',message='portability V1 target belongs to another GC task';
+    end if;
+    if t.disposition='local' and g.deletion_id is null and not exists(
+      select 1 from record_platform_internal.record_deletion_effect_scopes s
+      join public.record_portability_v1_preparations p on p.operation_id=s.operation_id
+      where s.transaction_id=pg_current_xact_id() and s.backend_pid=pg_backend_pid()
+        and s.operation_id=t.operation_id and s.record_id=p.record_id
+        and s.authority_kind='online_v1' and s.effect_kind='portability' and s.authority_digest=p.inventory_digest) then
+      raise exception using errcode='55000',message='portability V1 pending task requires exact preparation scope';
+    end if;
+    if t.disposition not in ('local','retained_shared') or not exists(
+      select 1 from public.record_portability_v1_obligations captured
+      join public.record_write_obligations o on o.obligation_id=captured.obligation_id
+      where (captured.operation_id,captured.target_id)=(t.operation_id,t.target_id)
+        and record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id)='local-v2-'||o.obligation_id
+        and (t.object_version_id is null or t.object_version_id='local-v2-'||o.obligation_id)
+        and t.obligation_id=o.obligation_id
+        and (v->>'expected_version' is null or v->>'expected_version'='local-v2-'||o.obligation_id)
+        and (legacy is not null or (not purge and o.operation_id is null
+          and coalesce(record_platform_internal.local_blob_origin_closed(o.obligation_id),false))
+          or (purge and (o.operation_id is null or o.operation_id=v->>'operation_id')
+            and (o.record_id=target_record or o.operation_id=v->>'operation_id'
+              or (o.origin_kind='export_artifact' and exists(select 1 from public.record_export_jobs j
+                where j.export_job_id=o.origin_id and j.record_id=target_record))
+              or exists(select 1 from public.record_write_obligation_targets ot
+                where ot.obligation_id=o.obligation_id and ot.record_id=target_record))))) then
+      raise exception using errcode='55000',message='portability V1 original source is unavailable for preparation';
+    end if;
+    if g.deletion_id is not null and (g.deletion_state<>'pending' or g.cleanup_dispatch_id is not null
+      or g.owner_id is not null or g.receipt_digest is not null or g.final_identity_bound
+      or (g.project_id,g.purge_mode,g.backend_kind,g.local_contract_version,g.namespace_id,g.incarnation_id,g.blob_key,g.operation_id)
+        is distinct from ('default',case when purge then 'permanent' else 'ordinary' end,'local',2,
+          (v->>'namespace_id')::uuid,(v->>'incarnation_id')::uuid,v->>'key',v->>'operation_id')) then
+      raise exception using errcode='55000',message='portability V1 pending task identity conflict';
+    end if;
+  end loop;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_gc_prepare_barrier(jsonb,boolean,bytea) from public;
+
+create function record_platform_internal.record_portability_v1_gc_barrier(
+  backend text, namespace uuid, incarnation uuid, key text, version text, registered_deletion_id text)
+returns void language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare effective_version text:=version;
+begin
+  -- Unknown version or route remains a possible match. The epoch lock keeps
+  -- an absent matching manifest absent until the original GC transaction ends;
+  -- a REPEATABLE READ snapshot older than a V1 epoch update fails with 40001.
+  perform record_platform_internal.record_portability_v1_epoch_share();
+  if not exists(select 1 from public.record_portability_v1_targets x
+    where x.backend_kind=backend and x.blob_key=key
+      and (backend<>'local' or (x.namespace_id is null or namespace is null or x.namespace_id=namespace)
+        and (x.incarnation_id is null or incarnation is null or x.incarnation_id=incarnation))) then
+    return;
+  end if;
+  if current_setting('transaction_isolation')<>'read committed' then
+    raise exception using errcode='25000',message='portability GC requires read committed';
+  end if;
+  begin
+    perform 1 from public.attachment_quota_accounts where project_id='default' for update nowait;
+    lock table public.blob_objects in share row exclusive mode nowait;
+    lock table public.attachment_upload_parts in share row exclusive mode nowait;
+    lock table public.record_portability_v1_targets in share mode nowait;
+    -- An unbound task may use only its own unique authenticated V1 target's
+    -- expected identity for matching; absence or ambiguity stays unknown.
+    if backend='local' and effective_version is null and registered_deletion_id is not null then
+      select case when count(*)=1 then min(identity.expected_version) end into effective_version
+      from public.blob_gc_deletions g join public.record_portability_v1_targets t
+        on t.local_deletion_id=g.deletion_id and t.operation_id=g.operation_id and t.disposition='local'
+      cross join lateral (select record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id) expected_version) identity
+      where g.deletion_id=registered_deletion_id and g.backend_kind='local' and g.local_contract_version=2
+        and g.object_version is null and (g.namespace_id,g.incarnation_id,g.blob_key,g.sha256_digest)
+          is not distinct from (t.namespace_id,t.incarnation_id,t.blob_key,t.sha256)
+        and (g.namespace_id,g.incarnation_id,g.blob_key) is not distinct from (namespace,incarnation,key);
+    end if;
+    perform 1 from public.record_write_obligations o where exists(
+      select 1 from public.record_portability_v1_obligations c
+      join public.record_portability_v1_targets t on (t.operation_id,t.target_id)=(c.operation_id,c.target_id)
+      cross join lateral (select case when t.backend_kind='local'
+        then record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id)
+        else t.object_version_id end expected_version) identity
+      where c.obligation_id=o.obligation_id and t.backend_kind=backend and t.blob_key=key
+        and (backend<>'local' or (t.namespace_id is null or namespace is null or t.namespace_id=namespace)
+          and (t.incarnation_id is null or incarnation is null or t.incarnation_id=incarnation))
+        and (effective_version is null or identity.expected_version is null or identity.expected_version=effective_version))
+      order by o.obligation_id collate "C" for update nowait;
+  exception when lock_not_available then
+    raise exception using errcode='40001',message='portability GC source changed; restart transaction';
+  end;
+  perform record_platform_internal.record_portability_v1_gc_barrier_impl(backend,namespace,incarnation,key,effective_version,registered_deletion_id,null);
+end $$;
+
+create function record_platform_internal.record_portability_v1_gc_transition_guard()
+returns trigger language plpgsql security definer set search_path=pg_catalog as $$
+declare t public.record_portability_v1_targets;
+begin
+  perform record_platform_internal.record_portability_v1_epoch_share();
+  for t in select x.* from public.record_portability_v1_targets x
+    where x.disposition='retained_shared' and x.backend_kind=new.backend_kind and x.blob_key=new.blob_key
+      and (x.namespace_id is null or new.namespace_id is null or x.namespace_id=new.namespace_id)
+      and (x.incarnation_id is null or new.incarnation_id is null or x.incarnation_id=new.incarnation_id)
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    perform record_platform_internal.record_portability_v1_touch_retained(t.operation_id,t.target_id);
+  end loop;
+  if exists(select 1 from public.record_portability_v1_targets tx
+    where tx.disposition='local' and tx.local_deletion_id=coalesce(old.deletion_id,new.deletion_id)
+      and ((new.deletion_id,new.operation_id,new.project_id,new.purge_mode,new.backend_kind,new.local_contract_version,
+          new.namespace_id,new.incarnation_id,new.blob_key,new.sha256_digest)
+        is distinct from (tx.local_deletion_id,tx.operation_id,'default','permanent','local',2,
+          tx.namespace_id,tx.incarnation_id,tx.blob_key,tx.sha256)
+        or (new.final_identity_bound and new.final_was_present and (new.object_version,new.size_bytes)
+          is distinct from (record_platform_internal.record_portability_v1_local_expected_version(tx.operation_id,tx.target_id),tx.byte_size)))) then
+    raise exception using errcode='55000',message='portability V1 local task transition identity conflict';
+  end if;
+  if new.deletion_state in ('claimed','completed') then
+    perform record_platform_internal.record_portability_v1_gc_barrier(new.backend_kind,new.namespace_id,new.incarnation_id,
+      new.blob_key,new.object_version,new.deletion_id);
+  end if;
+  return new;
+end $$;
+create trigger record_portability_v1_gc_transition_guard before insert or update on public.blob_gc_deletions
+  for each row execute function record_platform_internal.record_portability_v1_gc_transition_guard();
+revoke all on function record_platform_internal.record_portability_v1_gc_barrier(text,uuid,uuid,text,text,text),
+  record_platform_internal.record_portability_v1_gc_barrier_impl(text,uuid,uuid,text,text,text,bytea),
+  record_platform_internal.record_portability_v1_gc_transition_guard() from public;
 
 create function public.local_portability_purge_prepare(bytea)
 returns jsonb language plpgsql security definer set search_path=pg_catalog
@@ -5705,7 +6992,7 @@ begin
           'namespace_id',p.namespace_id,'incarnation_id',p.incarnation_id,'key',key,
           'operation_id',p.operation_id,'operation_owner_id',v->>'operation_owner_id',
           'operation_generation',(v->>'operation_generation')::bigint,'operation_expires_at',v->>'operation_expires_at',
-          'expected_version',null,'orphaned_before',null,'publication_id',null)::text,'UTF8'),true);
+          'expected_version',null,'orphaned_before',null,'publication_id',null)::text,'UTF8'),true,null);
       end if;
       insert into public.record_portability_cleanup_targets(operation_id,deletion_id,blob_key) values(p.operation_id,g.deletion_id,key);
     end loop;
@@ -5755,6 +7042,15 @@ begin
     get diagnostics changed=row_count; removed:=removed+changed;
     insert into public.record_portability_cleanup_preparations(operation_id,record_id,namespace_id,incarnation_id,surface_digest,removed_rows)
       values(p.operation_id,p.record_id,p.namespace_id,p.incarnation_id,p.surface_digest,removed) returning * into p;
+    insert into public.local_blob_gc_obligations(deletion_id,obligation_id,seal_obligation)
+      select gd.deletion_id,o.obligation_id,true
+      from public.record_portability_cleanup_targets ct
+      join public.blob_gc_deletions gd on gd.deletion_id=ct.deletion_id and gd.operation_id=ct.operation_id
+      join public.record_write_obligations o on o.operation_id=gd.operation_id
+        and (o.namespace_id,o.incarnation_id,o.canonical_key)=(gd.namespace_id,gd.incarnation_id,gd.blob_key)
+      where ct.operation_id=p.operation_id and o.cleanup_completed_at is null
+      on conflict (deletion_id,obligation_id) do update set seal_obligation=true
+        where not public.local_blob_gc_obligations.seal_obligation;
   end if;
   result:=jsonb_build_object('targets',coalesce((select jsonb_agg(jsonb_build_object('deletion_id',t.deletion_id,'key',t.blob_key)
     order by t.blob_key) from public.record_portability_cleanup_targets t where t.operation_id=p.operation_id),'[]'::jsonb));
@@ -6037,7 +7333,7 @@ begin
   return true;
 end $$;
 
-create function public.record_outbox_drain_v2(bytea)
+create function record_platform_internal.record_outbox_drain(bytea,bigint)
 returns table(drained_count bigint,remaining boolean)
 language plpgsql security definer set search_path=pg_catalog as $$
 declare raw json; v jsonb; res public.deletion_reservations; gate public.record_deletion_gates;
@@ -6053,6 +7349,15 @@ begin
   perform public.source_application_admit();
   perform pg_advisory_xact_lock_shared(1213154899,1);
   perform pg_advisory_xact_lock(1213154899,81);
+  if $2 not in (1,2) then
+    raise exception using errcode='22023',message='invalid outbox drain version'; end if;
+  if $2=1 then
+    v:=record_platform_internal.legacy_adapter_lock($1,'record_collaboration');
+    generation:=(v->>'owner_generation')::bigint;
+    expiry:=(v->>'owner_expires_at')::timestamptz;
+    select x.* into strict res from public.deletion_reservations x where x.reservation_id=v->>'reservation_id';
+    select x.* into strict operation from public.record_purge_operations x where x.operation_id=v->>'operation_id';
+  else
   if $1 is null or octet_length($1) not between 1 and 65536 then
     raise exception using errcode='22023',message='invalid outbox drain command size'; end if;
   begin raw:=convert_from($1,'UTF8')::json;
@@ -6094,6 +7399,7 @@ begin
   if operation.reservation_id<>res.reservation_id or operation.project_id<>res.project_id then
     raise exception using errcode='42501',message='outbox drain operation mismatch'; end if;
   perform 1 from public.records x where x.project_id=res.project_id and x.record_id=res.object_id for update;
+  end if;
   perform 1 from public.object_content_leases x where x.project_id=res.project_id
     and x.object_kind=res.object_kind and x.object_id=res.object_id for update;
   lock table public.record_outbox in share row exclusive mode;
@@ -6322,13 +7628,28 @@ begin
   end loop;
   still:=not record_platform_internal.record_outbox_handoff_complete(operation.operation_id,res.object_id);
   if cnt=0 and still then raise exception using errcode='55000',message='outbox drain cannot establish complete handoff'; end if;
-  perform record_platform_internal.local_blob_cleanup_operation(operation.operation_id,v->>'owner_id',generation,expiry,res.object_id);
+  if $2=1 then
+    perform record_platform_internal.legacy_adapter_lock($1,'record_collaboration');
+    perform record_platform_internal.record_deletion_queue_owner_commit_check(operation.operation_id,v->>'owner_id',generation,expiry);
+  else
+    perform record_platform_internal.local_blob_cleanup_operation(operation.operation_id,v->>'owner_id',generation,expiry,res.object_id);
+  end if;
   return query select cnt,still;
 end $$;
+create function public.record_outbox_drain_v1(bytea)
+returns table(drained_count bigint,remaining boolean)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.record_outbox_drain($1,1) $$;
+create function public.record_outbox_drain_v2(bytea)
+returns table(drained_count bigint,remaining boolean)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.record_outbox_drain($1,2) $$;
 revoke all on function record_platform_internal.record_outbox_observed_route(public.record_outbox),
-  record_platform_internal.record_outbox_handoff_complete(text,text),public.record_outbox_drain_v2(bytea) from public;
+  record_platform_internal.record_outbox_handoff_complete(text,text),
+  record_platform_internal.record_outbox_drain(bytea,bigint),public.record_outbox_drain_v1(bytea),
+  public.record_outbox_drain_v2(bytea) from public;
 
-create function record_platform_internal.client_metadata_purge(bytea, text, boolean)
+create function record_platform_internal.client_metadata_purge(bytea, text, boolean, bigint)
 returns table (removed_surface_digest bytea, receipt_digest bytea,
   removed_row_count bigint, verified_absent_at timestamptz)
 language plpgsql security definer set search_path = pg_catalog
@@ -6361,6 +7682,31 @@ begin
   perform pg_advisory_xact_lock_shared(1213154899, 1);
   perform pg_advisory_xact_lock(1213154899,81);
 
+  if $4 not in (1,2) then
+    raise exception using errcode='22023',message='invalid client purge version';
+  end if;
+  if $4=1 then
+    command:=record_platform_internal.legacy_adapter_lock($1,$2);
+    owner_generation:=(command->>'owner_generation')::bigint;
+    owner_expires_at:=(command->>'owner_expires_at')::timestamptz;
+    expected_surface:=decode(command->>'surface_digest','hex');
+    select r.* into strict reservation from public.deletion_reservations r
+      where r.reservation_id=command->>'reservation_id';
+    select o.* into strict operation from public.record_purge_operations o
+      where o.operation_id=command->>'operation_id';
+    if not $3 then
+      insert into public.browser_record_cleanup_events(operation_id,project_id,record_id,cleanup_epoch,scopes)
+      values(operation.operation_id,reservation.project_id,reservation.object_id,reservation.fence_epoch,
+        array['markdown_draft_buffer','markdown_workspace','comparison_workbench','comparison_save_attempt']::text[])
+      on conflict on constraint browser_record_cleanup_events_operation_record_key do nothing;
+    end if;
+    if not exists(select 1 from public.browser_record_cleanup_events event
+      where (event.operation_id,event.project_id,event.record_id,event.cleanup_epoch,event.scopes)
+        is not distinct from (operation.operation_id,reservation.project_id,reservation.object_id,reservation.fence_epoch,
+          array['markdown_draft_buffer','markdown_workspace','comparison_workbench','comparison_save_attempt']::text[])) then
+      raise exception using errcode='55000',message='client cleanup event unavailable or conflicting';
+    end if;
+  else
   if $1 is null or octet_length($1) not between 1 and 65536 then
     raise exception using errcode = '22023', message = 'invalid client purge command size';
   end if;
@@ -6447,6 +7793,7 @@ begin
   end if;
   perform 1 from public.records r where r.project_id = reservation.project_id
     and r.record_id = reservation.object_id for update;
+  end if;
 
   -- Freeze the affected metadata tables during effects and absence checks.
   -- These locks do not authorize or change any browser delivery evidence.
@@ -6490,8 +7837,12 @@ begin
   if $3 and not has_receipt then
     raise exception using errcode = '55000', message = 'client purge receipt unavailable';
   end if;
-  perform record_platform_internal.local_blob_cleanup_operation(operation.operation_id, command->>'owner_id',
-    owner_generation, owner_expires_at, reservation.object_id);
+  if $4=1 then
+    perform record_platform_internal.legacy_adapter_lock($1,$2);
+  else
+    perform record_platform_internal.local_blob_cleanup_operation(operation.operation_id, command->>'owner_id',
+      owner_generation, owner_expires_at, reservation.object_id);
+  end if;
 
   if not has_receipt then
     if $2 = 'record_markdown_client' then
@@ -6624,8 +7975,16 @@ begin
         values (operation.operation_id, stored_surface, stored_receipt, stored_count, stored_absent_at);
     end if;
   end if;
-  perform record_platform_internal.local_blob_cleanup_operation(operation.operation_id, command->>'owner_id',
-    owner_generation, owner_expires_at, reservation.object_id);
+  if $4=1 then
+    perform record_platform_internal.legacy_adapter_lock($1,$2);
+    if not $3 then
+      perform record_platform_internal.record_deletion_queue_owner_commit_check(operation.operation_id,
+        command->>'owner_id',owner_generation,owner_expires_at);
+    end if;
+  else
+    perform record_platform_internal.local_blob_cleanup_operation(operation.operation_id, command->>'owner_id',
+      owner_generation, owner_expires_at, reservation.object_id);
+  end if;
   return query select stored_surface, stored_receipt, stored_count, stored_absent_at;
 end
 $$;
@@ -6634,44 +7993,72 @@ create function public.record_markdown_client_purge(bytea)
 returns table (removed_surface_digest bytea, receipt_digest bytea,
   removed_row_count bigint, verified_absent_at timestamptz)
 language sql security definer set search_path = pg_catalog
-as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_markdown_client', false) $$;
+as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_markdown_client', false, 2) $$;
 
 create function public.record_markdown_client_purge_verify(bytea)
 returns table (removed_surface_digest bytea, receipt_digest bytea,
   removed_row_count bigint, verified_absent_at timestamptz)
 language sql security definer set search_path = pg_catalog
-as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_markdown_client', true) $$;
+as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_markdown_client', true, 2) $$;
 
 create function public.record_comparison_purge(bytea)
 returns table (removed_surface_digest bytea, receipt_digest bytea,
   removed_row_count bigint, verified_absent_at timestamptz)
 language sql security definer set search_path = pg_catalog
-as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_comparison', false) $$;
+as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_comparison', false, 2) $$;
 
 create function public.record_comparison_purge_verify(bytea)
 returns table (removed_surface_digest bytea, receipt_digest bytea,
   removed_row_count bigint, verified_absent_at timestamptz)
 language sql security definer set search_path = pg_catalog
-as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_comparison', true) $$;
+as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_comparison', true, 2) $$;
 
 create function public.record_collaboration_purge_v2(bytea)
 returns table (removed_surface_digest bytea, receipt_digest bytea,
   removed_row_count bigint, verified_absent_at timestamptz)
 language sql security definer set search_path = pg_catalog
-as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_collaboration', false) $$;
+as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_collaboration', false, 2) $$;
 
 create function public.record_collaboration_purge_verify_v2(bytea)
 returns table (removed_surface_digest bytea, receipt_digest bytea,
   removed_row_count bigint, verified_absent_at timestamptz)
 language sql security definer set search_path = pg_catalog
-as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_collaboration', true) $$;
+as $$ select * from record_platform_internal.client_metadata_purge($1, 'record_collaboration', true, 2) $$;
+
+create function public.record_markdown_client_purge_v1(bytea)
+returns table (removed_surface_digest bytea, receipt_digest bytea, removed_row_count bigint, verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.client_metadata_purge($1,'record_markdown_client',false,1) $$;
+create function public.record_markdown_client_purge_verify_v1(bytea)
+returns table (removed_surface_digest bytea, receipt_digest bytea, removed_row_count bigint, verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.client_metadata_purge($1,'record_markdown_client',true,1) $$;
+create function public.record_comparison_purge_v1(bytea)
+returns table (removed_surface_digest bytea, receipt_digest bytea, removed_row_count bigint, verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.client_metadata_purge($1,'record_comparison',false,1) $$;
+create function public.record_comparison_purge_verify_v1(bytea)
+returns table (removed_surface_digest bytea, receipt_digest bytea, removed_row_count bigint, verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.client_metadata_purge($1,'record_comparison',true,1) $$;
+create function public.record_collaboration_purge_v1(bytea)
+returns table (removed_surface_digest bytea, receipt_digest bytea, removed_row_count bigint, verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.client_metadata_purge($1,'record_collaboration',false,1) $$;
+create function public.record_collaboration_purge_verify_v1(bytea)
+returns table (removed_surface_digest bytea, receipt_digest bytea, removed_row_count bigint, verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog
+as $$ select * from record_platform_internal.client_metadata_purge($1,'record_collaboration',true,1) $$;
 
 revoke all on function record_platform_internal.enforce_client_purge_receipt_immutable(),
   record_platform_internal.client_purge_field(bytea),
-  record_platform_internal.client_metadata_purge(bytea, text, boolean),
+  record_platform_internal.client_metadata_purge(bytea, text, boolean, bigint),
   public.record_markdown_client_purge(bytea), public.record_markdown_client_purge_verify(bytea),
   public.record_comparison_purge(bytea), public.record_comparison_purge_verify(bytea),
-  public.record_collaboration_purge_v2(bytea), public.record_collaboration_purge_verify_v2(bytea) from public;
+  public.record_collaboration_purge_v2(bytea), public.record_collaboration_purge_verify_v2(bytea),
+  public.record_markdown_client_purge_v1(bytea), public.record_markdown_client_purge_verify_v1(bytea),
+  public.record_comparison_purge_v1(bytea), public.record_comparison_purge_verify_v1(bytea),
+  public.record_collaboration_purge_v1(bytea), public.record_collaboration_purge_verify_v1(bytea) from public;
 
 -- The runtime issuer is the trusted caller for source authorization and the
 -- nine-adapter snapshot. These commands enforce its persisted identity and CAS;
@@ -7856,6 +9243,1150 @@ alter table public.record_import_entity_mappings add column owner_target_record_
 alter table public.record_import_entity_mappings add constraint record_import_mapping_owner_identity_check
   check (owner_target_record_id is null or (entity_kind in ('evidence','attachment')
     and owner_target_record_id ~ '^rec2_[0-9a-f]{32}$'));
+-- Outside artifact owners need not be members of this operation's deletion
+-- inventory. Authenticate their live row and parent against the recorded digest.
+create function record_platform_internal.record_portability_v1_live_artifact_digest(op text, target text, kind text, artifact text)
+returns bytea language sql volatile security definer set search_path=pg_catalog as $$
+  select record_platform_internal.record_portability_v1_owner_digest(
+    case source.kind when 'export' then 'record_export_artifacts' else 'record_import_artifacts' end,
+    jsonb_build_array(source.artifact_id),
+    jsonb_build_array(source.backend_kind,source.blob_key,source.object_version_id,encode(source.sha256,'hex'),source.byte_size,
+      to_char(source.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),source.namespace_id,
+      o.incarnation_id,encode(o.storage_binding,'hex'),source.obligation_id),
+    jsonb_build_array(source.job_id,source.artifact_role,source.job_route))
+  from (
+    select 'export'::text kind,a.export_artifact_id artifact_id,a.export_job_id job_id,a.artifact_kind artifact_role,
+      a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.created_at,a.namespace_id,a.obligation_id,
+      jsonb_build_array(j.export_job_id,j.project_id,j.record_id,j.export_kind) job_route
+    from public.record_export_artifacts a join public.record_export_jobs j on j.export_job_id=a.export_job_id
+    union all
+    select 'import'::text,a.import_artifact_id,a.import_job_id,a.artifact_role,a.backend_kind,a.blob_key,a.object_version_id,
+      a.sha256,a.byte_size,a.created_at,a.namespace_id,a.obligation_id,jsonb_build_array(j.import_job_id,j.project_id)
+    from public.record_import_artifacts a join public.record_import_jobs j on j.import_job_id=a.import_job_id
+  ) source
+  join public.record_portability_v1_targets t on t.operation_id=op and t.target_id=target
+  join public.record_write_obligations o on o.obligation_id=source.obligation_id
+  where source.kind=kind and source.artifact_id=artifact
+    and (source.backend_kind,source.blob_key,source.object_version_id,source.sha256,source.byte_size,source.namespace_id,
+      o.incarnation_id,o.storage_binding)
+      is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,
+        t.incarnation_id,t.storage_binding)
+    and (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id)
+      is not distinct from (source.backend_kind,source.blob_key,source.object_version_id,source.sha256,source.byte_size,source.namespace_id)
+    and o.origin_kind=case source.kind when 'export' then 'export_artifact' else 'import_archive' end
+    and o.origin_id=source.job_id and o.outcome='materialized' and o.dispatch_id is not null
+    and o.dispatched_at is not null and o.returned_at is not null and o.return_command is not null
+    and encode(o.storage_binding,'hex') is not distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id'=o.dispatch_id::text
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome'=o.outcome
+    and (convert_from(o.return_command,'UTF8')::jsonb)->>'version'=o.object_version
+    and ((o.backend_kind='s3' and o.storage_binding is not null and o.object_version<>'null')
+      or (o.backend_kind='local' and o.namespace_id is not null and o.incarnation_id is not null
+        and record_platform_internal.record_portability_v1_local_owner_version(o)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_live_artifact_digest(text,text,text,text) from public;
+
+-- Carry only an original, still outstanding responsibility whose retired
+-- manifest recorded the incoming record's actual live artifact as its owner.
+create function record_platform_internal.record_portability_v1_carried(p_record text, obligation text)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_portability_v1_obligations captured
+    join public.record_portability_v1_targets prior on (prior.operation_id,prior.target_id)=(captured.operation_id,captured.target_id)
+    join public.record_write_obligations o on o.obligation_id=captured.obligation_id
+    cross join lateral jsonb_array_elements(prior.retained_evidence) e(value)
+    where captured.obligation_id=obligation and prior.disposition='retained_shared'
+      and record_platform_internal.record_portability_v1_eligible(prior.operation_id)
+      and o.operation_id is null and o.handed_off_at is not null and o.cleanup_completed_at is null
+      and ((o.origin_kind='export_artifact' and not exists(select 1 from public.record_export_jobs j where j.export_job_id=o.origin_id))
+        or (o.origin_kind='import_archive' and not exists(select 1 from public.record_import_jobs j where j.import_job_id=o.origin_id)))
+      and record_platform_internal.record_portability_v1_obligation_owner_digest(prior.operation_id,o.obligation_id) is not null
+      and case when jsonb_typeof(e.value)='array' then jsonb_array_length(e.value)=3 else false end
+      and e.value->>2 ~ '^[0-9a-f]{64}$'
+      and ((e.value->>0='export_artifact' and exists(select 1 from public.record_export_artifacts a
+        join public.record_export_jobs j on j.export_job_id=a.export_job_id
+        where a.export_artifact_id=e.value->>1 and j.record_id=p_record
+          and record_platform_internal.record_portability_v1_live_artifact_digest(prior.operation_id,prior.target_id,'export',a.export_artifact_id)=decode(e.value->>2,'hex')))
+        or (e.value->>0='import_artifact' and exists(select 1 from public.record_import_artifacts a
+          join public.record_import_plans p on p.import_job_id=a.import_job_id
+          join public.record_import_entity_mappings m on m.import_plan_id=p.import_plan_id
+          where a.import_artifact_id=e.value->>1 and ((m.entity_kind='record' and m.target_id=p_record)
+            or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id=p_record))
+            and record_platform_internal.record_portability_v1_live_artifact_digest(prior.operation_id,prior.target_id,'import',a.import_artifact_id)=decode(e.value->>2,'hex')))
+        or (e.value->>0='write_obligation' and exists(select 1 from public.record_write_obligations owner
+          where owner.obligation_id=e.value->>1 and owner.published_at is not null and owner.cleanup_completed_at is null
+            and owner.operation_id is null and owner.handed_off_at is null
+            and (owner.record_id=p_record or exists(select 1 from public.record_write_obligation_targets ot
+              where ot.obligation_id=owner.obligation_id and ot.record_id=p_record and ot.handed_off_at is null))
+            and record_platform_internal.record_portability_v1_live_obligation_digest(prior.operation_id,prior.target_id,owner.obligation_id)=decode(e.value->>2,'hex')))))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_carried(text,text) from public;
+
+create function record_platform_internal.record_portability_v1_artifact_owner_survives(op text, kind text, artifact text, digest bytea)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select digest is not null and exists(select 1 from public.record_portability_v1_targets t
+    join public.record_portability_v1_preparations p on p.operation_id=t.operation_id
+    where t.operation_id=op and t.disposition='retained_shared'
+      and t.retained_evidence @> jsonb_build_array(jsonb_build_array(
+        case kind when 'export' then 'export_artifact' else 'import_artifact' end,artifact,encode(digest,'hex')))
+      and digest=record_platform_internal.record_portability_v1_live_artifact_digest(op,t.target_id,kind,artifact)
+      and ((kind='export' and exists(select 1 from public.record_export_artifacts a
+        join public.record_export_jobs j on j.export_job_id=a.export_job_id
+        where a.export_artifact_id=artifact and j.record_id is distinct from p.record_id))
+      or (kind='import' and exists(select 1 from public.record_import_artifacts a
+        join public.record_import_jobs j on j.import_job_id=a.import_job_id
+        where a.import_artifact_id=artifact and (exists(select 1 from public.record_import_plans plan
+          join public.record_import_entity_mappings m using(import_plan_id)
+          where plan.import_job_id=j.import_job_id and ((m.entity_kind='record' and m.target_id<>p.record_id)
+            or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id is not null
+              and m.owner_target_record_id<>p.record_id)))
+          or exists(select 1 from public.record_write_obligations w
+            join public.record_write_obligation_targets ot using(obligation_id)
+            where w.origin_kind='import_archive' and w.origin_id=j.import_job_id
+              and ot.record_id<>p.record_id and ot.handed_off_at is null))))))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_artifact_owner_survives(text,text,text,bytea) from public;
+
+create function record_platform_internal.record_portability_v1_upload_part_survives(op text, target text, owner_key text, digest bytea)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_portability_v1_targets t
+    join public.record_portability_v1_preparations prep on prep.operation_id=t.operation_id
+    join public.attachment_upload_parts part on 'sha256/'||encode(part.sha256_digest,'hex')=t.blob_key
+    join public.attachment_uploads u on u.upload_id=part.upload_id
+    join public.record_attachments a on a.attachment_id=u.attachment_id
+    left join public.record_drafts d on d.draft_id=a.draft_id
+    join public.record_write_obligations o on o.obligation_id=part.obligation_id
+    join public.blob_publication_intents publication on publication.publication_id=o.publication_id
+    where t.operation_id=op and t.target_id=target and t.disposition='retained_shared'
+      and owner_key=part.upload_id||':'||part.part_number::text and digest is not null
+      and coalesce(a.record_id,d.record_id) is not null and coalesce(a.record_id,d.record_id)<>prep.record_id
+      and (u.transport_kind,o.canonical_key,part.object_version,part.sha256_digest,part.size_bytes,
+        part.namespace_id,o.incarnation_id,o.storage_binding)
+        is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,
+          t.namespace_id,t.incarnation_id,t.storage_binding)
+      and (o.backend_kind,o.namespace_id,o.object_version,o.sha256_digest,o.size_bytes)
+        is not distinct from (u.transport_kind,part.namespace_id,part.object_version,part.sha256_digest,part.size_bytes)
+      and o.origin_kind='upload' and o.origin_id=u.upload_id and o.outcome='materialized'
+      and o.dispatch_id is not null and o.dispatched_at is not null and o.returned_at is not null
+      and publication.obligation_id=o.obligation_id and publication.owner_kind='upload'
+      and publication.owner_id=u.upload_id and publication.publication_state='completed' and publication.completion_outcome='consumed'
+      and encode(o.storage_binding,'hex') is not distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id'=o.dispatch_id::text
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome'=o.outcome
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'version'=o.object_version
+      and ((o.backend_kind='s3' and o.storage_binding is not null and o.object_version<>'null')
+        or (o.backend_kind='local' and o.namespace_id is not null and o.incarnation_id is not null
+          and record_platform_internal.record_portability_v1_local_owner_version(o)))
+      and digest=record_platform_internal.record_portability_v1_owner_digest('attachment_upload_parts',
+        jsonb_build_array(part.upload_id,part.part_number),
+        jsonb_build_array(u.transport_kind,o.canonical_key,part.object_version,encode(part.sha256_digest,'hex'),part.size_bytes,
+          to_char(part.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),part.namespace_id,o.incarnation_id,
+          encode(o.storage_binding,'hex'),part.obligation_id),
+        jsonb_build_array(a.attachment_id,a.project_id,a.record_id,a.draft_id,d.record_id,u.origin_draft_id)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_upload_part_survives(text,text,text,bytea) from public;
+
+create function record_platform_internal.record_portability_v1_attachment_survives(op text, target text, owner_key text, digest bytea)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_portability_v1_targets t
+    join public.record_portability_v1_preparations prep on prep.operation_id=t.operation_id
+    join public.record_attachments a on a.attachment_id=owner_key
+    left join public.record_drafts d on d.draft_id=a.draft_id
+    join public.blob_objects b on b.blob_key=t.blob_key and b.object_version=t.object_version_id
+    join public.record_write_obligations o on o.canonical_key=b.blob_key and o.object_version=b.object_version
+      and o.backend_kind=b.backend_kind and o.sha256_digest=b.sha256_digest and o.size_bytes=b.size_bytes
+    join public.blob_publication_intents publication on publication.publication_id=o.publication_id
+    where t.operation_id=op and t.target_id=target and t.disposition='retained_shared' and digest is not null
+      and coalesce(a.record_id,d.record_id) is not null and coalesce(a.record_id,d.record_id)<>prep.record_id
+      and ((a.blob_key,a.blob_object_version)=(t.blob_key,t.object_version_id)
+        or (a.preview_blob_key,a.preview_blob_object_version)=(t.blob_key,t.object_version_id))
+      and (b.backend_kind,b.blob_key,b.object_version,b.sha256_digest,b.size_bytes,b.namespace_id,o.incarnation_id,o.storage_binding)
+        is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+      and o.namespace_id is not distinct from b.namespace_id and o.outcome='materialized'
+      and o.dispatch_id is not null and o.dispatched_at is not null and o.returned_at is not null
+      and publication.obligation_id=o.obligation_id and publication.publication_state='completed'
+      and publication.completion_outcome='consumed'
+      and ((o.origin_kind='upload' and publication.owner_kind='upload' and publication.owner_id=o.origin_id
+          and exists(select 1 from public.attachment_uploads u where u.upload_id=o.origin_id and u.attachment_id=a.attachment_id))
+        or (o.origin_kind='processor_preview' and publication.owner_kind='processor_preview' and publication.owner_id=o.origin_id
+          and exists(select 1 from public.attachment_processor_jobs j where j.processor_job_id=o.origin_id and j.attachment_id=a.attachment_id)))
+      and encode(o.storage_binding,'hex') is not distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id'=o.dispatch_id::text
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome'=o.outcome
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'version'=o.object_version
+      and ((o.backend_kind='s3' and o.storage_binding is not null and o.object_version<>'null')
+        or (o.backend_kind='local' and o.namespace_id is not null and o.incarnation_id is not null
+          and record_platform_internal.record_portability_v1_local_owner_version(o)))
+      and digest=record_platform_internal.record_portability_v1_owner_digest('record_attachments',
+        jsonb_build_array(a.attachment_id),
+        jsonb_build_array(b.backend_kind,b.blob_key,b.object_version,encode(b.sha256_digest,'hex'),b.size_bytes,
+          to_char(b.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),b.namespace_id,o.incarnation_id,
+          encode(o.storage_binding,'hex'),o.obligation_id,a.blob_key,a.blob_object_version,a.preview_blob_key,
+          a.preview_blob_object_version,a.logical_size_bytes,a.preview_size_bytes,
+          to_char(a.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+        jsonb_build_array(a.project_id,a.record_id,a.draft_id,d.record_id,a.origin_draft_id)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_attachment_survives(text,text,text,bytea) from public;
+
+create function record_platform_internal.record_portability_v1_blob_object_survives(op text, target text, owner_key text, digest bytea, excluded_kind text, excluded_id text)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_portability_v1_targets t
+    join public.record_portability_v1_preparations prep on prep.operation_id=t.operation_id
+    join public.blob_objects b on b.blob_key=owner_key
+    join public.record_write_obligations o on o.canonical_key=b.blob_key and o.object_version=b.object_version
+      and o.backend_kind=b.backend_kind and o.sha256_digest=b.sha256_digest and o.size_bytes=b.size_bytes
+    join public.blob_publication_intents publication on publication.publication_id=o.publication_id
+    join public.record_attachments a on (a.blob_key,a.blob_object_version)=(b.blob_key,b.object_version)
+      or (a.preview_blob_key,a.preview_blob_object_version)=(b.blob_key,b.object_version)
+    left join public.record_drafts d on d.draft_id=a.draft_id
+    where t.operation_id=op and t.target_id=target and t.disposition='retained_shared' and digest is not null
+      and coalesce(a.record_id,d.record_id) is not null and coalesce(a.record_id,d.record_id)<>prep.record_id
+      and not (excluded_kind is not distinct from 'attachment' and excluded_id is not distinct from a.attachment_id)
+      and not (excluded_kind is not distinct from 'write_obligation' and excluded_id is not distinct from o.obligation_id)
+      and not (excluded_kind is not distinct from 'publication' and excluded_id is not distinct from publication.publication_id)
+      and (b.backend_kind,b.blob_key,b.object_version,b.sha256_digest,b.size_bytes,b.namespace_id,o.incarnation_id,o.storage_binding)
+        is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+      and o.namespace_id is not distinct from b.namespace_id and o.outcome='materialized'
+      and o.dispatch_id is not null and o.dispatched_at is not null and o.returned_at is not null
+      and publication.obligation_id=o.obligation_id and publication.publication_state='completed'
+      and publication.completion_outcome='consumed'
+      and ((o.origin_kind='upload' and publication.owner_kind='upload' and publication.owner_id=o.origin_id
+          and exists(select 1 from public.attachment_uploads u where u.upload_id=o.origin_id and u.attachment_id=a.attachment_id))
+        or (o.origin_kind='processor_preview' and publication.owner_kind='processor_preview' and publication.owner_id=o.origin_id
+          and exists(select 1 from public.attachment_processor_jobs j where j.processor_job_id=o.origin_id and j.attachment_id=a.attachment_id)))
+      and encode(o.storage_binding,'hex') is not distinct from (convert_from(o.registration_command,'UTF8')::jsonb)->>'storage_binding'
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'dispatch_id'=o.dispatch_id::text
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'outcome'=o.outcome
+      and (convert_from(o.return_command,'UTF8')::jsonb)->>'version'=o.object_version
+      and ((o.backend_kind='s3' and o.storage_binding is not null and o.object_version<>'null')
+        or (o.backend_kind='local' and o.namespace_id is not null and o.incarnation_id is not null
+          and record_platform_internal.record_portability_v1_local_owner_version(o)))
+      and digest=record_platform_internal.record_portability_v1_owner_digest('blob_objects',
+        jsonb_build_array(b.blob_key),
+        jsonb_build_array(b.backend_kind,b.blob_key,b.object_version,encode(b.sha256_digest,'hex'),b.size_bytes,
+          to_char(b.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),b.namespace_id,o.incarnation_id,
+          encode(o.storage_binding,'hex'),o.obligation_id),
+        jsonb_build_array(o.publication_id,o.origin_kind,o.origin_id)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_blob_object_survives(text,text,text,bytea,text,text) from public;
+
+-- Source row triggers already hold their table's ROW EXCLUSIVE lock. Never
+-- wait for an earlier-ranked job/plan lock from that position: restart the
+-- entire transaction and rediscover the route instead.
+create function record_platform_internal.record_portability_v1_lock_parents(source_table text, before_row jsonb, after_row jsonb)
+returns void language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare old_job text; new_job text; old_plan text; new_plan text; check_old text; check_new text;
+  old_parent jsonb; new_parent jsonb;
+begin
+  if source_table='record_export_artifacts' then
+    old_job:=before_row->>'export_job_id'; new_job:=after_row->>'export_job_id';
+    begin
+      perform 1 from public.record_export_jobs j where j.export_job_id in (old_job,new_job)
+        order by j.export_job_id collate "C" for update nowait;
+    exception when lock_not_available then
+      raise exception using errcode='40001',message='portability export route changed; restart transaction';
+    end;
+  elsif source_table in ('record_import_artifacts','record_import_plans','record_import_entity_mappings') then
+    if source_table='record_import_entity_mappings' then
+      old_plan:=before_row->>'import_plan_id'; new_plan:=after_row->>'import_plan_id';
+      select p.import_job_id into old_job from public.record_import_plans p where p.import_plan_id=old_plan;
+      select p.import_job_id into new_job from public.record_import_plans p where p.import_plan_id=new_plan;
+    else
+      old_job:=before_row->>'import_job_id'; new_job:=after_row->>'import_job_id';
+      if source_table='record_import_plans' then
+        old_plan:=before_row->>'import_plan_id'; new_plan:=after_row->>'import_plan_id';
+      end if;
+    end if;
+    begin
+      perform 1 from public.record_import_jobs j where j.import_job_id in (old_job,new_job)
+        order by j.import_job_id collate "C" for update nowait;
+      if source_table='record_import_entity_mappings' then
+        perform 1 from public.record_import_plans p where p.import_plan_id in (old_plan,new_plan)
+          order by p.import_plan_id collate "C" for update nowait;
+      end if;
+    exception when lock_not_available then
+      raise exception using errcode='40001',message='portability import route changed; restart transaction';
+    end;
+    if source_table='record_import_entity_mappings' then
+      select p.import_job_id into check_old from public.record_import_plans p where p.import_plan_id=old_plan;
+      select p.import_job_id into check_new from public.record_import_plans p where p.import_plan_id=new_plan;
+      if (check_old,check_new) is distinct from (old_job,new_job) then
+        raise exception using errcode='40001',message='portability import route changed; restart transaction';
+      end if;
+    end if;
+  elsif source_table='record_write_obligations' then
+    begin
+      perform 1 from public.record_export_jobs j where j.export_job_id in
+        (case when before_row->>'origin_kind'='export_artifact' then before_row->>'origin_id' end,
+         case when after_row->>'origin_kind'='export_artifact' then after_row->>'origin_id' end)
+        order by j.export_job_id collate "C" for update nowait;
+      perform 1 from public.record_import_jobs j where j.import_job_id in
+        (case when before_row->>'origin_kind' in ('import_archive','import_attachment') then before_row->>'origin_id' end,
+         case when after_row->>'origin_kind' in ('import_archive','import_attachment') then after_row->>'origin_id' end)
+        order by j.import_job_id collate "C" for update nowait;
+    exception when lock_not_available then
+      raise exception using errcode='40001',message='portability write route changed; restart transaction';
+    end;
+  elsif source_table='record_write_obligation_targets' then
+    select to_jsonb(o) into old_parent from public.record_write_obligations o
+      where o.obligation_id=before_row->>'obligation_id';
+    select to_jsonb(o) into new_parent from public.record_write_obligations o
+      where o.obligation_id=after_row->>'obligation_id';
+    perform record_platform_internal.record_portability_v1_lock_parents('record_write_obligations',old_parent,new_parent);
+  elsif source_table='attachment_upload_parts' then
+    old_job:=before_row->>'upload_id'; new_job:=after_row->>'upload_id';
+    select u.attachment_id into old_plan from public.attachment_uploads u where u.upload_id=old_job;
+    select u.attachment_id into new_plan from public.attachment_uploads u where u.upload_id=new_job;
+    begin
+      perform 1 from public.record_attachments a where a.attachment_id in (old_plan,new_plan)
+        order by a.attachment_id collate "C" for update nowait;
+      perform 1 from public.attachment_uploads u where u.upload_id in (old_job,new_job)
+        order by u.upload_id collate "C" for update nowait;
+    exception when lock_not_available then
+      raise exception using errcode='40001',message='portability upload route changed; restart transaction';
+    end;
+    select u.attachment_id into check_old from public.attachment_uploads u where u.upload_id=old_job;
+    select u.attachment_id into check_new from public.attachment_uploads u where u.upload_id=new_job;
+    if (check_old,check_new) is distinct from (old_plan,new_plan) then
+      raise exception using errcode='40001',message='portability upload route changed; restart transaction';
+    end if;
+  elsif source_table='record_attachments' then
+    begin
+      perform 1 from public.records r where r.record_id in (before_row->>'record_id',after_row->>'record_id')
+        order by r.record_id collate "C" for update nowait;
+      perform 1 from public.record_drafts d where d.draft_id in (before_row->>'draft_id',after_row->>'draft_id')
+        order by d.draft_id collate "C" for update nowait;
+    exception when lock_not_available then
+      raise exception using errcode='40001',message='portability attachment route changed; restart transaction';
+    end;
+  end if;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_lock_parents(text,jsonb,jsonb) from public;
+
+-- Exclude leases, provider returns, cleanup claims, quota and other mutable
+-- bookkeeping from the reference-change decision. Their original commands
+-- retain their own authority and replay rules.
+create function record_platform_internal.record_portability_v1_reference_identity(source_table text, source_row jsonb)
+returns jsonb language plpgsql immutable security definer set search_path=pg_catalog as $$
+declare fields text[]; result jsonb;
+begin
+  if source_row is null then return null; end if;
+  fields:=case source_table
+    when 'record_export_jobs' then array['export_job_id','project_id','record_id','export_kind']
+    when 'record_export_artifacts' then array['export_artifact_id','export_job_id','artifact_kind','backend_kind',
+      'blob_key','object_version_id','sha256','byte_size','created_at','namespace_id','obligation_id']
+    when 'record_import_jobs' then array['import_job_id','project_id','archive_digest']
+    when 'record_import_artifacts' then array['import_artifact_id','import_job_id','artifact_role','backend_kind',
+      'blob_key','object_version_id','sha256','byte_size','created_at','namespace_id','obligation_id']
+    when 'record_import_plans' then array['import_plan_id','import_job_id','plan_digest']
+    when 'record_import_entity_mappings' then array['import_plan_id','entity_kind','source_identity_digest','source_id','target_id','owner_target_record_id']
+    when 'record_attachments' then array['attachment_id','project_id','record_id','draft_id','origin_draft_id','blob_key',
+      'blob_object_version','preview_blob_key','preview_blob_object_version','logical_size_bytes','preview_size_bytes','created_at']
+    when 'attachment_upload_parts' then array['upload_id','part_number','size_bytes','sha256_digest','object_version','created_at','namespace_id','obligation_id']
+    when 'blob_gc_pins' then array['pin_id','pin_owner_kind','pin_owner_id','blob_key','blob_object_version','created_at','expires_at']
+    when 'blob_objects' then array['blob_key','sha256_digest','object_version','size_bytes','backend_kind','namespace_id','created_at']
+    when 'blob_publication_intents' then array['publication_id','project_id','owner_kind','owner_id','owner_generation',
+      'blob_key','sha256_digest','size_bytes','backend_kind','object_version','namespace_id','obligation_id']
+    when 'record_write_obligations' then array['obligation_id','project_id','origin_kind','origin_id','origin_generation',
+      'backend_kind','storage_binding','canonical_key','sha256_digest','size_bytes','namespace_id','incarnation_id',
+      'record_id','record_epoch','publication_id','registration_command','created_at']
+    when 'record_write_obligation_targets' then array['obligation_id','record_id','attachment_id','plan_digest','record_epoch','bound_at','handed_off_at']
+    else null end;
+  if fields is null or jsonb_typeof(source_row) is distinct from 'object' then
+    raise exception using errcode='22023',message='invalid portability reference source';
+  end if;
+  select coalesce(jsonb_object_agg(e.key,e.value),'{}'::jsonb) into result
+    from jsonb_each(source_row) e where e.key=any(fields);
+  return result;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_reference_identity(text,jsonb) from public;
+
+create function record_platform_internal.record_portability_v1_reference_owner(source_table text, source_row jsonb)
+returns jsonb language plpgsql immutable security definer set search_path=pg_catalog as $$
+declare kind text; owner_id text;
+begin
+  if source_row is null then return null; end if;
+  case source_table
+    when 'record_export_jobs' then kind:='export_job'; owner_id:=source_row->>'export_job_id';
+    when 'record_export_artifacts' then kind:='export_artifact'; owner_id:=source_row->>'export_artifact_id';
+    when 'record_import_jobs' then kind:='import_job'; owner_id:=source_row->>'import_job_id';
+    when 'record_import_artifacts' then kind:='import_artifact'; owner_id:=source_row->>'import_artifact_id';
+    when 'record_import_plans' then kind:='import_plan'; owner_id:=source_row->>'import_plan_id';
+    when 'record_import_entity_mappings' then kind:='import_mapping'; owner_id:=jsonb_build_array(source_row->>'import_plan_id',
+      source_row->>'entity_kind',substr(source_row->>'source_identity_digest',3))::text;
+    when 'record_attachments' then kind:='attachment'; owner_id:=source_row->>'attachment_id';
+    when 'attachment_upload_parts' then kind:='upload_part'; owner_id:=(source_row->>'upload_id')||':'||(source_row->>'part_number');
+    when 'blob_objects' then kind:='blob_object'; owner_id:=source_row->>'blob_key';
+    when 'blob_publication_intents' then kind:='publication'; owner_id:=source_row->>'publication_id';
+    when 'record_write_obligations' then kind:='write_obligation'; owner_id:=source_row->>'obligation_id';
+    when 'record_write_obligation_targets' then kind:='obligation_target'; owner_id:=jsonb_build_array(
+      source_row->>'obligation_id',source_row->>'record_id')::text;
+    when 'blob_gc_pins' then return null;
+    else raise exception using errcode='22023',message='invalid portability reference source';
+  end case;
+  if owner_id is null then return null; end if;
+  return jsonb_build_object('kind',kind,'id',owner_id);
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_reference_owner(text,jsonb) from public;
+
+-- The matcher deliberately treats an unknown physical component as a match.
+-- Only a recorded, different component can exclude an unrelated identity.
+create function record_platform_internal.record_portability_v1_reference_match(source_table text, source_row jsonb,
+  target_row public.record_portability_v1_targets)
+returns boolean language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare key_value text; version_value text; backend_value text; namespace_value uuid; incarnation_value uuid;
+  binding_value bytea; job_value text; plan_value text; o public.record_write_obligations;
+  expected_version text; completed boolean;
+begin
+  if source_row is null then return false; end if;
+  if source_table='record_export_jobs' then
+    job_value:=source_row->>'export_job_id';
+  elsif source_table='record_import_jobs' then
+    job_value:=source_row->>'import_job_id';
+  elsif source_table in ('record_import_plans','record_import_entity_mappings') then
+    plan_value:=source_row->>'import_plan_id';
+    if source_table='record_import_plans' then job_value:=source_row->>'import_job_id';
+    else
+      select p.import_job_id into job_value from public.record_import_plans p where p.import_plan_id=plan_value;
+      if job_value is null then
+        select x.value->>1 into job_value from public.record_portability_v1_preparations prep,
+          jsonb_array_elements(prep.owners->'import_plans') x(value)
+          where prep.operation_id=target_row.operation_id and x.value->>0=plan_value;
+      end if;
+    end if;
+  end if;
+  if source_table in ('record_export_jobs','record_import_jobs','record_import_plans','record_import_entity_mappings') then
+    return (job_value is not null and (exists(select 1 from public.record_portability_v1_artifacts a
+      where a.operation_id=target_row.operation_id and a.target_id=target_row.target_id and a.job_id=job_value
+        and a.source_kind=case when source_table='record_export_jobs' then 'export' else 'import' end)
+      or exists(select 1 from public.record_portability_v1_obligations captured
+        where captured.operation_id=target_row.operation_id and captured.target_id=target_row.target_id
+          and captured.snapshot->>'origin_id'=job_value
+          and captured.snapshot->>'origin_kind'=case when source_table='record_export_jobs' then 'export_artifact' else 'import_archive' end)))
+      or (target_row.disposition='retained_shared' and exists(
+        select 1 from jsonb_array_elements(target_row.retained_evidence) e(value)
+        where (source_table='record_export_jobs' and e.value->>0='export_artifact' and
+          (exists(select 1 from public.record_export_artifacts a where a.export_artifact_id=e.value->>1 and a.export_job_id=job_value)
+            or not exists(select 1 from public.record_export_jobs j where j.export_job_id=job_value)))
+        or (source_table<>'record_export_jobs' and e.value->>0='import_artifact' and
+          (exists(select 1 from public.record_import_artifacts a where a.import_artifact_id=e.value->>1 and a.import_job_id=job_value)
+            or (source_table in ('record_import_plans','record_import_entity_mappings')
+              and not exists(select 1 from public.record_import_plans p where p.import_plan_id=plan_value))
+            or (source_table='record_import_jobs' and not exists(select 1 from public.record_import_jobs j where j.import_job_id=job_value))))));
+  end if;
+  if source_table='record_write_obligation_targets' then
+    select w.* into o from public.record_write_obligations w where w.obligation_id=source_row->>'obligation_id';
+    if not found then return false; end if;
+    return record_platform_internal.record_portability_v1_reference_match('record_write_obligations',to_jsonb(o),target_row);
+  elsif source_table in ('record_export_artifacts','record_import_artifacts','blob_publication_intents') then
+    key_value:=source_row->>'blob_key'; version_value:=source_row->>'object_version_id';
+    if source_table='blob_publication_intents' then version_value:=source_row->>'object_version'; end if;
+    backend_value:=source_row->>'backend_kind'; namespace_value:=(source_row->>'namespace_id')::uuid;
+    select w.* into o from public.record_write_obligations w where w.obligation_id=source_row->>'obligation_id';
+  elsif source_table='record_write_obligations' then
+    key_value:=source_row->>'canonical_key'; version_value:=source_row->>'object_version';
+    backend_value:=source_row->>'backend_kind'; namespace_value:=(source_row->>'namespace_id')::uuid;
+    incarnation_value:=(source_row->>'incarnation_id')::uuid;
+    if source_row->>'storage_binding' is not null then binding_value:=decode(substr(source_row->>'storage_binding',3),'hex'); end if;
+  elsif source_table='attachment_upload_parts' then
+    if source_row->>'sha256_digest' is not null then key_value:='sha256/'||substr(source_row->>'sha256_digest',3); end if;
+    version_value:=source_row->>'object_version'; namespace_value:=(source_row->>'namespace_id')::uuid;
+    select u.transport_kind into backend_value from public.attachment_uploads u where u.upload_id=source_row->>'upload_id';
+    select w.* into o from public.record_write_obligations w where w.obligation_id=source_row->>'obligation_id';
+  elsif source_table='blob_objects' then
+    key_value:=source_row->>'blob_key'; version_value:=source_row->>'object_version';
+    backend_value:=source_row->>'backend_kind'; namespace_value:=(source_row->>'namespace_id')::uuid;
+  elsif source_table='blob_gc_pins' then
+    key_value:=source_row->>'blob_key'; version_value:=source_row->>'blob_object_version';
+    select b.backend_kind,b.namespace_id into backend_value,namespace_value from public.blob_objects b
+      where b.blob_key=key_value and b.object_version=version_value;
+  elsif source_table='record_attachments' then
+    return record_platform_internal.record_portability_v1_reference_match('blob_gc_pins',
+      jsonb_build_object('blob_key',source_row->>'blob_key','blob_object_version',source_row->>'blob_object_version'),target_row)
+      or record_platform_internal.record_portability_v1_reference_match('blob_gc_pins',
+        jsonb_build_object('blob_key',source_row->>'preview_blob_key','blob_object_version',source_row->>'preview_blob_object_version'),target_row);
+  else return false;
+  end if;
+  if o.obligation_id is not null and (o.backend_kind,o.canonical_key,o.object_version,o.namespace_id)
+    is not distinct from (backend_value,key_value,version_value,namespace_value) then
+    incarnation_value:=o.incarnation_id; binding_value:=o.storage_binding;
+  end if;
+  if key_value is distinct from target_row.blob_key or (backend_value is not null and backend_value<>target_row.backend_kind) then return false; end if;
+  if target_row.backend_kind='local' then
+    if (namespace_value is not null and target_row.namespace_id is not null and namespace_value<>target_row.namespace_id)
+      or (incarnation_value is not null and target_row.incarnation_id is not null and incarnation_value<>target_row.incarnation_id) then return false; end if;
+    select record_platform_internal.record_portability_v1_local_task_proof(g) into completed
+      from public.blob_gc_deletions g where g.deletion_id=target_row.local_deletion_id;
+    if coalesce(completed,false) or target_row.disposition='retained_shared' then
+      expected_version:=record_platform_internal.record_portability_v1_local_expected_version(target_row.operation_id,target_row.target_id);
+      -- A newly registered local writer has no returned version yet. Once the
+      -- old exact task is proven complete, its distinct obligation can enter
+      -- the existing key guard, which establishes the actual final version.
+      if completed and source_table='record_write_obligations' and version_value is null
+        and source_row->>'outcome'='registered' and source_row->>'dispatched_at' is null
+        and source_row->>'obligation_id' is not null and namespace_value=target_row.namespace_id
+        and incarnation_value=target_row.incarnation_id
+        and expected_version is not null and 'local-v2-'||(source_row->>'obligation_id')<>expected_version then
+        return false;
+      end if;
+      if version_value is not null and expected_version is not null and version_value<>expected_version then return false; end if;
+    end if;
+  else
+    if version_value is not null and target_row.object_version_id is not null and version_value<>target_row.object_version_id then return false; end if;
+    if binding_value is not null and target_row.storage_binding is not null and binding_value<>target_row.storage_binding then return false; end if;
+  end if;
+  return true;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_reference_match(text,jsonb,public.record_portability_v1_targets) from public;
+
+create function record_platform_internal.record_portability_v1_scope_member(source_table text, source_row jsonb,
+  target_row public.record_portability_v1_targets)
+returns boolean language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare p public.record_portability_v1_preparations; member boolean:=false;
+begin
+  if source_row is null then return false; end if;
+  select prep.* into p from public.record_portability_v1_preparations prep
+    join record_platform_internal.record_deletion_effect_scopes s on s.operation_id=prep.operation_id
+    where prep.operation_id=target_row.operation_id and s.transaction_id=pg_current_xact_id()
+      and s.backend_pid=pg_backend_pid() and s.record_id=prep.record_id and s.authority_kind='online_v1'
+      and s.effect_kind='portability' and s.authority_digest=prep.inventory_digest;
+  if not found or not record_platform_internal.record_portability_v1_eligible(p.operation_id) then return false; end if;
+  case source_table
+    when 'record_export_artifacts' then
+      select exists(select 1 from public.record_portability_v1_artifacts a where a.operation_id=p.operation_id
+        and a.target_id=target_row.target_id and a.source_kind='export' and a.artifact_id=source_row->>'export_artifact_id'
+        and a.job_id=source_row->>'export_job_id') into member;
+    when 'record_import_artifacts' then
+      select exists(select 1 from public.record_portability_v1_artifacts a where a.operation_id=p.operation_id
+        and a.target_id=target_row.target_id and a.source_kind='import' and a.artifact_id=source_row->>'import_artifact_id'
+        and a.job_id=source_row->>'import_job_id') into member;
+    when 'record_export_jobs' then
+      member:=(p.owners->'export_jobs') @> jsonb_build_array(jsonb_build_array(source_row->>'export_job_id',
+        source_row->>'project_id',source_row->>'record_id',source_row->>'export_kind'));
+    when 'record_import_jobs' then
+      member:=(p.owners->'import_jobs') @> jsonb_build_array(jsonb_build_array(source_row->>'import_job_id',source_row->>'project_id'));
+    when 'record_import_plans' then
+      member:=(p.owners->'import_plans') @> jsonb_build_array(jsonb_build_array(source_row->>'import_plan_id',source_row->>'import_job_id'));
+    when 'record_import_entity_mappings' then
+      member:=(p.owners->'mappings') @> jsonb_build_array(jsonb_build_array(source_row->>'import_plan_id',source_row->>'entity_kind',
+        substr(source_row->>'source_identity_digest',3),source_row->>'source_id',source_row->>'target_id'));
+    when 'record_write_obligations' then
+      select exists(select 1 from public.record_portability_v1_obligations captured where captured.operation_id=p.operation_id
+        and captured.target_id=target_row.target_id and captured.obligation_id=source_row->>'obligation_id'
+        and captured.snapshot->>'registration_command'=source_row->>'registration_command') into member;
+    when 'record_write_obligation_targets' then
+      begin
+        perform 1 from public.record_portability_v1_obligations captured
+          join public.record_import_plans plan on plan.import_job_id=captured.snapshot->>'origin_id'
+          where captured.operation_id=p.operation_id and captured.target_id=target_row.target_id
+            and captured.obligation_id=source_row->>'obligation_id' and captured.snapshot->>'origin_kind'='import_archive'
+            and source_row->>'record_id'=p.record_id and captured.snapshot ? 'plan_digest'
+            and source_row->>'plan_digest' is not null
+            and source_row->>'plan_digest'='\x'||encode(plan.plan_digest,'hex')
+            and (captured.snapshot->>'plan_digest' is null
+              or captured.snapshot->>'plan_digest'=source_row->>'plan_digest')
+            and (p.owners->'import_plans') @> jsonb_build_array(jsonb_build_array(plan.import_plan_id,plan.import_job_id))
+          for share of plan nowait;
+        member:=found;
+      exception when lock_not_available then
+        raise exception using errcode='40001',message='portability archive plan changed; restart transaction';
+      end;
+    else return false;
+  end case;
+  return coalesce(member,false);
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_scope_member(text,jsonb,public.record_portability_v1_targets) from public;
+
+-- This proves retained responsibility, never physical absence. It reuses the
+-- GC barrier for a successor so every matching manifest is independently checked.
+create function record_platform_internal.record_portability_v1_retained_proof(op text, target text, excluded_kind text, excluded_id text)
+returns boolean language plpgsql security definer set search_path=pg_catalog as $$
+declare t public.record_portability_v1_targets; evidence jsonb; candidate text; v_kind text; excluded_job text;
+begin
+  select x.* into t from public.record_portability_v1_targets x
+    where x.operation_id=op and x.target_id=target and x.disposition='retained_shared';
+  if not found or not record_platform_internal.record_portability_v1_eligible(op) then return false; end if;
+  if excluded_kind='import_job' then excluded_job:=excluded_id;
+  elsif excluded_kind='import_plan' then
+    select p.import_job_id into excluded_job from public.record_import_plans p where p.import_plan_id=excluded_id;
+    if excluded_job is null then
+      select x.value->>1 into excluded_job from public.record_portability_v1_preparations prep,
+        jsonb_array_elements(prep.owners->'import_plans') x(value)
+        where prep.operation_id=op and x.value->>0=excluded_id;
+    end if;
+  end if;
+  for evidence in select value from jsonb_array_elements(t.retained_evidence) loop
+    if jsonb_typeof(evidence) is distinct from 'array' then continue; end if;
+    if evidence->>0=excluded_kind and evidence->>1=excluded_id then continue; end if;
+    if excluded_kind='export_job' and evidence->>0='export_artifact' and exists(
+      select 1 from public.record_export_artifacts a where a.export_artifact_id=evidence->>1
+        and a.export_job_id=excluded_id) then continue; end if;
+    if excluded_job is not null and evidence->>0='import_artifact' and exists(
+      select 1 from public.record_import_artifacts a where a.import_artifact_id=evidence->>1
+        and a.import_job_id=excluded_job) then continue; end if;
+    if evidence->>0='write_obligation' and exists(select 1 from public.record_write_obligations o
+      where o.obligation_id=evidence->>1 and ((excluded_kind='export_job' and o.origin_kind='export_artifact' and o.origin_id=excluded_id)
+        or (excluded_job is not null and o.origin_kind in ('import_archive','import_attachment') and o.origin_id=excluded_job))) then continue; end if;
+    if excluded_kind='attachment' and evidence->>0='upload_part' and exists(
+      select 1 from public.attachment_upload_parts part join public.attachment_uploads u on u.upload_id=part.upload_id
+      where u.attachment_id=excluded_id and part.upload_id||':'||part.part_number::text=evidence->>1) then continue; end if;
+    if excluded_kind='blob_object' and excluded_id=t.blob_key and evidence->>0='attachment' then continue; end if;
+    if excluded_kind='publication' and evidence->>0 in ('attachment','upload_part') then continue; end if;
+    if excluded_kind='publication' and evidence->>0='write_obligation' and exists(
+      select 1 from public.record_write_obligations o where o.obligation_id=evidence->>1 and o.publication_id=excluded_id) then continue; end if;
+    if excluded_kind='import_mapping' and evidence->>0='import_artifact' then
+      if exists(
+      select 1 from public.record_import_artifacts a
+        join public.record_import_plans plan on plan.import_job_id=a.import_job_id
+        where a.import_artifact_id=evidence->>1 and plan.import_plan_id=(excluded_id::jsonb)->>0
+          and not exists(select 1 from public.record_import_entity_mappings m
+            join public.record_portability_v1_preparations p on p.operation_id=op
+            where m.import_plan_id=plan.import_plan_id
+              and jsonb_build_array(m.import_plan_id,m.entity_kind,encode(m.source_identity_digest,'hex'))::text<>excluded_id
+              and ((m.entity_kind='record' and m.target_id<>p.record_id)
+                or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id is not null
+                  and m.owner_target_record_id<>p.record_id)))
+          and not exists(select 1 from public.record_write_obligations w
+            join public.record_write_obligation_targets ot using(obligation_id)
+            join public.record_portability_v1_preparations p on p.operation_id=op
+            where w.origin_kind='import_archive' and w.origin_id=a.import_job_id
+              and ot.record_id<>p.record_id and ot.handed_off_at is null)) then continue; end if;
+    end if;
+    if jsonb_array_length(evidence)=3 and evidence->>2 ~ '^[0-9a-f]{64}$' then
+      if evidence->>0 in ('export_artifact','import_artifact') then
+        v_kind:=case evidence->>0 when 'export_artifact' then 'export' else 'import' end;
+        if record_platform_internal.record_portability_v1_live_artifact_digest(op,target,v_kind,evidence->>1)=decode(evidence->>2,'hex')
+          and record_platform_internal.record_portability_v1_artifact_owner_survives(op,v_kind,evidence->>1,decode(evidence->>2,'hex')) then
+          return true;
+        end if;
+      elsif evidence->>0='write_obligation'
+        and record_platform_internal.record_portability_v1_live_obligation_digest(op,target,evidence->>1)=decode(evidence->>2,'hex')
+        and record_platform_internal.record_portability_v1_obligation_owner_survives(op,evidence->>1,decode(evidence->>2,'hex')) then
+        return true;
+      elsif evidence->>0='upload_part' and
+        record_platform_internal.record_portability_v1_upload_part_survives(op,target,evidence->>1,decode(evidence->>2,'hex')) then
+        return true;
+      elsif evidence->>0='attachment' and
+        record_platform_internal.record_portability_v1_attachment_survives(op,target,evidence->>1,decode(evidence->>2,'hex')) then
+        return true;
+      elsif evidence->>0='blob_object' and record_platform_internal.record_portability_v1_blob_object_survives(
+        op,target,evidence->>1,decode(evidence->>2,'hex'),excluded_kind,excluded_id) then
+        return true;
+      end if;
+    end if;
+  end loop;
+  for candidate in
+    select g.deletion_id from public.blob_gc_deletions g where t.backend_kind='local'
+      and g.backend_kind='local' and (g.namespace_id,g.incarnation_id,g.blob_key,g.sha256_digest)
+        is not distinct from (t.namespace_id,t.incarnation_id,t.blob_key,t.sha256)
+    union
+    select other.target_id from public.record_portability_v1_targets other where t.backend_kind='s3'
+      and other.disposition='s3' and other.operation_id<>t.operation_id
+      and (other.backend_kind,other.blob_key,other.object_version_id,other.storage_binding,other.sha256,other.byte_size)
+        is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.storage_binding,t.sha256,t.byte_size)
+  loop
+    begin
+      perform record_platform_internal.record_portability_v1_gc_barrier_impl(t.backend_kind,t.namespace_id,t.incarnation_id,
+        t.blob_key,t.object_version_id,candidate,t.storage_binding);
+      return true;
+    exception when sqlstate '55000' then null;
+    end;
+  end loop;
+  return false;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_retained_proof(text,text,text,text) from public;
+
+-- Check retained owner preimages before their source rows or routes disappear.
+create function record_platform_internal.record_portability_v1_old_owner_valid(
+  op text, target text, kind text, owner_id text, expected bytea)
+returns boolean language plpgsql volatile security definer set search_path=pg_catalog as $$
+begin
+  case kind
+    when 'export_artifact' then return expected=record_platform_internal.record_portability_v1_live_artifact_digest(op,target,'export',owner_id);
+    when 'import_artifact' then return expected=record_platform_internal.record_portability_v1_live_artifact_digest(op,target,'import',owner_id);
+    when 'attachment' then return exists(select 1 from public.record_portability_v1_targets t
+      join public.record_attachments a on a.attachment_id=owner_id
+      left join public.record_drafts d on d.draft_id=a.draft_id
+      join public.blob_objects b on b.blob_key=t.blob_key and b.object_version=t.object_version_id
+      join public.record_write_obligations o on (o.canonical_key,o.object_version,o.backend_kind,o.sha256_digest,o.size_bytes)
+        is not distinct from (b.blob_key,b.object_version,b.backend_kind,b.sha256_digest,b.size_bytes)
+      where t.operation_id=op and t.target_id=target
+        and ((a.blob_key,a.blob_object_version)=(t.blob_key,t.object_version_id)
+          or (a.preview_blob_key,a.preview_blob_object_version)=(t.blob_key,t.object_version_id))
+        and (b.backend_kind,b.blob_key,b.object_version,b.sha256_digest,b.size_bytes,b.namespace_id,o.incarnation_id,o.storage_binding)
+          is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+        and o.namespace_id is not distinct from b.namespace_id
+        and expected=record_platform_internal.record_portability_v1_owner_digest('record_attachments',jsonb_build_array(a.attachment_id),
+          jsonb_build_array(b.backend_kind,b.blob_key,b.object_version,encode(b.sha256_digest,'hex'),b.size_bytes,
+            to_char(b.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),b.namespace_id,o.incarnation_id,
+            encode(o.storage_binding,'hex'),o.obligation_id,a.blob_key,a.blob_object_version,a.preview_blob_key,
+            a.preview_blob_object_version,a.logical_size_bytes,a.preview_size_bytes,
+            to_char(a.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+          jsonb_build_array(a.project_id,a.record_id,a.draft_id,d.record_id,a.origin_draft_id)));
+    when 'upload_part' then return exists(select 1 from public.record_portability_v1_targets t
+      join public.attachment_upload_parts part on 'sha256/'||encode(part.sha256_digest,'hex')=t.blob_key
+      join public.attachment_uploads u on u.upload_id=part.upload_id
+      join public.record_attachments a on a.attachment_id=u.attachment_id
+      left join public.record_drafts d on d.draft_id=a.draft_id
+      join public.record_write_obligations o on o.obligation_id=part.obligation_id
+      where t.operation_id=op and t.target_id=target and owner_id=part.upload_id||':'||part.part_number::text
+        and (u.transport_kind,o.canonical_key,part.object_version,part.sha256_digest,part.size_bytes,
+          part.namespace_id,o.incarnation_id,o.storage_binding)
+          is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,
+            t.namespace_id,t.incarnation_id,t.storage_binding)
+        and (o.backend_kind,o.namespace_id,o.object_version,o.sha256_digest,o.size_bytes)
+          is not distinct from (u.transport_kind,part.namespace_id,part.object_version,part.sha256_digest,part.size_bytes)
+        and expected=record_platform_internal.record_portability_v1_owner_digest('attachment_upload_parts',
+          jsonb_build_array(part.upload_id,part.part_number),jsonb_build_array(u.transport_kind,o.canonical_key,
+            part.object_version,encode(part.sha256_digest,'hex'),part.size_bytes,
+            to_char(part.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),part.namespace_id,
+            o.incarnation_id,encode(o.storage_binding,'hex'),part.obligation_id),
+          jsonb_build_array(a.attachment_id,a.project_id,a.record_id,a.draft_id,d.record_id,u.origin_draft_id)));
+    when 'blob_object' then return exists(select 1 from public.record_portability_v1_targets t
+      join public.blob_objects b on b.blob_key=owner_id
+      join public.record_write_obligations o on (o.canonical_key,o.object_version,o.backend_kind,o.sha256_digest,o.size_bytes)
+        is not distinct from (b.blob_key,b.object_version,b.backend_kind,b.sha256_digest,b.size_bytes)
+      where t.operation_id=op and t.target_id=target
+        and (b.backend_kind,b.blob_key,b.object_version,b.sha256_digest,b.size_bytes,b.namespace_id,o.incarnation_id,o.storage_binding)
+          is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+        and o.namespace_id is not distinct from b.namespace_id
+        and expected=record_platform_internal.record_portability_v1_owner_digest('blob_objects',jsonb_build_array(b.blob_key),
+          jsonb_build_array(b.backend_kind,b.blob_key,b.object_version,encode(b.sha256_digest,'hex'),b.size_bytes,
+            to_char(b.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),b.namespace_id,o.incarnation_id,
+            encode(o.storage_binding,'hex'),o.obligation_id),jsonb_build_array(o.publication_id,o.origin_kind,o.origin_id)));
+    when 'write_obligation' then return expected=record_platform_internal.record_portability_v1_live_obligation_digest(op,target,owner_id);
+    else return false;
+  end case;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_old_owner_valid(text,text,text,text,bytea) from public;
+
+-- Dispatch and return facts may be appended without creating a new owner.
+-- In particular, storage_binding is deliberately excluded from this allowance.
+create function record_platform_internal.record_portability_v1_append_fact_only(before_row jsonb, after_row jsonb)
+returns boolean language sql immutable security definer set search_path=pg_catalog as $$
+  select (before_row-array['dispatch_id','dispatched_at','temporary_device','temporary_inode','temporary_created_at',
+      'object_version','outcome','returned_at','return_command'])
+    is not distinct from (after_row-array['dispatch_id','dispatched_at','temporary_device','temporary_inode','temporary_created_at',
+      'object_version','outcome','returned_at','return_command'])
+    and (before_row->>'dispatch_id' is null or before_row->'dispatch_id'=after_row->'dispatch_id')
+    and (before_row->>'dispatched_at' is null or before_row->'dispatched_at'=after_row->'dispatched_at')
+    and (before_row->>'temporary_device' is null or before_row->'temporary_device'=after_row->'temporary_device')
+    and (before_row->>'temporary_inode' is null or before_row->'temporary_inode'=after_row->'temporary_inode')
+    and (before_row->>'temporary_created_at' is null or before_row->'temporary_created_at'=after_row->'temporary_created_at')
+    and (before_row->>'object_version' is null or before_row->'object_version'=after_row->'object_version')
+    and (before_row->>'returned_at' is null or before_row->'returned_at'=after_row->'returned_at')
+    and (before_row->>'return_command' is null or before_row->'return_command'=after_row->'return_command')
+    and (before_row->'outcome'=after_row->'outcome' or (before_row->>'outcome' in ('registered','remote_unknown')
+      and after_row->>'outcome' in ('materialized','failed','remote_unknown')))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_append_fact_only(jsonb,jsonb) from public;
+
+create function record_platform_internal.record_portability_v1_reference_guard()
+returns trigger language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare before_row jsonb; after_row jsonb; owner jsonb; t public.record_portability_v1_targets; e jsonb;
+begin
+  if tg_op<>'INSERT' then before_row:=to_jsonb(old); end if;
+  if tg_op<>'DELETE' then after_row:=to_jsonb(new); end if;
+  perform record_platform_internal.record_portability_v1_epoch_share();
+  if not exists(select 1 from public.record_portability_v1_targets x
+    where (before_row is not null and record_platform_internal.record_portability_v1_reference_match(tg_table_name,before_row,x))
+       or (after_row is not null and record_platform_internal.record_portability_v1_reference_match(tg_table_name,after_row,x))) then
+    if tg_op='DELETE' then return old; end if;
+    return new;
+  end if;
+  begin
+    perform 1 from public.attachment_quota_accounts where project_id='default' for update nowait;
+    lock table public.blob_objects in share row exclusive mode nowait;
+    lock table public.attachment_upload_parts in share row exclusive mode nowait;
+    perform record_platform_internal.record_portability_v1_lock_parents(tg_table_name,before_row,after_row);
+    perform 1 from public.record_write_obligations o
+      where exists(select 1 from public.record_portability_v1_obligations c
+        join public.record_portability_v1_targets x on (x.operation_id,x.target_id)=(c.operation_id,c.target_id)
+        where c.obligation_id=o.obligation_id and
+          ((before_row is not null and record_platform_internal.record_portability_v1_reference_match(tg_table_name,before_row,x))
+            or (after_row is not null and record_platform_internal.record_portability_v1_reference_match(tg_table_name,after_row,x))))
+      order by o.obligation_id collate "C" for update nowait;
+  exception when lock_not_available then
+    raise exception using errcode='40001',message='portability reference changed; restart transaction';
+  end;
+  if tg_table_name='record_write_obligations' and tg_op='UPDATE'
+    and record_platform_internal.record_portability_v1_append_fact_only(before_row,after_row) then return new; end if;
+  owner:=record_platform_internal.record_portability_v1_reference_owner(tg_table_name,before_row);
+  for t in select x.* from public.record_portability_v1_targets x
+    where (before_row is not null and record_platform_internal.record_portability_v1_reference_match(tg_table_name,before_row,x))
+       or (after_row is not null and record_platform_internal.record_portability_v1_reference_match(tg_table_name,after_row,x))
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    if t.disposition='retained_shared' then
+      perform record_platform_internal.record_portability_v1_touch_retained(t.operation_id,t.target_id);
+    end if;
+    if tg_op='INSERT' and tg_table_name in ('record_export_jobs','record_import_jobs','record_import_plans')
+      and (exists(select 1 from public.record_portability_v1_preparations p,
+        jsonb_array_elements(case tg_table_name when 'record_export_jobs' then p.owners->'export_jobs'
+          when 'record_import_jobs' then p.owners->'import_jobs' else p.owners->'import_plans' end) route(value)
+        where p.operation_id=t.operation_id and route.value->>0=case tg_table_name
+          when 'record_export_jobs' then after_row->>'export_job_id'
+          when 'record_import_jobs' then after_row->>'import_job_id' else after_row->>'import_plan_id' end)
+        or (tg_table_name in ('record_export_jobs','record_import_jobs') and t.disposition='retained_shared'
+          and exists(select 1 from public.record_write_obligations o
+            where o.origin_kind=case tg_table_name when 'record_export_jobs' then 'export_artifact' else 'import_archive' end
+              and o.origin_id=case tg_table_name when 'record_export_jobs' then after_row->>'export_job_id' else after_row->>'import_job_id' end
+              and record_platform_internal.record_portability_v1_live_obligation_digest(t.operation_id,t.target_id,o.obligation_id) is not null)
+          and exists(select 1 from jsonb_array_elements(t.retained_evidence) evidence(value)
+            where evidence.value->>0=case tg_table_name when 'record_export_jobs' then 'export_artifact' else 'import_artifact' end))) then
+      raise exception using errcode='55000',message='portability V1 captured route cannot be recreated';
+    end if;
+    if after_row is not null and (before_row is null or
+      record_platform_internal.record_portability_v1_reference_identity(tg_table_name,before_row)
+        is distinct from record_platform_internal.record_portability_v1_reference_identity(tg_table_name,after_row))
+      and t.disposition in ('local','s3','unresolved')
+      and record_platform_internal.record_portability_v1_reference_match(tg_table_name,after_row,t)
+      and not (tg_table_name='record_write_obligation_targets' and before_row is not null
+        and before_row->'handed_off_at'='null'::jsonb and after_row->'handed_off_at'<>'null'::jsonb
+        and (before_row-'handed_off_at') is not distinct from (after_row-'handed_off_at')
+        and record_platform_internal.record_portability_v1_scope_member(tg_table_name,before_row,t)) then
+      raise exception using errcode='55000',message='portability V1 exclusive target rejects new ownership';
+    end if;
+    if before_row is not null and t.disposition in ('local','s3','unresolved')
+      and tg_table_name in ('record_export_jobs','record_export_artifacts','record_import_jobs','record_import_artifacts',
+        'record_import_plans','record_import_entity_mappings','record_write_obligations','record_write_obligation_targets')
+      and record_platform_internal.record_portability_v1_reference_match(tg_table_name,before_row,t)
+      and (after_row is null or record_platform_internal.record_portability_v1_reference_identity(tg_table_name,before_row)
+        is distinct from record_platform_internal.record_portability_v1_reference_identity(tg_table_name,after_row))
+      and not record_platform_internal.record_portability_v1_scope_member(tg_table_name,before_row,t) then
+      raise exception using errcode='55000',message='portability V1 source removal lacks exact scope';
+    end if;
+    if before_row is not null and t.disposition='retained_shared' and owner is not null
+      and (after_row is null or record_platform_internal.record_portability_v1_reference_identity(tg_table_name,before_row)
+        is distinct from record_platform_internal.record_portability_v1_reference_identity(tg_table_name,after_row)
+        or (tg_table_name='record_write_obligations' and
+          (before_row->'operation_id',before_row->'handed_off_at',before_row->'cleanup_completed_at',before_row->'cleanup_owner_id',before_row->'outcome')
+            is distinct from (after_row->'operation_id',after_row->'handed_off_at',after_row->'cleanup_completed_at',after_row->'cleanup_owner_id',after_row->'outcome'))
+        or (tg_table_name='blob_publication_intents' and
+          (before_row->'publication_state',before_row->'completion_outcome')
+            is distinct from (after_row->'publication_state',after_row->'completion_outcome'))) then
+      for e in select value from jsonb_array_elements(t.retained_evidence) where value->>0=owner->>'kind'
+        and value->>1=owner->>'id' loop
+        if jsonb_array_length(e)<>3 or e->>2 !~ '^[0-9a-f]{64}$'
+          or record_platform_internal.record_portability_v1_old_owner_valid(t.operation_id,t.target_id,
+            owner->>'kind',owner->>'id',decode(e->>2,'hex')) is not true then
+          raise exception using errcode='55000',message='portability V1 retained owner preimage changed';
+        end if;
+      end loop;
+      for e in select value from jsonb_array_elements(t.retained_evidence) evidence(value)
+        where (value->>0='export_artifact' and tg_table_name='record_export_jobs' and exists(
+          select 1 from public.record_export_artifacts live where live.export_artifact_id=value->>1
+            and live.export_job_id=before_row->>'export_job_id'))
+          or (value->>0='import_artifact' and exists(select 1 from public.record_import_artifacts live
+            where live.import_artifact_id=value->>1 and
+              ((tg_table_name='record_import_jobs' and live.import_job_id=before_row->>'import_job_id')
+                or (tg_table_name='record_import_plans' and live.import_job_id=before_row->>'import_job_id')
+                or (tg_table_name='record_import_entity_mappings' and exists(select 1 from public.record_import_plans plan
+                  where plan.import_plan_id=before_row->>'import_plan_id' and plan.import_job_id=live.import_job_id)))))
+          or (value->>0='write_obligation' and tg_table_name='record_write_obligation_targets'
+            and value->>1=before_row->>'obligation_id')
+          or (value->>0='upload_part' and tg_table_name='record_attachments' and exists(
+            select 1 from public.attachment_upload_parts part join public.attachment_uploads u using(upload_id)
+            where u.attachment_id=before_row->>'attachment_id' and part.upload_id||':'||part.part_number::text=value->>1))
+          or (value->>0 in ('attachment','upload_part') and tg_table_name in ('record_write_obligations','blob_publication_intents','blob_objects')
+            and ((value->>0='attachment' and exists(select 1 from public.record_attachments a where a.attachment_id=value->>1))
+              or (value->>0='upload_part' and exists(select 1 from public.attachment_upload_parts part
+                where part.upload_id||':'||part.part_number::text=value->>1))))
+      loop
+        if jsonb_array_length(e)<>3 or e->>2 !~ '^[0-9a-f]{64}$'
+          or record_platform_internal.record_portability_v1_old_owner_valid(t.operation_id,t.target_id,
+            e->>0,e->>1,decode(e->>2,'hex')) is not true then
+          raise exception using errcode='55000',message='portability V1 dependent owner preimage changed';
+        end if;
+      end loop;
+    end if;
+  end loop;
+  if tg_op='DELETE' then return old; end if;
+  return new;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_reference_guard() from public;
+
+create function record_platform_internal.record_portability_v1_reference_check()
+returns trigger language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare before_row jsonb:=to_jsonb(old); t public.record_portability_v1_targets;
+begin
+  if tg_op='UPDATE' and to_jsonb(old) is not distinct from to_jsonb(new) then return null; end if;
+  if tg_table_name='record_write_obligations' and tg_op='UPDATE'
+    and record_platform_internal.record_portability_v1_append_fact_only(before_row,to_jsonb(new)) then return null; end if;
+  for t in select x.* from public.record_portability_v1_targets x where x.disposition='retained_shared'
+    and record_platform_internal.record_portability_v1_reference_match(tg_table_name,before_row,x)
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    if not record_platform_internal.record_portability_v1_retained_proof(t.operation_id,t.target_id,null,null) then
+      raise exception using errcode='55000',message='portability V1 retained responsibility is unavailable';
+    end if;
+  end loop;
+  return null;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_reference_check() from public;
+
+do $$
+declare relation_name text;
+begin
+  foreach relation_name in array array['record_export_jobs','record_export_artifacts','record_import_jobs',
+    'record_import_artifacts','record_import_plans','record_import_entity_mappings','record_attachments',
+    'attachment_upload_parts','blob_gc_pins','blob_objects','blob_publication_intents',
+    'record_write_obligations','record_write_obligation_targets'] loop
+    execute format('create trigger record_portability_v1_reference_guard before insert or update or delete on public.%I for each row execute function record_platform_internal.record_portability_v1_reference_guard()',relation_name);
+    execute format('create constraint trigger record_portability_v1_reference_check after update or delete on public.%I deferrable initially deferred for each row execute function record_platform_internal.record_portability_v1_reference_check()',relation_name);
+  end loop;
+end $$;
+
+create function record_platform_internal.record_portability_v1_link_guard()
+returns trigger language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare g public.blob_gc_deletions; o public.record_write_obligations; t public.record_portability_v1_targets;
+begin
+  perform record_platform_internal.record_portability_v1_epoch_share();
+  for t in select x.* from public.record_portability_v1_targets x
+    where x.disposition='retained_shared' and (exists(select 1 from public.record_portability_v1_obligations c
+      where (c.operation_id,c.target_id)=(x.operation_id,x.target_id) and c.obligation_id in
+        (case when tg_op<>'INSERT' then old.obligation_id end,case when tg_op<>'DELETE' then new.obligation_id end))
+      or (x.backend_kind='local' and exists(select 1 from public.blob_gc_deletions successor
+        where successor.deletion_id in (case when tg_op<>'INSERT' then old.deletion_id end,case when tg_op<>'DELETE' then new.deletion_id end)
+          and successor.backend_kind='local' and successor.local_contract_version=2
+          and (successor.namespace_id,successor.incarnation_id,successor.blob_key,successor.sha256_digest)
+            is not distinct from (x.namespace_id,x.incarnation_id,x.blob_key,x.sha256))))
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    perform record_platform_internal.record_portability_v1_touch_retained(t.operation_id,t.target_id);
+  end loop;
+  if exists(select 1 from public.record_portability_v1_targets x
+    where x.disposition='retained_shared' and (exists(select 1 from public.record_portability_v1_obligations c
+      where (c.operation_id,c.target_id)=(x.operation_id,x.target_id) and c.obligation_id in
+        (case when tg_op<>'INSERT' then old.obligation_id end,case when tg_op<>'DELETE' then new.obligation_id end))
+      or (x.backend_kind='local' and exists(select 1 from public.blob_gc_deletions successor
+        where successor.deletion_id in (case when tg_op<>'INSERT' then old.deletion_id end,case when tg_op<>'DELETE' then new.deletion_id end)
+          and successor.backend_kind='local' and successor.local_contract_version=2
+          and (successor.namespace_id,successor.incarnation_id,successor.blob_key,successor.sha256_digest)
+            is not distinct from (x.namespace_id,x.incarnation_id,x.blob_key,x.sha256))))) then
+  begin
+    perform 1 from public.attachment_quota_accounts where project_id='default' for update nowait;
+    lock table public.blob_objects in share row exclusive mode nowait;
+    lock table public.attachment_upload_parts in share row exclusive mode nowait;
+    perform 1 from public.record_write_obligations where obligation_id in
+      (case when tg_op<>'INSERT' then old.obligation_id end,case when tg_op<>'DELETE' then new.obligation_id end)
+      order by obligation_id collate "C" for update nowait;
+  exception when lock_not_available then
+    raise exception using errcode='40001',message='portability link changed; restart transaction';
+  end;
+  end if;
+  if tg_op='DELETE' then
+    select * into strict g from public.blob_gc_deletions where deletion_id=old.deletion_id;
+    if g.deletion_state='completed' then
+      raise exception using errcode='55000',message='completed local cleanup sources are immutable';
+    end if;
+    return old;
+  end if;
+  if tg_op='UPDATE' and ((old.deletion_id,old.obligation_id) is distinct from (new.deletion_id,new.obligation_id)
+    or (old.seal_obligation and not new.seal_obligation)) then
+    raise exception using errcode='55000',message='local GC source link cannot be changed or unsealed';
+  end if;
+  if tg_op<>'DELETE' then
+    select * into strict g from public.blob_gc_deletions where deletion_id=new.deletion_id;
+    if g.deletion_state='completed' then
+      raise exception using errcode='55000',message='completed local cleanup sources are immutable';
+    end if;
+    select * into strict o from public.record_write_obligations where obligation_id=new.obligation_id;
+    if g.backend_kind<>'local' or g.local_contract_version<>2
+      or (g.namespace_id,g.incarnation_id,g.blob_key) is distinct from (o.namespace_id,o.incarnation_id,o.canonical_key)
+      or (new.seal_obligation and not (o.cleanup_completed_at is null
+        and o.operation_id is not distinct from g.operation_id
+        and (g.operation_id is not null or coalesce(record_platform_internal.local_blob_origin_closed(o.obligation_id),false)))) then
+      raise exception using errcode='55000',message='local GC source link lacks original authority';
+    end if;
+    return new;
+  end if;
+  return old;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_link_guard() from public;
+create trigger record_portability_v1_link_guard before insert or update or delete on public.local_blob_gc_obligations
+  for each row execute function record_platform_internal.record_portability_v1_link_guard();
+
+create function record_platform_internal.record_portability_v1_control_check()
+returns trigger language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare before_row jsonb; after_row jsonb; t public.record_portability_v1_targets;
+begin
+  if tg_op<>'INSERT' then before_row:=to_jsonb(old); end if;
+  if tg_op<>'DELETE' then after_row:=to_jsonb(new); end if;
+  perform record_platform_internal.record_portability_v1_epoch_share();
+  if not exists(select 1 from public.record_portability_v1_targets where disposition='retained_shared') then return null; end if;
+  begin
+    perform 1 from public.attachment_quota_accounts where project_id='default' for update nowait;
+    lock table public.blob_objects in share row exclusive mode nowait;
+    lock table public.attachment_upload_parts in share row exclusive mode nowait;
+    perform 1 from public.record_write_obligations o where exists(
+      select 1 from public.record_portability_v1_obligations c
+      join public.record_portability_v1_targets x on (x.operation_id,x.target_id)=(c.operation_id,c.target_id)
+      where c.obligation_id=o.obligation_id and x.disposition='retained_shared'
+        and ((tg_table_name='local_blob_gc_obligations' and exists(
+          select 1 from public.record_portability_v1_obligations source
+          where (source.operation_id,source.target_id)=(x.operation_id,x.target_id)
+            and source.obligation_id in (before_row->>'obligation_id',after_row->>'obligation_id')))
+          or (tg_table_name='local_blob_gc_obligations' and x.backend_kind='local' and exists(
+            select 1 from public.blob_gc_deletions successor
+            where successor.deletion_id in (before_row->>'deletion_id',after_row->>'deletion_id')
+              and successor.backend_kind='local' and successor.local_contract_version=2
+              and (successor.namespace_id,successor.incarnation_id,successor.blob_key,successor.sha256_digest)
+                is not distinct from (x.namespace_id,x.incarnation_id,x.blob_key,x.sha256)))
+          or (tg_table_name='blob_gc_deletions' and x.backend_kind='local'
+            and ((before_row->>'blob_key'=x.blob_key and (before_row->>'namespace_id')::uuid is not distinct from x.namespace_id
+              and (before_row->>'incarnation_id')::uuid is not distinct from x.incarnation_id)
+              or (after_row->>'blob_key'=x.blob_key and (after_row->>'namespace_id')::uuid is not distinct from x.namespace_id
+              and (after_row->>'incarnation_id')::uuid is not distinct from x.incarnation_id)))))
+      order by o.obligation_id collate "C" for update nowait;
+  exception when lock_not_available then
+    raise exception using errcode='40001',message='portability control changed; restart transaction';
+  end;
+  for t in select x.* from public.record_portability_v1_targets x where x.disposition='retained_shared'
+    and ((tg_table_name='local_blob_gc_obligations' and exists(
+      select 1 from public.record_portability_v1_obligations c where c.operation_id=x.operation_id and c.target_id=x.target_id
+        and c.obligation_id in (before_row->>'obligation_id',after_row->>'obligation_id')))
+      or (tg_table_name='local_blob_gc_obligations' and x.backend_kind='local' and exists(
+        select 1 from public.blob_gc_deletions successor
+        where successor.deletion_id in (before_row->>'deletion_id',after_row->>'deletion_id')
+          and successor.backend_kind='local' and successor.local_contract_version=2
+          and (successor.namespace_id,successor.incarnation_id,successor.blob_key,successor.sha256_digest)
+            is not distinct from (x.namespace_id,x.incarnation_id,x.blob_key,x.sha256)))
+      or (tg_table_name='blob_gc_deletions' and x.backend_kind='local'
+        and ((before_row->>'blob_key'=x.blob_key and (before_row->>'namespace_id')::uuid is not distinct from x.namespace_id
+          and (before_row->>'incarnation_id')::uuid is not distinct from x.incarnation_id)
+          or (after_row->>'blob_key'=x.blob_key and (after_row->>'namespace_id')::uuid is not distinct from x.namespace_id
+          and (after_row->>'incarnation_id')::uuid is not distinct from x.incarnation_id))))
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    perform record_platform_internal.record_portability_v1_touch_retained(t.operation_id,t.target_id);
+    if not record_platform_internal.record_portability_v1_retained_proof(t.operation_id,t.target_id,null,null) then
+      raise exception using errcode='55000',message='portability V1 retained control proof is unavailable';
+    end if;
+  end loop;
+  return null;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_control_check() from public;
+create constraint trigger record_portability_v1_control_check after insert or update or delete on public.blob_gc_deletions
+  deferrable initially deferred for each row execute function record_platform_internal.record_portability_v1_control_check();
+create constraint trigger record_portability_v1_control_check after insert or update or delete on public.local_blob_gc_obligations
+  deferrable initially deferred for each row execute function record_platform_internal.record_portability_v1_control_check();
+
+create function record_platform_internal.record_portability_v1_parent_route(source_table text, source_row jsonb)
+returns jsonb language plpgsql immutable security definer set search_path=pg_catalog as $$
+begin
+  if source_row is null then return null; end if;
+  case source_table
+    when 'attachment_uploads' then return jsonb_build_array(source_row->'upload_id',source_row->'attachment_id',source_row->'origin_draft_id',source_row->'transport_kind');
+    when 'attachment_processor_jobs' then return jsonb_build_array(source_row->'processor_job_id',source_row->'upload_id',source_row->'attachment_id');
+    when 'record_drafts' then return jsonb_build_array(source_row->'draft_id',source_row->'record_id');
+    else raise exception using errcode='22023',message='invalid portability parent route';
+  end case;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_parent_route(text,jsonb) from public;
+
+create function record_platform_internal.record_portability_v1_parent_guard()
+returns trigger language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare before_row jsonb:=to_jsonb(old); after_row jsonb; t public.record_portability_v1_targets; e jsonb; relevant boolean;
+begin
+  if tg_op='UPDATE' then
+    after_row:=to_jsonb(new);
+    if record_platform_internal.record_portability_v1_parent_route(tg_table_name,before_row)
+      is not distinct from record_platform_internal.record_portability_v1_parent_route(tg_table_name,after_row) then return new; end if;
+  end if;
+  perform record_platform_internal.record_portability_v1_epoch_share();
+  if not exists(select 1 from public.record_portability_v1_targets x,
+    jsonb_array_elements(x.retained_evidence) ev(value) where x.disposition='retained_shared'
+      and ((tg_table_name='record_drafts' and ev.value->>0 in ('attachment','upload_part'))
+        or (tg_table_name in ('attachment_uploads','attachment_processor_jobs') and ev.value->>0='attachment'
+          and ev.value->>1=before_row->>'attachment_id')
+        or (tg_table_name='attachment_uploads' and ev.value->>0='upload_part'
+          and split_part(ev.value->>1,':',1)=before_row->>'upload_id'))) then
+    if tg_op='DELETE' then return old; end if;
+    return new;
+  end if;
+  begin
+    perform 1 from public.attachment_quota_accounts where project_id='default' for update nowait;
+    lock table public.blob_objects in share row exclusive mode nowait;
+    lock table public.attachment_upload_parts in share row exclusive mode nowait;
+    perform 1 from public.record_write_obligations o where exists(
+      select 1 from public.record_portability_v1_obligations c
+      join public.record_portability_v1_targets x on (x.operation_id,x.target_id)=(c.operation_id,c.target_id)
+      where c.obligation_id=o.obligation_id and x.disposition='retained_shared'
+        and exists(select 1 from jsonb_array_elements(x.retained_evidence) e(value)
+          where (tg_table_name='record_drafts' and e.value->>0 in ('attachment','upload_part'))
+            or (tg_table_name in ('attachment_uploads','attachment_processor_jobs') and e.value->>0='attachment'
+              and e.value->>1=before_row->>'attachment_id')
+            or (tg_table_name='attachment_uploads' and e.value->>0='upload_part'
+              and split_part(e.value->>1,':',1)=before_row->>'upload_id')))
+      order by o.obligation_id collate "C" for update nowait;
+  exception when lock_not_available then
+    raise exception using errcode='40001',message='portability parent changed; restart transaction';
+  end;
+  for t in select * from public.record_portability_v1_targets where disposition='retained_shared'
+    order by operation_id collate "C",target_id collate "C" loop
+    if exists(select 1 from jsonb_array_elements(t.retained_evidence) candidate(value)
+      where (tg_table_name='record_drafts' and candidate.value->>0 in ('attachment','upload_part'))
+        or (tg_table_name in ('attachment_uploads','attachment_processor_jobs') and candidate.value->>0='attachment'
+          and candidate.value->>1=before_row->>'attachment_id')
+        or (tg_table_name='attachment_uploads' and candidate.value->>0='upload_part'
+          and split_part(candidate.value->>1,':',1)=before_row->>'upload_id')) then
+      perform record_platform_internal.record_portability_v1_touch_retained(t.operation_id,t.target_id);
+    end if;
+    for e in select value from jsonb_array_elements(t.retained_evidence)
+      where value->>0 in ('attachment','upload_part') loop
+      relevant:=false;
+      if tg_table_name='attachment_uploads' then
+        relevant:=(e->>0='attachment' and e->>1=before_row->>'attachment_id'
+            and exists(select 1 from public.record_attachments a where a.attachment_id=e->>1))
+          or (e->>0='upload_part' and split_part(e->>1,':',1)=before_row->>'upload_id'
+            and exists(select 1 from public.attachment_upload_parts part
+              where part.upload_id||':'||part.part_number::text=e->>1));
+      elsif tg_table_name='attachment_processor_jobs' then
+        relevant:=e->>0='attachment' and e->>1=before_row->>'attachment_id'
+          and exists(select 1 from public.record_attachments a where a.attachment_id=e->>1);
+      else
+        relevant:=exists(select 1 from public.record_attachments a where a.draft_id=before_row->>'draft_id'
+          and ((e->>0='attachment' and e->>1=a.attachment_id) or (e->>0='upload_part' and exists(
+            select 1 from public.attachment_uploads u join public.attachment_upload_parts part using(upload_id)
+            where u.attachment_id=a.attachment_id and part.upload_id||':'||part.part_number::text=e->>1))));
+      end if;
+      if relevant and (jsonb_array_length(e)<>3 or e->>2 !~ '^[0-9a-f]{64}$'
+        or record_platform_internal.record_portability_v1_old_owner_valid(t.operation_id,t.target_id,e->>0,e->>1,decode(e->>2,'hex')) is not true) then
+        raise exception using errcode='55000',message='portability V1 dependent owner preimage changed';
+      end if;
+    end loop;
+  end loop;
+  if tg_op='DELETE' then return old; end if;
+  return new;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_parent_guard() from public;
+
+create function record_platform_internal.record_portability_v1_parent_check()
+returns trigger language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare before_row jsonb:=to_jsonb(old); t public.record_portability_v1_targets;
+begin
+  if tg_op='UPDATE' and record_platform_internal.record_portability_v1_parent_route(tg_table_name,before_row)
+    is not distinct from record_platform_internal.record_portability_v1_parent_route(tg_table_name,to_jsonb(new)) then return null; end if;
+  for t in select x.* from public.record_portability_v1_targets x where x.disposition='retained_shared'
+    and exists(select 1 from jsonb_array_elements(x.retained_evidence) e(value)
+      where (tg_table_name='record_drafts' and e.value->>0 in ('attachment','upload_part'))
+        or (tg_table_name in ('attachment_uploads','attachment_processor_jobs') and e.value->>0='attachment'
+          and e.value->>1=before_row->>'attachment_id')
+        or (tg_table_name='attachment_uploads' and e.value->>0='upload_part'
+          and split_part(e.value->>1,':',1)=before_row->>'upload_id'))
+    order by x.operation_id collate "C",x.target_id collate "C" loop
+    if not record_platform_internal.record_portability_v1_retained_proof(t.operation_id,t.target_id,null,null) then
+      raise exception using errcode='55000',message='portability V1 dependent responsibility is unavailable';
+    end if;
+  end loop;
+  return null;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_parent_check() from public;
+
+do $$
+declare relation_name text;
+begin
+  foreach relation_name in array array['attachment_uploads','attachment_processor_jobs','record_drafts'] loop
+    execute format('create trigger record_portability_v1_parent_guard before update or delete on public.%I for each row execute function record_platform_internal.record_portability_v1_parent_guard()',relation_name);
+    execute format('create constraint trigger record_portability_v1_parent_check after update or delete on public.%I deferrable initially deferred for each row execute function record_platform_internal.record_portability_v1_parent_check()',relation_name);
+  end loop;
+end $$;
 
 create function public.record_birth_allocation_lock(bytea)
 returns void language plpgsql security definer set search_path=pg_catalog as $$
@@ -9726,7 +12257,7 @@ create table record_platform_internal.record_deletion_effect_scopes (
   operation_id text not null,
   authority_kind text not null check (authority_kind in ('online_v1','online_v2','recovery_v1')),
   authority_digest bytea not null check (octet_length(authority_digest)=32),
-  effect_kind text not null check (effect_kind in ('core','evidence','attachment','recovery')),
+  effect_kind text not null check (effect_kind in ('core','evidence','attachment','portability','recovery')),
   primary key (transaction_id,backend_pid,record_id,operation_id,effect_kind)
 );
 create function record_platform_internal.record_deletion_effect_scope(target text, kinds text[])
@@ -10478,7 +13009,7 @@ declare
   r public.deletion_reservations; o public.record_purge_operations; f public.deletion_fence_leases;
   e record_platform_internal.record_deletion_verified_entries; s public.source_authority_admission;
   expiry timestamptz; seq bigint; hash bytea; epoch bigint; result_count bigint;
-  target_state text; terminal boolean:=false; release bigint:=0;
+  target_state text; terminal boolean:=false; ready boolean:=true; release bigint:=0;
 begin
   perform record_platform_internal.local_blob_direct_login();
   if current_setting('transaction_isolation')<>'read committed' then
@@ -10490,7 +13021,7 @@ begin
       where p.principal=session_user and p.generation=s.generation and p.purpose='worker')) then
     raise exception using errcode='42501',message='legacy worker admission unavailable';
   end if;
-  if kind in ('delete_entry','witness','outcome_entry','finalize','promote','read_fenced','begin_purge','complete','retry','resume') then
+  if kind in ('delete_entry','witness','outcome_entry','finalize','promote','permanent_fence_applied','read_fenced','begin_purge','complete','retry','resume') then
     fields:=fields||array['ledger_sequence','ledger_entry_hash']; numbers:=numbers||array['ledger_sequence'];
   end if;
   if kind in ('witness','finalize') then fields:=fields||array['witness_proof_digest']; end if;
@@ -10501,7 +13032,7 @@ begin
   if kind='complete' then fields:=fields||array['receipt_digest']; end if;
   if kind in ('retry','resume') then fields:=fields||array['retry_stage']; end if;
   if kind not in ('delete_unknown','delete_entry','witness','outcome_unknown','outcome_entry','finalize','promote',
-                  'read_fenced','begin_purge','complete','retry','resume') then
+                  'permanent_fence_applied','read_fenced','begin_purge','complete','retry','resume') then
     raise exception using errcode='22023',message='invalid private continuation kind';
   end if;
   v:=record_platform_internal.record_deletion_command(body,fields,numbers);
@@ -10615,6 +13146,16 @@ begin
     update public.record_purge_operations x set operation_state='fence_propagating',updated_at=clock_timestamp() where x.operation_id=o.operation_id;
     insert into public.record_deletion_audits(audit_id,operation_id,project_id,event_kind,reason_code,occurred_at)
       values(v->>'audit_id',o.operation_id,o.project_id,'committed',o.reason_code,clock_timestamp());
+  when 'permanent_fence_applied' then
+    if o.operation_state<>'fence_propagating' or r.state<>'committed' or e.entry_type<>'delete_commit'
+      or e.deletion_contract_version<>1
+      or (o.ledger_entry_type,o.ledger_sequence,o.ledger_entry_hash,o.witness_proof_digest)
+        is distinct from ('delete_commit'::text,seq,hash,e.witness_proof_digest) then
+      raise exception using errcode='42501',message='legacy permanent fence check mismatch'; end if;
+    ready:=not exists(select 1 from public.deletion_fence_leases x where x.project_id=r.project_id
+        and x.object_kind=r.object_kind and x.object_id=r.object_id and x.expires_at>transaction_timestamp())
+      and not exists(select 1 from public.object_content_leases x where x.project_id=r.project_id
+        and x.object_kind=r.object_kind and x.object_id=r.object_id and x.expires_at>transaction_timestamp());
   when 'read_fenced' then
     if o.operation_state<>'fence_propagating' or r.state<>'committed' or e.entry_type<>'delete_commit'
       or (o.ledger_sequence,o.ledger_entry_hash,o.witness_proof_digest) is distinct from (seq,hash,e.witness_proof_digest)
@@ -10656,7 +13197,7 @@ begin
       where x.operation_id=o.operation_id and (x.owner_id,x.owner_generation,x.owner_expires_at)=(o.owner_id,o.owner_generation,o.owner_expires_at))) then
     raise exception using errcode='42501',message='legacy owner expired before commit';
   end if;
-  return true;
+  return ready;
 end $$;
 
 create function public.record_deletion_mark_delete_commit_unknown_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'delete_unknown') $$;
@@ -10666,6 +13207,7 @@ create function public.record_deletion_mark_outcome_commit_unknown_v1(bytea) ret
 create function public.record_deletion_record_outcome_entry_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'outcome_entry') $$;
 create function public.record_deletion_finalize_not_committed_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'finalize') $$;
 create function public.record_deletion_promote_permanent_fence_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'promote') $$;
+create function public.record_deletion_permanent_fence_applied_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'permanent_fence_applied') $$;
 create function public.record_deletion_mark_read_fenced_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'read_fenced') $$;
 create function public.record_deletion_begin_online_purge_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'begin_purge') $$;
 create function public.record_deletion_complete_online_purge_v1(bytea) returns boolean language sql security definer set search_path=pg_catalog as $$ select record_platform_internal.record_deletion_v1_continue($1,'complete') $$;
@@ -10681,6 +13223,7 @@ revoke all on function public.record_deletion_mark_delete_commit_unknown_v1(byte
   public.record_deletion_record_outcome_entry_v1(bytea),
   public.record_deletion_finalize_not_committed_v1(bytea),
   public.record_deletion_promote_permanent_fence_v1(bytea),
+  public.record_deletion_permanent_fence_applied_v1(bytea),
   public.record_deletion_mark_read_fenced_v1(bytea),
   public.record_deletion_begin_online_purge_v1(bytea),
   public.record_deletion_complete_online_purge_v1(bytea),
@@ -10783,12 +13326,108 @@ begin
     on res.reservation_id=o.reservation_id and res.project_id=o.project_id
     where o.operation_id=op and o.deletion_contract_version=version and res.deletion_contract_version=version;
   if octet_length(expected)<>32 then return false; end if;
+  if version=1 and (not exists(select 1 from public.browser_record_cleanup_events e
+      where (e.operation_id,e.project_id,e.record_id,e.cleanup_epoch,e.scopes)
+        is not distinct from (op,r.project_id,r.object_id,r.fence_epoch,
+          array['markdown_draft_buffer','markdown_workspace','comparison_workbench','comparison_save_attempt']::text[]))
+    or not exists(select 1 from public.record_portability_v1_preparations p
+      join public.record_purge_operations o on o.operation_id=p.operation_id
+      join record_platform_internal.record_deletion_verified_entries e
+        on (e.ledger_domain,e.ledger_sequence,e.ledger_entry_hash,e.witness_proof_digest)
+          =(p.ledger_domain,p.ledger_sequence,p.ledger_entry_hash,p.witness_proof_digest)
+      where p.operation_id=op and p.project_id=r.project_id and p.record_id=r.object_id
+        and (o.ledger_sequence,o.ledger_entry_hash,o.witness_proof_digest,o.ledger_entry_type)
+          is not distinct from (p.ledger_sequence,p.ledger_entry_hash,p.witness_proof_digest,'delete_commit')
+        and (e.entry_type,e.deletion_contract_version,e.operation_id,e.deployment_id,e.project_id,e.actor_id,e.reason_code,e.object_kind,e.object_id)
+          is not distinct from ('delete_commit',1::bigint,o.operation_id,o.deployment_id,o.project_id,o.actor_id,o.reason_code,r.object_kind,r.object_id)
+        and (e.token_commitment,e.request_fingerprint) is not distinct from (r.deletion_token_commitment,r.request_fingerprint)
+        and record_platform_internal.record_portability_v1_eligible(op))) then
+    return false;
+  end if;
+  if version=1 and (not record_platform_internal.record_portability_v1_finished(op)
+    or exists(select 1 from public.blob_gc_deletions g
+      where (g.operation_id=op or (g.operation_id is null and g.owner_id=op))
+        and not ((g.project_id=r.project_id and g.purge_mode='permanent' and g.local_contract_version=1
+                    and g.backend_kind='s3')
+          or (g.operation_id=op and g.local_contract_version=2 and
+            (select count(*) from public.record_portability_v1_targets t where t.operation_id=op
+              and t.disposition='local' and t.local_deletion_id=g.deletion_id)=1)))) then
+    return false;
+  end if;
+  if version=1 and (
+    exists(select 1 from public.record_portability_v1_targets t left join public.blob_gc_deletions g
+      on g.deletion_id=t.local_deletion_id where t.operation_id=op and t.disposition='local' and (
+        record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id) is null
+        or g.deletion_id is null or g.operation_id is distinct from op or g.local_contract_version<>2
+        or g.project_id is distinct from r.project_id or g.purge_mode is distinct from 'permanent'
+        or (g.namespace_id,g.incarnation_id,g.blob_key,g.sha256_digest)
+          is distinct from (t.namespace_id,t.incarnation_id,t.blob_key,t.sha256)
+        or g.deletion_state<>'completed' or g.completed_at is null or g.retry_at is not null
+        or g.physical_delete_result is null or g.physical_delete_result not in ('deleted','already_absent') or not g.final_identity_bound
+        or g.final_was_present is null
+        or (g.final_was_present and (g.object_version,g.size_bytes) is distinct from
+          (record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id),t.byte_size))
+        or (g.final_was_present and (g.final_device is null or g.final_inode is null or g.final_inode<=0))
+        or (not g.final_was_present and (g.object_version is not null or g.final_device is not null or g.final_inode is not null))
+        or g.inventory_digest is null or g.completion_command is null
+        or g.receipt_digest is distinct from sha256(convert_to('HOUFENG-LOCAL-GC-V2','UTF8')||g.completion_command)
+        or (convert_from(g.completion_command,'UTF8')::jsonb)->>'deletion_id' is distinct from g.deletion_id
+        or (convert_from(g.completion_command,'UTF8')::jsonb)->>'namespace_id' is distinct from g.namespace_id::text
+        or (convert_from(g.completion_command,'UTF8')::jsonb)->>'incarnation_id' is distinct from g.incarnation_id::text
+        or (convert_from(g.completion_command,'UTF8')::jsonb)->>'operation_id' is distinct from op
+        or (convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_owner_id' is distinct from g.owner_id
+        or ((convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_generation')::bigint is distinct from g.owner_generation
+        or ((convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_expires_at')::timestamptz is distinct from g.lease_expires_at
+        or ((convert_from(g.completion_command,'UTF8')::jsonb)->>'cleanup_dispatch_id')::uuid is distinct from g.cleanup_dispatch_id
+        or (convert_from(g.completion_command,'UTF8')::jsonb)->>'outcome' is distinct from g.physical_delete_result
+        or (convert_from(g.completion_command,'UTF8')::jsonb)->>'inventory_digest' is distinct from encode(g.inventory_digest,'hex')))
+    or exists(select 1 from public.record_portability_v1_targets t where t.operation_id=op and t.disposition='s3'
+      and (t.backend_kind<>'s3' or t.blob_key is distinct from 'sha256/'||encode(t.sha256,'hex')
+        or t.object_version_id is null or octet_length(t.object_version_id) not between 1 and 1024 or t.object_version_id='null'
+        or t.namespace_id is not null or t.incarnation_id is not null or t.byte_size is null or t.byte_size<=0
+        or t.storage_binding is null or octet_length(t.storage_binding)<>32
+        or t.deletion_state<>'completed' or t.completed_at is null or t.retry_at is not null
+        or t.cleanup_owner_id is null or t.cleanup_owner_generation is null or t.cleanup_owner_generation<1
+        or t.attempt is null or t.attempt<1 or t.cleanup_expires_at is null
+        or t.physical_delete_result is null or t.physical_delete_result not in ('deleted','already_absent')
+        or t.receipt_digest is distinct from record_platform_internal.record_portability_v1_gc_digest(t,t.physical_delete_result)))
+    or exists(select 1 from public.record_portability_v1_obligations member
+      join public.record_portability_v1_targets t on (t.operation_id,t.target_id)=(member.operation_id,member.target_id)
+      join public.record_write_obligations w on w.obligation_id=member.obligation_id
+      left join public.blob_gc_deletions g on g.deletion_id=t.local_deletion_id
+      left join public.local_blob_gc_obligations link on (link.deletion_id,link.obligation_id)=(g.deletion_id,w.obligation_id)
+      where member.operation_id=op and t.disposition='local' and (
+        (w.backend_kind,w.namespace_id,w.incarnation_id,w.canonical_key,w.sha256_digest,w.size_bytes)
+          is distinct from ('local',t.namespace_id,t.incarnation_id,t.blob_key,t.sha256,t.byte_size)
+        or link.obligation_id is null
+        or (link.seal_obligation and (w.handed_off_at is null or w.cleanup_completed_at is null
+          or w.quota_settled_at is null or (w.cleanup_outcome,w.cleanup_receipt)
+            is distinct from (g.physical_delete_result,g.receipt_digest)))
+        or not link.seal_obligation))
+    or exists(select 1 from public.record_portability_v1_targets t
+      join public.local_blob_gc_obligations link on link.deletion_id=t.local_deletion_id
+      where t.operation_id=op and t.disposition='local' and (not link.seal_obligation or not exists(
+        select 1 from public.record_portability_v1_obligations c where (c.operation_id,c.target_id,c.obligation_id)=
+          (t.operation_id,t.target_id,link.obligation_id))))
+    or exists(select 1 from public.blob_gc_deletions g where g.operation_id=op and g.local_contract_version=2
+      and (select count(*) from public.record_portability_v1_targets t where t.operation_id=op
+        and t.disposition='local' and t.local_deletion_id=g.deletion_id)<>1)) then
+    return false;
+  end if;
   -- Pending physical obligations remain independent of a SQL receipt. The
   -- planned collaboration drain must additionally establish its durable handoff.
-  if (version=1 and (exists(select 1 from public.record_write_obligations w where (w.operation_id=op or (w.project_id=r.project_id and w.record_id=r.object_id))
-        and w.cleanup_completed_at is null)
-    or exists(select 1 from public.record_write_obligation_targets t join public.record_write_obligations w using(obligation_id)
-        where t.record_id=r.object_id and w.cleanup_completed_at is null)))
+  if (version=1 and exists(select 1 from public.record_write_obligations w
+      where (w.operation_id=op or (w.project_id=r.project_id and w.record_id=r.object_id)
+        or exists(select 1 from public.record_write_obligation_targets ot
+          where ot.obligation_id=w.obligation_id and ot.record_id=r.object_id))
+        and w.cleanup_completed_at is null
+        and not exists(select 1 from public.record_portability_v1_obligations c
+          join public.record_portability_v1_targets t using(operation_id,target_id)
+          where c.operation_id=op and c.obligation_id=w.obligation_id and
+            ((t.disposition='retained_shared' and
+              record_platform_internal.record_portability_v1_retained_proof(t.operation_id,t.target_id,null,null))
+              or (t.disposition='s3' and t.deletion_state='completed'
+                and t.receipt_digest=record_platform_internal.record_portability_v1_gc_digest(t,t.physical_delete_result))))))
     or (version=2 and not record_platform_internal.record_deletion_responsibilities_v2(op,r.project_id,r.object_id))
     or not record_platform_internal.record_outbox_handoff_complete(op,r.object_id) then
     return false;
@@ -10874,9 +13513,9 @@ begin
           if item='blob_object' then expected_gc:=part.removed_row_count; end if;
         end loop;
         select count(*) into rowcount from public.blob_gc_deletions g where g.project_id=r.project_id and g.purge_mode='permanent'
-          and (g.operation_id=op or (g.operation_id is null and g.owner_id=op and g.local_contract_version=1));
+          and g.local_contract_version=1 and (g.operation_id=op or (g.operation_id is null and g.owner_id=op));
         if rowcount<>expected_gc or exists(select 1 from public.blob_gc_deletions g where g.project_id=r.project_id and g.purge_mode='permanent'
-          and (g.operation_id=op or (g.operation_id is null and g.owner_id=op and g.local_contract_version=1))
+          and g.local_contract_version=1 and (g.operation_id=op or (g.operation_id is null and g.owner_id=op))
           and (g.deletion_state<>'completed' or g.retry_at is not null or g.physical_delete_result not in ('deleted','already_absent')
             or g.receipt_digest is null or g.completed_at is null or g.sha256_digest is null or g.size_bytes is null or g.size_bytes<=0)) then return false; end if;
         receipt:=record_platform_internal.digest(content,'sha256'); computed:=receipt; stored_surface:=surface; verified_at:=part.verified_absent_at; count_removed:=0;
@@ -10905,6 +13544,8 @@ begin
       when 'record_portability' then
         select x.removed_surface_digest,x.receipt_digest,x.removed_row_count,x.verified_absent_at into stored_surface,receipt,count_removed,verified_at
           from public.record_portability_purge_receipts x where x.operation_id=op and x.adapter_name=name;
+        if version=1 and not exists(select 1 from public.record_portability_v1_preparations p
+          where p.operation_id=op and p.surface_digest=surface and p.removed_rows=count_removed) then return false; end if;
         if version=2 then
           select p.* into strict portability_manifest from public.record_portability_cleanup_preparations p where p.operation_id=op;
           if portability_manifest.record_id<>r.object_id or portability_manifest.surface_digest<>surface then return false; end if;
@@ -11262,6 +13903,16 @@ begin
     when 'record_evidence' then
       names:=array['evidence_capture_intents','evidence_copy_lineage','evidence_payload_gc_receipts',
         'evidence_payloads','evidence_purge_receipts','evidence_snapshots','record_revision_evidence'];
+    when 'record_markdown_client' then
+      return decode('fbf3be26fad82b0045f9c13f7379b1808eb590cc46107e36e2d19ea2e7df6c32','hex');
+    when 'record_comparison' then
+      return decode('e83ca414d2cefa65a747f68ce0b6a855b7eddd633e427ea350dc5fb182885780','hex');
+    when 'record_collaboration' then
+      return decode('03498615d38f1445dc2414657d4efe45fb4c8b564430d79f40220e209c9802e8','hex');
+    when 'record_portability' then
+      names:=array['record_export_artifacts','record_export_jobs','record_import_artifacts',
+        'record_import_entity_mappings','record_import_jobs','record_import_plans',
+        'record_origin_tombstones','record_origins','record_portability_purge_receipts'];
     when 'record_attachments' then
       names:=array['attachment_processor_jobs','attachment_purge_receipts','attachment_quota_accounts',
         'attachment_upload_parts','attachment_uploads','blob_gc_deletions','blob_gc_pins','blob_objects',
@@ -11571,6 +14222,42 @@ begin
     when 'record_evidence' then
       lock table public.evidence_capture_intents,public.evidence_payloads,public.evidence_snapshots,
         public.evidence_copy_lineage,public.record_revision_evidence in share row exclusive mode;
+    when 'record_markdown_client' then
+      lock table public.markdown_client_draft_buffers,public.markdown_client_workspaces in share row exclusive mode;
+    when 'record_comparison' then
+      lock table public.comparison_client_save_attempts,public.comparison_client_workbenches,
+        public.comparison_result_dependencies,public.comparison_result_dependency_index_completions in share row exclusive mode;
+    when 'record_collaboration' then
+      perform 1 from public.object_content_leases x where x.project_id=reservation.project_id
+        and x.object_kind=reservation.object_kind and x.object_id=reservation.object_id for update;
+      lock table public.record_outbox in share row exclusive mode;
+      begin
+        lock table public.record_action_events,public.record_actions,public.record_comment_mentions,
+          public.record_comment_replies,public.record_comment_revisions,public.record_comment_tombstones,
+          public.record_comments,public.record_followers,public.record_notification_audit_summaries,
+          public.record_notification_deliveries,public.record_notification_delivery_attempts,
+          public.record_notification_delivery_starts,public.record_notification_recipients,
+          public.record_notifications in share row exclusive mode nowait;
+      exception when lock_not_available then
+        raise exception using errcode='40001',message='collaboration purge route changed; restart transaction';
+      end;
+    when 'record_portability' then
+      perform 1 from public.attachment_quota_accounts q where q.project_id=reservation.project_id for update;
+      lock table public.blob_objects in share row exclusive mode;
+      lock table public.attachment_upload_parts in share row exclusive mode;
+      begin
+        lock table public.record_attachments,public.attachment_uploads,public.attachment_processor_jobs,
+          public.record_drafts,public.blob_gc_pins,public.blob_publication_intents
+          in share row exclusive mode nowait;
+      exception when lock_not_available then
+        raise exception using errcode='40001',message='portability source route changed; restart transaction';
+      end;
+      lock table public.record_export_jobs,public.record_export_artifacts,public.record_import_jobs,
+        public.record_import_artifacts,public.record_import_plans,public.record_import_entity_mappings,
+        public.record_origins,public.record_write_obligations,public.record_write_obligation_targets,
+        public.record_portability_v1_preparations,public.record_portability_v1_targets,
+        public.record_portability_v1_artifacts,public.record_portability_v1_obligations,
+        public.blob_gc_deletions,public.record_portability_purge_receipts in share row exclusive mode;
     when 'record_attachments' then
       perform 1 from public.attachment_quota_accounts q where q.project_id=reservation.project_id for update;
       lock table public.blob_objects in share row exclusive mode;
@@ -12339,6 +15026,7 @@ begin
   end if;
   docs:='[]'::jsonb; gc_count:=0;
   for g in select x.* from public.blob_gc_deletions x where x.operation_id=v->>'operation_id'
+      and x.local_contract_version=1
       order by x.backend_kind collate "C",x.blob_key collate "C",x.object_version collate "C",x.deletion_id collate "C" loop
     docs:=docs||jsonb_build_array(record_platform_internal.attachment_v1_gc_document(g));
     gc_count:=gc_count+1;
@@ -12348,7 +15036,7 @@ begin
   end if;
   select o.operation_state into strict operation_state from public.record_purge_operations o where o.operation_id=v->>'operation_id';
   if operation_state='online_purged' and exists(select 1 from public.blob_gc_deletions x
-      where x.operation_id=v->>'operation_id' and x.deletion_state<>'completed') then
+      where x.operation_id=v->>'operation_id' and x.local_contract_version=1 and x.deletion_state<>'completed') then
     raise exception using errcode='55000',message='terminal attachment proof incomplete';
   end if;
   return jsonb_build_object('counts',counts,'verified_at',record_platform_internal.attachment_v1_time(latest),
@@ -12366,7 +15054,7 @@ begin
   if verify_only then return projection; end if;
   perform record_platform_internal.attachment_v1_live(v);
   if projection<>'null'::jsonb then return projection; end if;
-  if exists(select 1 from public.blob_gc_deletions g where g.operation_id=v->>'operation_id'
+  if exists(select 1 from public.blob_gc_deletions g where (g.operation_id=v->>'operation_id' and g.local_contract_version=1)
       or (g.operation_id is null and g.local_contract_version=1 and g.purge_mode='permanent' and g.owner_id=v->>'operation_id')) then
     raise exception using errcode='55000',message='attachment claim without preparation';
   end if;
@@ -12561,11 +15249,13 @@ begin
   if kind<>'resolve' then perform record_platform_internal.attachment_v1_live(v); end if;
   -- legacy_adapter_lock takes quota before any GC row lock.
   if kind='resolve' then
-    select * into g from public.blob_gc_deletions x where x.deletion_id=deletion and x.operation_id=v->>'operation_id';
+    select * into g from public.blob_gc_deletions x where x.deletion_id=deletion and x.operation_id=v->>'operation_id' and x.local_contract_version=1;
   else
-    select * into g from public.blob_gc_deletions x where x.deletion_id=deletion and x.operation_id=v->>'operation_id' for update;
+    select * into g from public.blob_gc_deletions x where x.deletion_id=deletion and x.operation_id=v->>'operation_id' and x.local_contract_version=1 for update;
   end if;
   if not found then return 'null'::jsonb; end if;
+  perform record_platform_internal.record_portability_v1_gc_barrier(g.backend_kind,g.namespace_id,g.incarnation_id,
+    g.blob_key,g.object_version,g.deletion_id);
   doc:=record_platform_internal.attachment_v1_gc_document(g);
   select o.operation_state into strict state from public.record_purge_operations o where o.operation_id=v->>'operation_id';
   if state='online_purged' and (kind<>'resolve' or g.deletion_state<>'completed') then
@@ -12648,3 +15338,1061 @@ revoke all on function record_platform_internal.attachment_v1_time(timestamptz),
   public.record_attachment_purge_prepare_v1(bytea),public.record_attachment_purge_verify_v1(bytea),
   public.record_attachment_gc_claim_v1(bytea),public.record_attachment_gc_complete_v1(bytea),
   public.record_attachment_gc_retry_v1(bytea),public.record_attachment_gc_resolve_v1(bytea) from public;
+
+create function record_platform_internal.record_portability_local_v1(body bytea, kind text)
+returns jsonb language plpgsql security definer set search_path=pg_catalog as $$
+declare raw json; auth json; request json; authority jsonb; request_bytes bytea; authority_bytes bytea; result jsonb;
+begin
+  if body is null or octet_length(body) not between 1 and 262144
+    or kind not in ('prepare','claim','resolve','bind_final','complete') then
+    raise exception using errcode='22023',message='invalid portability local command';
+  end if;
+  raw:=convert_from(body,'UTF8')::json;
+  if json_typeof(raw) is distinct from 'object' or (select count(*) from json_each(raw))<>2
+    or (select count(distinct x.key) from json_each(raw) x)<>2
+    or exists(select 1 from json_each(raw) x where x.key not in ('authority','request') or json_typeof(x.value)<>'object') then
+    raise exception using errcode='22023',message='invalid portability local command fields';
+  end if;
+  auth:=raw->'authority'; request:=raw->'request';
+  if (select count(*) from json_each(auth))<>(select count(distinct x.key) from json_each(auth) x)
+    or (select count(*) from json_each(request))<>(select count(distinct x.key) from json_each(request) x)
+    or exists(select 1 from json_each(request) x where json_typeof(x.value) not in ('string','number','null')) then
+    raise exception using errcode='22023',message='invalid portability local nested fields';
+  end if;
+  authority_bytes:=convert_to(auth::text,'UTF8');
+  request_bytes:=convert_to(request::text,'UTF8');
+  if kind<>'resolve' then
+    update record_platform_internal.record_portability_v1_epoch set epoch=case when epoch=9223372036854775807 then 0 else epoch+1 end where singleton;
+    if not found then raise exception using errcode='55000',message='portability V1 serialization epoch unavailable'; end if;
+  end if;
+  authority:=record_platform_internal.legacy_adapter_lock(authority_bytes,'record_portability');
+  case kind
+    when 'prepare' then result:=to_jsonb(record_platform_internal.local_blob_gc_prepare(request_bytes,true,authority_bytes));
+    when 'claim' then result:=record_platform_internal.local_blob_gc_claim(request_bytes,true,authority_bytes);
+    when 'resolve' then result:=record_platform_internal.local_blob_gc_resolve(request_bytes,true,authority_bytes);
+    when 'bind_final' then result:=record_platform_internal.local_blob_gc_bind_final(request_bytes,true,authority_bytes);
+    when 'complete' then result:=record_platform_internal.local_blob_gc_complete(request_bytes,true,authority_bytes);
+  end case;
+  perform record_platform_internal.legacy_adapter_lock(authority_bytes,'record_portability');
+  if kind<>'resolve' then
+    perform record_platform_internal.record_deletion_queue_owner_commit_check(authority->>'operation_id',authority->>'owner_id',
+      (authority->>'owner_generation')::bigint,(authority->>'owner_expires_at')::timestamptz);
+  end if;
+  return result;
+end $$;
+create function public.record_portability_local_prepare_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_local_v1($1,'prepare') $$;
+create function public.record_portability_local_claim_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_local_v1($1,'claim') $$;
+create function public.record_portability_local_resolve_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_local_v1($1,'resolve') $$;
+create function public.record_portability_local_bind_final_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_local_v1($1,'bind_final') $$;
+create function public.record_portability_local_complete_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_local_v1($1,'complete') $$;
+revoke all on function record_platform_internal.record_portability_local_v1(bytea,text),
+  public.record_portability_local_prepare_v1(bytea),public.record_portability_local_claim_v1(bytea),
+  public.record_portability_local_resolve_v1(bytea),public.record_portability_local_bind_final_v1(bytea),
+  public.record_portability_local_complete_v1(bytea) from public;
+
+create function record_platform_internal.record_portability_v1_gc_digest(t public.record_portability_v1_targets, result text)
+returns bytea language sql immutable strict security definer set search_path=pg_catalog as $$
+  select sha256(record_platform_internal.client_purge_field(convert_to('houfeng.record-portability.blob-gc-receipt.v1','UTF8'))
+    ||record_platform_internal.client_purge_field(convert_to(t.target_id,'UTF8'))
+    ||record_platform_internal.client_purge_field(convert_to('default','UTF8'))
+    ||record_platform_internal.client_purge_field(convert_to('permanent','UTF8'))
+    ||record_platform_internal.client_purge_field(convert_to(t.blob_key,'UTF8'))
+    ||record_platform_internal.client_purge_field(t.sha256)
+    ||record_platform_internal.client_purge_field(convert_to(t.object_version_id,'UTF8'))
+    ||record_platform_internal.client_purge_field(int8send(t.byte_size))
+    ||record_platform_internal.client_purge_field(convert_to('s3','UTF8'))
+    ||record_platform_internal.client_purge_field(t.storage_binding)
+    ||record_platform_internal.client_purge_field(convert_to(result,'UTF8')))
+$$;
+
+create function record_platform_internal.record_portability_v1_gc_document(t public.record_portability_v1_targets)
+returns jsonb language plpgsql stable strict security definer set search_path=pg_catalog as $$
+begin
+  if t.disposition<>'s3' or t.backend_kind<>'s3' or t.blob_key<>'sha256/'||encode(t.sha256,'hex')
+    or t.object_version_id is null or t.object_version_id='null' or octet_length(t.object_version_id) not between 1 and 1024
+    or t.byte_size<=0 or octet_length(t.storage_binding)<>32 or t.cleanup_owner_generation<1 or t.attempt<1
+    or not isfinite(t.blob_created_at) or not isfinite(t.cleanup_expires_at)
+    or t.deletion_state not in ('claimed','retry_wait','completed') then
+    raise exception using errcode='55000',message='portability S3 target identity unavailable';
+  end if;
+  if t.deletion_state='completed' and (t.completed_at is null or not isfinite(t.completed_at)
+    or t.physical_delete_result not in ('deleted','already_absent')
+    or t.receipt_digest is distinct from record_platform_internal.record_portability_v1_gc_digest(t,t.physical_delete_result)) then
+    raise exception using errcode='55000',message='portability S3 receipt conflict';
+  end if;
+  return jsonb_build_object('claim',jsonb_build_object(
+    'operation_id',t.operation_id,'deletion_id',t.target_id,'project_id','default','backend_kind','s3',
+    'key',t.blob_key,'version_id',t.object_version_id,'sha256',encode(t.sha256,'hex'),'size_bytes',t.byte_size,
+    'blob_created_at',record_platform_internal.attachment_v1_time(t.blob_created_at),
+    'cleanup_owner_id',t.cleanup_owner_id,'cleanup_owner_generation',t.cleanup_owner_generation,'attempt',t.attempt,
+    'cleanup_expires_at',record_platform_internal.attachment_v1_time(t.cleanup_expires_at),
+    'storage_binding',encode(t.storage_binding,'hex')),
+    'deletion_state',t.deletion_state,'retry_at',record_platform_internal.attachment_v1_time(t.retry_at),
+    'physical_delete_result',t.physical_delete_result,'receipt_digest',encode(t.receipt_digest,'hex'),
+    'completed_at',record_platform_internal.attachment_v1_time(t.completed_at));
+end $$;
+
+create function record_platform_internal.record_portability_gc_v1(body bytea, kind text)
+returns jsonb language plpgsql security definer set search_path=pg_catalog as $$
+declare raw json; auth json; claim_raw json; receipt_raw json; v jsonb; c jsonb; receipt jsonb;
+  fields text[]; t public.record_portability_v1_targets; deletion text; cleanup_owner text;
+  result text; digest bytea; retry_time timestamptz;
+begin
+  if body is null or octet_length(body) not between 1 and 262144
+    or kind not in ('claim','claim_resolve','complete','retry','resolve') then
+    raise exception using errcode='22023',message='invalid portability S3 command';
+  end if;
+  raw:=convert_from(body,'UTF8')::json;
+  fields:=case kind when 'claim' then array['authority','deletion_id','cleanup_owner_id','cleanup_lease_ms']
+    when 'claim_resolve' then array['authority','claim'] when 'retry' then array['authority','claim','retry_at']
+    else array['authority','claim','receipt'] end;
+  if json_typeof(raw) is distinct from 'object' or (select count(*) from json_each(raw))<>cardinality(fields)
+    or (select count(distinct x.key) from json_each(raw) x)<>cardinality(fields)
+    or exists(select 1 from json_each(raw) x where not(x.key=any(fields)) or json_typeof(x.value)='null') then
+    raise exception using errcode='22023',message='invalid portability S3 command fields';
+  end if;
+  auth:=raw->'authority';
+  if json_typeof(auth) is distinct from 'object' or
+    (select count(*) from json_each(auth))<>(select count(distinct x.key) from json_each(auth) x) then
+    raise exception using errcode='22023',message='invalid portability S3 authority';
+  end if;
+  if kind not in ('resolve','claim_resolve') then
+    update record_platform_internal.record_portability_v1_epoch set epoch=case when epoch=9223372036854775807 then 0 else epoch+1 end where singleton;
+    if not found then raise exception using errcode='55000',message='portability V1 serialization epoch unavailable'; end if;
+  end if;
+  v:=record_platform_internal.legacy_adapter_lock(convert_to(auth::text,'UTF8'),'record_portability');
+  if not record_platform_internal.record_portability_v1_eligible(v->>'operation_id') or not exists(
+    select 1 from public.record_portability_v1_preparations p where p.operation_id=v->>'operation_id'
+      and (p.project_id,p.record_id,p.surface_digest,p.ledger_domain,p.ledger_sequence,p.ledger_entry_hash,p.witness_proof_digest)
+        is not distinct from ('default',v->>'record_id',decode(v->>'surface_digest','hex'),decode(v->>'ledger_domain','hex'),
+          (v->>'ledger_sequence')::bigint,decode(v->>'ledger_entry_hash','hex'),decode(v->>'witness_proof_digest','hex'))) then
+    raise exception using errcode='55000',message='portability S3 inventory unavailable';
+  end if;
+  if kind='claim' then
+    if json_typeof(raw->'deletion_id')<>'string' or json_typeof(raw->'cleanup_owner_id')<>'string'
+      or json_typeof(raw->'cleanup_lease_ms')<>'number' or (raw->'cleanup_lease_ms')::text<>'60000' then
+      raise exception using errcode='22023',message='invalid portability S3 claim fields'; end if;
+    deletion:=raw->>'deletion_id'; cleanup_owner:=raw->>'cleanup_owner_id';
+    if deletion !~ '^bgd_[0-9a-f]{64}$' or cleanup_owner is distinct from v->>'owner_id' then
+      raise exception using errcode='42501',message='invalid portability S3 claim owner'; end if;
+  else
+    claim_raw:=raw->'claim';
+    c:=record_platform_internal.record_deletion_command(convert_to(claim_raw::text,'UTF8'),
+      array['operation_id','deletion_id','project_id','backend_kind','key','version_id','sha256','size_bytes',
+        'blob_created_at','cleanup_owner_id','cleanup_owner_generation','attempt','cleanup_expires_at','storage_binding'],
+      array['size_bytes','cleanup_owner_generation','attempt']);
+    deletion:=c->>'deletion_id';
+    if c->>'operation_id' is distinct from v->>'operation_id' or deletion !~ '^bgd_[0-9a-f]{64}$'
+      or c->>'project_id'<>'default' or c->>'backend_kind'<>'s3' or c->>'sha256' !~ '^[0-9a-f]{64}$'
+      or c->>'storage_binding' !~ '^[0-9a-f]{64}$' or c->>'key'<>'sha256/'||(c->>'sha256')
+      or octet_length(c->>'version_id') not between 1 and 1024 or c->>'version_id'='null'
+      or (c->>'size_bytes')::bigint<1 or (c->>'cleanup_owner_generation')::bigint<1 or (c->>'attempt')::bigint<1
+      or c->>'cleanup_owner_id' !~ '^[a-z0-9_-]{1,128}$'
+      or c->>'blob_created_at' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+      or c->>'cleanup_expires_at' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' then
+      raise exception using errcode='22023',message='invalid portability S3 tuple'; end if;
+    if kind='retry' then
+      if json_typeof(raw->'retry_at')<>'string' or raw->>'retry_at' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' then
+        raise exception using errcode='22023',message='invalid portability S3 retry time'; end if;
+      retry_time:=(raw->>'retry_at')::timestamptz;
+    elsif kind in ('complete','resolve') then
+      receipt_raw:=raw->'receipt';
+      if json_typeof(receipt_raw) is distinct from 'object' or (select count(*) from json_each(receipt_raw))<>6
+        or (select count(distinct x.key) from json_each(receipt_raw) x)<>6
+        or exists(select 1 from json_each(receipt_raw) x where not(x.key=any(array['key','version_id','sha256','size_bytes','deleted','storage_binding']))
+          or case when x.key='deleted' then json_typeof(x.value)<>'boolean'
+            when x.key='size_bytes' then json_typeof(x.value)<>'number' or x.value::text !~ '^(0|[1-9][0-9]*)$'
+            else json_typeof(x.value)<>'string' end) then
+        raise exception using errcode='22023',message='invalid portability S3 receipt'; end if;
+      receipt:=receipt_raw::jsonb;
+      if (receipt->>'key',receipt->>'version_id',receipt->>'sha256',(receipt->>'size_bytes')::bigint,receipt->>'storage_binding')
+        is distinct from (c->>'key',c->>'version_id',c->>'sha256',(c->>'size_bytes')::bigint,c->>'storage_binding') then
+        raise exception using errcode='22023',message='portability S3 receipt tuple mismatch'; end if;
+      result:=case when (receipt->>'deleted')::boolean then 'deleted' else 'already_absent' end;
+    end if;
+  end if;
+  select x.* into t from public.record_portability_v1_targets x
+    where x.operation_id=v->>'operation_id' and x.target_id=deletion and x.disposition='s3' for update;
+  if not found then raise exception using errcode='55000',message='portability S3 target unavailable'; end if;
+  perform record_platform_internal.record_portability_v1_gc_barrier_impl('s3',null,null,t.blob_key,t.object_version_id,t.target_id,t.storage_binding);
+  if kind='claim' then
+    if t.deletion_state='completed' then return record_platform_internal.record_portability_v1_gc_document(t); end if;
+    if t.deletion_state='claimed' and t.cleanup_owner_id=cleanup_owner and t.cleanup_expires_at>clock_timestamp() then
+      perform record_platform_internal.record_deletion_queue_owner_commit_check(v->>'operation_id',v->>'owner_id',
+        (v->>'owner_generation')::bigint,(v->>'owner_expires_at')::timestamptz);
+      return record_platform_internal.record_portability_v1_gc_document(t);
+    end if;
+    if (t.deletion_state='claimed' and t.cleanup_expires_at>clock_timestamp())
+      or (t.deletion_state='retry_wait' and t.retry_at>clock_timestamp()) then return 'null'::jsonb; end if;
+    update public.record_portability_v1_targets x set deletion_state='claimed',cleanup_owner_id=cleanup_owner,
+      cleanup_owner_generation=coalesce(x.cleanup_owner_generation,0)+1,attempt=coalesce(x.attempt,0)+1,
+      cleanup_expires_at=clock_timestamp()+interval '1 minute',retry_at=null
+      where x.operation_id=t.operation_id and x.target_id=t.target_id returning x.* into t;
+  else
+    if (t.operation_id,t.target_id,t.backend_kind,t.blob_key,t.object_version_id,encode(t.sha256,'hex'),t.byte_size,
+        t.blob_created_at,t.cleanup_owner_id,t.cleanup_owner_generation,t.attempt,t.cleanup_expires_at,encode(t.storage_binding,'hex'))
+      is distinct from (c->>'operation_id',c->>'deletion_id',c->>'backend_kind',c->>'key',c->>'version_id',c->>'sha256',
+        (c->>'size_bytes')::bigint,(c->>'blob_created_at')::timestamptz,c->>'cleanup_owner_id',
+        (c->>'cleanup_owner_generation')::bigint,(c->>'attempt')::bigint,(c->>'cleanup_expires_at')::timestamptz,c->>'storage_binding') then
+      raise exception using errcode='42501',message='portability S3 tuple unavailable'; end if;
+    if kind='claim_resolve' then
+      if t.deletion_state not in ('claimed','completed')
+        or (t.deletion_state='claimed' and t.cleanup_expires_at<=clock_timestamp()) then return 'null'::jsonb; end if;
+      return record_platform_internal.record_portability_v1_gc_document(t);
+    end if;
+    if kind in ('complete','resolve') then
+      digest:=record_platform_internal.record_portability_v1_gc_digest(t,result);
+      if t.deletion_state='completed' then
+        if t.physical_delete_result is distinct from result or t.receipt_digest is distinct from digest then
+          raise exception using errcode='55000',message='portability S3 receipt conflict'; end if;
+        return record_platform_internal.record_portability_v1_gc_document(t);
+      end if;
+      if kind='resolve' then return 'null'::jsonb; end if;
+    end if;
+    if t.deletion_state<>'claimed' or t.cleanup_expires_at<=clock_timestamp()
+      or t.cleanup_owner_id is distinct from v->>'owner_id' then
+      raise exception using errcode='42501',message='portability S3 cleanup owner expired'; end if;
+    if kind='retry' then
+      if retry_time<=clock_timestamp() or not isfinite(retry_time) then
+        raise exception using errcode='22023',message='invalid portability S3 retry time'; end if;
+      update public.record_portability_v1_targets x set deletion_state='retry_wait',retry_at=retry_time
+        where x.operation_id=t.operation_id and x.target_id=t.target_id returning x.* into t;
+    else
+      update public.record_portability_v1_targets x set deletion_state='completed',retry_at=null,
+        physical_delete_result=result,receipt_digest=digest,completed_at=clock_timestamp()
+        where x.operation_id=t.operation_id and x.target_id=t.target_id returning x.* into t;
+    end if;
+  end if;
+  perform record_platform_internal.legacy_adapter_lock(convert_to(auth::text,'UTF8'),'record_portability');
+  perform record_platform_internal.record_deletion_queue_owner_commit_check(v->>'operation_id',v->>'owner_id',
+    (v->>'owner_generation')::bigint,(v->>'owner_expires_at')::timestamptz);
+  return record_platform_internal.record_portability_v1_gc_document(t);
+exception when invalid_text_representation or numeric_value_out_of_range or datetime_field_overflow or invalid_datetime_format then
+  raise exception using errcode='22023',message='invalid portability S3 value';
+end $$;
+
+create function public.record_portability_gc_claim_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_gc_v1($1,'claim') $$;
+create function public.record_portability_gc_claim_resolve_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_gc_v1($1,'claim_resolve') $$;
+create function public.record_portability_gc_complete_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_gc_v1($1,'complete') $$;
+create function public.record_portability_gc_retry_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_gc_v1($1,'retry') $$;
+create function public.record_portability_gc_resolve_v1(bytea) returns jsonb language sql security definer set search_path=pg_catalog
+  as $$ select record_platform_internal.record_portability_gc_v1($1,'resolve') $$;
+revoke all on function record_platform_internal.record_portability_v1_gc_digest(public.record_portability_v1_targets,text),
+  record_platform_internal.record_portability_v1_gc_document(public.record_portability_v1_targets),
+  record_platform_internal.record_portability_gc_v1(bytea,text),public.record_portability_gc_claim_v1(bytea),
+  public.record_portability_gc_claim_resolve_v1(bytea),public.record_portability_gc_complete_v1(bytea),
+  public.record_portability_gc_retry_v1(bytea),public.record_portability_gc_resolve_v1(bytea) from public;
+
+-- The caller holds the portability source locks and supplies the complete
+-- affected job sets; include every mapping under those jobs, including other
+-- records' interests, in the immutable owner frame.
+create function record_platform_internal.record_portability_v1_owners(record_id text, export_jobs text[], import_jobs text[])
+returns jsonb language sql stable security definer set search_path=pg_catalog as $$
+  select jsonb_build_object(
+    'export_jobs',coalesce((select jsonb_agg(jsonb_build_array(j.export_job_id,j.project_id,j.record_id,j.export_kind)
+      order by j.export_job_id collate "C",j.project_id collate "C",j.record_id collate "C",j.export_kind collate "C")
+      from public.record_export_jobs j where j.export_job_id=any(export_jobs)),'[]'::jsonb),
+    'import_jobs',coalesce((select jsonb_agg(jsonb_build_array(j.import_job_id,j.project_id)
+      order by j.import_job_id collate "C",j.project_id collate "C")
+      from public.record_import_jobs j where j.import_job_id=any(import_jobs)),'[]'::jsonb),
+    'import_plans',coalesce((select jsonb_agg(jsonb_build_array(p.import_plan_id,p.import_job_id)
+      order by p.import_plan_id collate "C",p.import_job_id collate "C")
+      from public.record_import_plans p where p.import_job_id=any(import_jobs)),'[]'::jsonb),
+    'mappings',coalesce((select jsonb_agg(jsonb_build_array(m.import_plan_id,m.entity_kind,
+      encode(m.source_identity_digest,'hex'),m.source_id,m.target_id)
+      order by m.import_plan_id collate "C",m.entity_kind collate "C",encode(m.source_identity_digest,'hex') collate "C",
+        m.source_id collate "C",m.target_id collate "C")
+      from public.record_import_entity_mappings m join public.record_import_plans p using(import_plan_id)
+      where p.import_job_id=any(import_jobs)),'[]'::jsonb),
+    'origins',coalesce((select jsonb_agg(jsonb_build_array(o.origin_id,o.project_id,o.origin_kind,
+      encode(o.origin_digest,'hex'),o.source_record_id)
+      order by o.origin_id collate "C",o.project_id collate "C",o.origin_kind collate "C",
+        encode(o.origin_digest,'hex') collate "C",o.source_record_id collate "C")
+      from public.record_origins o where o.project_id='default' and o.source_record_id=record_id),'[]'::jsonb))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_owners(text,text[],text[]) from public;
+
+-- Enumerate each original source, including obligations without an artifact.
+-- An artifact has no incarnation or S3 route column; those values are carried
+-- across only when its actual linked obligation proves the same physical row.
+create function record_platform_internal.record_portability_v1_sources(p_record text, p_export_jobs text[], p_import_jobs text[])
+returns table(source_kind text, source_id text, job_id text, artifact_role text, backend_kind text,
+  blob_key text, object_version_id text, sha256 bytea, byte_size bigint, created_at timestamptz,
+  namespace_id uuid, incarnation_id uuid, obligation_id text, storage_binding bytea, snapshot jsonb)
+language sql stable security definer set search_path=pg_catalog as $$
+  select 'export',a.export_artifact_id,a.export_job_id,a.artifact_kind,a.backend_kind,a.blob_key,a.object_version_id,
+    a.sha256,a.byte_size,a.created_at,a.namespace_id,o.incarnation_id,a.obligation_id,o.storage_binding,null::jsonb
+  from public.record_export_artifacts a left join public.record_write_obligations o
+    on o.obligation_id=a.obligation_id and o.origin_kind='export_artifact' and o.origin_id=a.export_job_id
+      and (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id)
+        is not distinct from (a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.namespace_id)
+  where a.export_job_id=any(p_export_jobs)
+  union all
+  select 'import',a.import_artifact_id,a.import_job_id,a.artifact_role,a.backend_kind,a.blob_key,a.object_version_id,
+    a.sha256,a.byte_size,a.created_at,a.namespace_id,o.incarnation_id,a.obligation_id,o.storage_binding,null::jsonb
+  from public.record_import_artifacts a left join public.record_write_obligations o
+    on o.obligation_id=a.obligation_id and o.origin_kind='import_archive' and o.origin_id=a.import_job_id
+      and (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id)
+        is not distinct from (a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.namespace_id)
+  where a.import_job_id=any(p_import_jobs)
+  union all
+  select 'obligation',o.obligation_id,o.origin_id,null::text,o.backend_kind,o.canonical_key,o.object_version,
+    o.sha256_digest,o.size_bytes,o.created_at,o.namespace_id,o.incarnation_id,o.obligation_id,o.storage_binding,to_jsonb(o)
+  from public.record_write_obligations o where
+    (o.origin_kind='export_artifact' and o.origin_id=any(p_export_jobs))
+    or (o.origin_kind='import_archive' and o.origin_id=any(p_import_jobs))
+    or (o.origin_kind in ('export_artifact','import_archive') and o.record_id=p_record)
+    or exists(select 1 from public.record_export_artifacts a
+      where a.export_job_id=any(p_export_jobs) and a.obligation_id=o.obligation_id)
+    or exists(select 1 from public.record_import_artifacts a
+      where a.import_job_id=any(p_import_jobs) and a.obligation_id=o.obligation_id)
+    or exists(select 1 from public.record_write_obligation_targets t
+      where t.obligation_id=o.obligation_id and t.record_id=p_record)
+    or record_platform_internal.record_portability_v1_carried(p_record,o.obligation_id)
+    or (o.backend_kind='local' and o.object_version='local-v2-'||o.obligation_id
+      and record_platform_internal.record_portability_v1_local_owner_version(o)
+      and exists(select 1 from public.record_write_obligations owner where owner.obligation_id<>o.obligation_id
+        and (owner.backend_kind,owner.namespace_id,owner.incarnation_id,owner.canonical_key,owner.object_version,owner.sha256_digest,owner.size_bytes)
+          is not distinct from (o.backend_kind,o.namespace_id,o.incarnation_id,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes)
+        and record_platform_internal.record_portability_v1_local_owner_version(owner)
+        and ((owner.origin_kind='export_artifact' and owner.origin_id=any(p_export_jobs))
+          or (owner.origin_kind='import_archive' and owner.origin_id=any(p_import_jobs)))))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_sources(text,text[],text[]) from public;
+
+-- Evidence is captured from a live outside owner and its original write route.
+-- Every digest uses the same owner framing later checked by the survivor guard.
+create function record_platform_internal.record_portability_v1_retained_candidates(t public.record_portability_v1_targets, p_record text)
+returns jsonb language sql volatile security definer set search_path=pg_catalog as $$
+  with artifact_sources as (
+    select 'export_artifact'::text kind,a.export_artifact_id id,a.export_job_id job,a.artifact_kind role,
+      a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.created_at,a.namespace_id,a.obligation_id,
+      jsonb_build_array(j.export_job_id,j.project_id,j.record_id,j.export_kind) route,
+      j.record_id is distinct from p_record survives
+    from public.record_export_artifacts a join public.record_export_jobs j on j.export_job_id=a.export_job_id
+    union all
+    select 'import_artifact',a.import_artifact_id,a.import_job_id,a.artifact_role,
+      a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.created_at,a.namespace_id,a.obligation_id,
+      jsonb_build_array(j.import_job_id,j.project_id),
+      exists(select 1 from public.record_import_plans p join public.record_import_entity_mappings m using(import_plan_id)
+        where p.import_job_id=j.import_job_id and ((m.entity_kind='record' and m.target_id<>p_record)
+          or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id is not null and m.owner_target_record_id<>p_record)))
+      or exists(select 1 from public.record_write_obligations w join public.record_write_obligation_targets ot using(obligation_id)
+        where w.origin_kind='import_archive' and w.origin_id=j.import_job_id and ot.record_id<>p_record and ot.handed_off_at is null)
+    from public.record_import_artifacts a join public.record_import_jobs j on j.import_job_id=a.import_job_id
+  ), verified_artifacts as (
+    select a.*,o.incarnation_id,encode(o.storage_binding,'hex') binding
+    from artifact_sources a join public.record_write_obligations o on o.obligation_id=a.obligation_id
+    where a.survives and (a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.namespace_id,
+        o.incarnation_id,o.storage_binding) is not distinct from
+        (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+      and (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id)
+        is not distinct from (a.backend_kind,a.blob_key,a.object_version_id,a.sha256,a.byte_size,a.namespace_id)
+      and o.origin_id=a.job and o.origin_kind=case a.kind when 'export_artifact' then 'export_artifact' else 'import_archive' end
+      and ((o.backend_kind='s3' and record_platform_internal.record_portability_v1_s3_source_valid(to_jsonb(o),o.obligation_id))
+        or (o.backend_kind='local' and record_platform_internal.record_portability_v1_local_owner_version(o)))
+  ), verified_attachments as (
+    select a.*,d.record_id draft_record,b.backend_kind,b.blob_key physical_key,b.object_version,b.sha256_digest,b.size_bytes,
+      b.created_at blob_created_at,b.namespace_id,o.incarnation_id,o.storage_binding,o.obligation_id,
+      o.publication_id,o.origin_kind,o.origin_id
+    from public.record_attachments a left join public.record_drafts d on d.draft_id=a.draft_id
+    join public.blob_objects b on (a.blob_key,a.blob_object_version)=(b.blob_key,b.object_version)
+      or (a.preview_blob_key,a.preview_blob_object_version)=(b.blob_key,b.object_version)
+    join public.record_write_obligations o on (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id)
+      is not distinct from (b.backend_kind,b.blob_key,b.object_version,b.sha256_digest,b.size_bytes,b.namespace_id)
+    join public.blob_publication_intents publication on publication.publication_id=o.publication_id and publication.obligation_id=o.obligation_id
+    where coalesce(a.record_id,d.record_id) is not null and coalesce(a.record_id,d.record_id)<>p_record
+      and (b.backend_kind,b.blob_key,b.object_version,b.sha256_digest,b.size_bytes,b.namespace_id,o.incarnation_id,o.storage_binding)
+        is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+      and publication.publication_state='completed' and publication.completion_outcome='consumed'
+      and ((o.origin_kind='upload' and publication.owner_kind='upload' and publication.owner_id=o.origin_id
+          and exists(select 1 from public.attachment_uploads u where u.upload_id=o.origin_id and u.attachment_id=a.attachment_id))
+        or (o.origin_kind='processor_preview' and publication.owner_kind='processor_preview' and publication.owner_id=o.origin_id
+          and exists(select 1 from public.attachment_processor_jobs j where j.processor_job_id=o.origin_id and j.attachment_id=a.attachment_id)))
+      and ((o.backend_kind='s3' and record_platform_internal.record_portability_v1_s3_source_valid(to_jsonb(o),o.obligation_id))
+        or (o.backend_kind='local' and record_platform_internal.record_portability_v1_local_owner_version(o)))
+  ), evidence as (
+    select a.kind,a.id,record_platform_internal.record_portability_v1_owner_digest(
+      case a.kind when 'export_artifact' then 'record_export_artifacts' else 'record_import_artifacts' end,jsonb_build_array(a.id),
+      jsonb_build_array(a.backend_kind,a.blob_key,a.object_version_id,encode(a.sha256,'hex'),a.byte_size,
+        to_char(a.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),a.namespace_id,a.incarnation_id,a.binding,a.obligation_id),
+      jsonb_build_array(a.job,a.role,a.route)) digest from verified_artifacts a
+    union all
+    select 'attachment',a.attachment_id,record_platform_internal.record_portability_v1_owner_digest('record_attachments',
+      jsonb_build_array(a.attachment_id),jsonb_build_array(a.backend_kind,a.physical_key,a.object_version,encode(a.sha256_digest,'hex'),a.size_bytes,
+        to_char(a.blob_created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),a.namespace_id,a.incarnation_id,
+        encode(a.storage_binding,'hex'),a.obligation_id,a.blob_key,a.blob_object_version,a.preview_blob_key,a.preview_blob_object_version,
+        a.logical_size_bytes,a.preview_size_bytes,to_char(a.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+      jsonb_build_array(a.project_id,a.record_id,a.draft_id,a.draft_record,a.origin_draft_id)) from verified_attachments a
+    union all
+    select 'blob_object',a.physical_key,record_platform_internal.record_portability_v1_owner_digest('blob_objects',
+      jsonb_build_array(a.physical_key),jsonb_build_array(a.backend_kind,a.physical_key,a.object_version,encode(a.sha256_digest,'hex'),a.size_bytes,
+        to_char(a.blob_created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),a.namespace_id,a.incarnation_id,
+        encode(a.storage_binding,'hex'),a.obligation_id),jsonb_build_array(a.publication_id,a.origin_kind,a.origin_id)) from verified_attachments a
+    union all
+    select 'write_obligation',o.obligation_id,record_platform_internal.record_portability_v1_owner_digest('record_write_obligations',
+      jsonb_build_array(o.obligation_id),jsonb_build_array(o.backend_kind,o.canonical_key,o.object_version,encode(o.sha256_digest,'hex'),o.size_bytes,
+        to_char(o.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),o.namespace_id,o.incarnation_id,encode(o.storage_binding,'hex')),
+      jsonb_build_array(o.project_id,o.origin_kind,o.origin_id,o.origin_generation,o.record_id,o.record_epoch,o.publication_id))
+    from public.record_write_obligations o where
+      (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id,o.incarnation_id,o.storage_binding)
+        is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+      and o.published_at is not null and o.cleanup_completed_at is null and o.cleanup_owner_id is null
+      and o.operation_id is null and o.handed_off_at is null
+      and ((o.record_id is not null and o.record_id<>p_record) or exists(select 1 from public.record_write_obligation_targets ot
+        where ot.obligation_id=o.obligation_id and ot.record_id<>p_record and ot.handed_off_at is null))
+      and ((o.backend_kind='s3' and record_platform_internal.record_portability_v1_s3_source_valid(to_jsonb(o),o.obligation_id))
+        or (o.backend_kind='local' and record_platform_internal.record_portability_v1_local_owner_version(o)))
+    union all
+    select 'upload_part',part.upload_id||':'||part.part_number::text,record_platform_internal.record_portability_v1_owner_digest('attachment_upload_parts',
+      jsonb_build_array(part.upload_id,part.part_number),jsonb_build_array(u.transport_kind,o.canonical_key,part.object_version,
+        encode(part.sha256_digest,'hex'),part.size_bytes,to_char(part.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+        part.namespace_id,o.incarnation_id,encode(o.storage_binding,'hex'),part.obligation_id),
+      jsonb_build_array(a.attachment_id,a.project_id,a.record_id,a.draft_id,d.record_id,u.origin_draft_id))
+    from public.attachment_upload_parts part join public.attachment_uploads u on u.upload_id=part.upload_id
+    join public.record_attachments a on a.attachment_id=u.attachment_id left join public.record_drafts d on d.draft_id=a.draft_id
+    join public.record_write_obligations o on o.obligation_id=part.obligation_id
+    join public.blob_publication_intents publication on publication.publication_id=o.publication_id and publication.obligation_id=o.obligation_id
+    where coalesce(a.record_id,d.record_id) is not null and coalesce(a.record_id,d.record_id)<>p_record
+      and (u.transport_kind,o.canonical_key,part.object_version,part.sha256_digest,part.size_bytes,part.namespace_id,o.incarnation_id,o.storage_binding)
+        is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+      and (o.backend_kind,o.namespace_id,o.object_version,o.sha256_digest,o.size_bytes)
+        is not distinct from (u.transport_kind,part.namespace_id,part.object_version,part.sha256_digest,part.size_bytes)
+      and o.origin_kind='upload' and o.origin_id=u.upload_id and publication.owner_kind='upload' and publication.owner_id=u.upload_id
+      and publication.publication_state='completed' and publication.completion_outcome='consumed'
+      and ((o.backend_kind='s3' and record_platform_internal.record_portability_v1_s3_source_valid(to_jsonb(o),o.obligation_id))
+        or (o.backend_kind='local' and record_platform_internal.record_portability_v1_local_owner_version(o)))
+  ), unique_evidence as (
+    select distinct on (kind,id) kind,id,digest from evidence where digest is not null
+    order by kind,id,digest
+  )
+  select coalesce(jsonb_agg(jsonb_build_array(kind,id,encode(digest,'hex')) order by kind collate "C",id collate "C"),'[]'::jsonb)
+  from unique_evidence
+$$;
+revoke all on function record_platform_internal.record_portability_v1_retained_candidates(public.record_portability_v1_targets,text) from public;
+
+-- Before the immutable target exists, use its authenticated local expected
+-- version directly; the later manifest matcher derives the same identity.
+create function record_platform_internal.record_portability_v1_candidate_match(source_table text, source_row jsonb,
+  t public.record_portability_v1_targets)
+returns boolean language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare expected text; actual text;
+begin
+  if source_row is null then return false; end if;
+  if source_table='record_attachments' then
+    return record_platform_internal.record_portability_v1_candidate_match('blob_gc_pins',
+      jsonb_build_object('blob_key',source_row->>'blob_key','blob_object_version',source_row->>'blob_object_version'),t)
+      or record_platform_internal.record_portability_v1_candidate_match('blob_gc_pins',
+        jsonb_build_object('blob_key',source_row->>'preview_blob_key','blob_object_version',source_row->>'preview_blob_object_version'),t);
+  end if;
+  if not record_platform_internal.record_portability_v1_reference_match(source_table,source_row,t) then return false; end if;
+  if t.backend_kind<>'local' then return true; end if;
+  expected:=coalesce(t.object_version_id,case when t.obligation_id is not null then 'local-v2-'||t.obligation_id end);
+  actual:=case source_table when 'record_export_artifacts' then source_row->>'object_version_id'
+    when 'record_import_artifacts' then source_row->>'object_version_id'
+    when 'blob_gc_pins' then source_row->>'blob_object_version'
+    else source_row->>'object_version' end;
+  return expected is null or actual is null or actual=expected;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_candidate_match(text,jsonb,public.record_portability_v1_targets) from public;
+
+-- An outside reference that cannot be represented by a verified retained
+-- owner makes the whole captured inventory unresolved, never exclusive.
+create function record_platform_internal.record_portability_v1_ambiguous_references(
+  t public.record_portability_v1_targets, p_record text, p_removable_jobs text[], p_obligations text[], evidence jsonb)
+returns boolean language sql volatile security definer set search_path=pg_catalog as $$
+  select exists(select 1 from public.record_export_artifacts a join public.record_export_jobs j on j.export_job_id=a.export_job_id
+    where j.record_id is distinct from p_record
+      and record_platform_internal.record_portability_v1_candidate_match('record_export_artifacts',to_jsonb(a),t)
+      and not exists(select 1 from jsonb_array_elements(evidence) e(value)
+        where e.value->>0='export_artifact' and e.value->>1=a.export_artifact_id))
+  or exists(select 1 from public.record_import_artifacts a where not (a.import_job_id=any(p_removable_jobs))
+      and record_platform_internal.record_portability_v1_candidate_match('record_import_artifacts',to_jsonb(a),t)
+      and not exists(select 1 from jsonb_array_elements(evidence) e(value)
+        where e.value->>0='import_artifact' and e.value->>1=a.import_artifact_id))
+  or exists(select 1 from public.record_attachments a left join public.record_drafts d on d.draft_id=a.draft_id
+    where coalesce(a.record_id,d.record_id) is distinct from p_record
+      and record_platform_internal.record_portability_v1_candidate_match('record_attachments',to_jsonb(a),t)
+      and not exists(select 1 from jsonb_array_elements(evidence) e(value)
+        where e.value->>0='attachment' and e.value->>1=a.attachment_id))
+  or exists(select 1 from public.attachment_upload_parts part join public.attachment_uploads u on u.upload_id=part.upload_id
+    join public.record_attachments a on a.attachment_id=u.attachment_id left join public.record_drafts d on d.draft_id=a.draft_id
+    where coalesce(a.record_id,d.record_id) is distinct from p_record
+      and record_platform_internal.record_portability_v1_candidate_match('attachment_upload_parts',to_jsonb(part),t)
+      and not exists(select 1 from jsonb_array_elements(evidence) e(value)
+        where e.value->>0='upload_part' and e.value->>1=part.upload_id||':'||part.part_number::text))
+  or exists(select 1 from public.record_write_obligations o where o.cleanup_completed_at is null
+    and (not (o.obligation_id=any(p_obligations)) or (o.record_id is not null and o.record_id<>p_record
+        and not record_platform_internal.record_portability_v1_carried(p_record,o.obligation_id))
+      or exists(select 1 from public.record_write_obligation_targets ot where ot.obligation_id=o.obligation_id
+        and ot.record_id<>p_record and ot.handed_off_at is null))
+    and record_platform_internal.record_portability_v1_candidate_match('record_write_obligations',to_jsonb(o),t)
+    and not exists(select 1 from jsonb_array_elements(evidence) e(value)
+      where (e.value->>0='write_obligation' and e.value->>1=o.obligation_id)
+        or (e.value->>0='export_artifact' and exists(select 1 from public.record_export_artifacts a
+          where a.export_artifact_id=e.value->>1 and a.obligation_id=o.obligation_id))
+        or (e.value->>0='import_artifact' and exists(select 1 from public.record_import_artifacts a
+          where a.import_artifact_id=e.value->>1 and a.obligation_id=o.obligation_id))
+        or (e.value->>0='upload_part' and exists(select 1 from public.attachment_upload_parts part
+          where part.upload_id||':'||part.part_number::text=e.value->>1 and part.obligation_id=o.obligation_id))
+        or (e.value->>0='attachment' and o.backend_kind='local'
+          and record_platform_internal.record_portability_v1_local_owner_version(o) and exists(
+            select 1 from public.record_attachments a
+            left join public.record_drafts d on d.draft_id=a.draft_id
+            join public.attachment_uploads u on u.attachment_id=a.attachment_id and u.upload_id=o.origin_id
+            join public.blob_publication_intents publication on publication.publication_id=o.publication_id
+              and publication.obligation_id=o.obligation_id and publication.owner_kind='upload'
+              and publication.owner_id=u.upload_id and publication.publication_state='completed'
+              and publication.completion_outcome='consumed'
+            join public.blob_objects b on (b.backend_kind,b.blob_key,b.object_version,b.sha256_digest,b.size_bytes,b.namespace_id)
+              is not distinct from (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id)
+              and ((a.blob_key,a.blob_object_version)=(b.blob_key,b.object_version)
+                or (a.preview_blob_key,a.preview_blob_object_version)=(b.blob_key,b.object_version))
+            where a.attachment_id=e.value->>1 and o.origin_kind='upload'
+              and coalesce(a.record_id,d.record_id) is not null and coalesce(a.record_id,d.record_id)<>p_record
+              and (o.backend_kind,o.canonical_key,o.object_version,o.sha256_digest,o.size_bytes,o.namespace_id,o.incarnation_id,o.storage_binding)
+                is not distinct from (t.backend_kind,t.blob_key,t.object_version_id,t.sha256,t.byte_size,t.namespace_id,t.incarnation_id,t.storage_binding)
+              and e.value->>2=encode(record_platform_internal.record_portability_v1_owner_digest('record_attachments',
+                jsonb_build_array(a.attachment_id),jsonb_build_array(b.backend_kind,b.blob_key,b.object_version,encode(b.sha256_digest,'hex'),b.size_bytes,
+                  to_char(b.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),b.namespace_id,o.incarnation_id,
+                  encode(o.storage_binding,'hex'),o.obligation_id,a.blob_key,a.blob_object_version,a.preview_blob_key,a.preview_blob_object_version,
+                  a.logical_size_bytes,a.preview_size_bytes,to_char(a.created_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+                jsonb_build_array(a.project_id,a.record_id,a.draft_id,d.record_id,a.origin_draft_id)),'hex')))))
+  or exists(select 1 from public.blob_publication_intents p where p.publication_state in ('prepared','published')
+    and (p.obligation_id is null or not (p.obligation_id=any(p_obligations)))
+    and record_platform_internal.record_portability_v1_candidate_match('blob_publication_intents',to_jsonb(p),t))
+  or (jsonb_array_length(evidence)=0 and exists(select 1 from public.blob_gc_pins pin
+    where pin.expires_at>transaction_timestamp()
+      and record_platform_internal.record_portability_v1_candidate_match('blob_gc_pins',to_jsonb(pin),t)))
+$$;
+revoke all on function record_platform_internal.record_portability_v1_ambiguous_references(public.record_portability_v1_targets,text,text[],text[],jsonb) from public;
+
+-- Compute the V2 logical removal set before persisting the V1 immutable count.
+-- A mapping with an unknown owner is a surviving interest.
+create function record_platform_internal.record_portability_v1_removable_jobs(p_record text, p_import_jobs text[])
+returns text[] language sql stable security definer set search_path=pg_catalog as $$
+  select coalesce(array_agg(j.import_job_id order by j.import_job_id collate "C"),'{}'::text[])
+  from public.record_import_jobs j where j.import_job_id=any(p_import_jobs)
+    and not exists(select 1 from public.record_import_plans p join public.record_import_entity_mappings m using(import_plan_id)
+      where p.import_job_id=j.import_job_id and ((m.entity_kind='record' and m.target_id=p_record)
+        or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id=p_record)) is not true)
+    and not exists(select 1 from public.record_write_obligations o join public.record_write_obligation_targets t using(obligation_id)
+      where o.origin_id=j.import_job_id and o.origin_kind in ('import_archive','import_attachment')
+        and t.record_id<>p_record and t.handed_off_at is null)
+$$;
+revoke all on function record_platform_internal.record_portability_v1_removable_jobs(text,text[]) from public;
+
+create function record_platform_internal.record_portability_v1_removed_count(p_record text, p_export_jobs text[], p_removable_jobs text[])
+returns bigint language sql stable security definer set search_path=pg_catalog as $$
+  select (select count(*) from public.record_import_entity_mappings m where
+      (m.entity_kind='record' and m.target_id=p_record)
+      or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id=p_record))
+    +(select count(*) from public.record_export_artifacts a where a.export_job_id=any(p_export_jobs))
+    +(select count(*) from public.record_export_jobs j where j.export_job_id=any(p_export_jobs))
+    +(select count(*) from public.record_import_artifacts a where a.import_job_id=any(p_removable_jobs))
+    +(select count(*) from public.record_import_plans p where p.import_job_id=any(p_removable_jobs))
+    +(select count(*) from public.record_import_jobs j where j.import_job_id=any(p_removable_jobs))
+    +(select count(*) from public.record_origins o where o.project_id='default' and o.source_record_id=p_record)
+$$;
+revoke all on function record_platform_internal.record_portability_v1_removed_count(text,text[],text[]) from public;
+
+create function record_platform_internal.record_portability_v1_prepare_command(body bytea)
+returns json language plpgsql immutable security definer set search_path=pg_catalog as $$
+declare raw json; auth json;
+begin
+  if body is null or octet_length(body) not between 1 and 262144 then
+    raise exception using errcode='22023',message='invalid portability preparation command'; end if;
+  raw:=convert_from(body,'UTF8')::json;
+  if json_typeof(raw) is distinct from 'object' or (select count(*) from json_each(raw))<>2
+    or (select count(distinct x.key) from json_each(raw) x)<>2
+    or exists(select 1 from json_each(raw) x where x.key not in ('authority','storage_binding'))
+    or json_typeof(raw->'authority') is distinct from 'object'
+    or json_typeof(raw->'storage_binding') not in ('string','null') then
+    raise exception using errcode='22023',message='invalid portability preparation fields'; end if;
+  auth:=raw->'authority';
+  if (select count(*) from json_each(auth))<>(select count(distinct x.key) from json_each(auth) x) then
+    raise exception using errcode='22023',message='duplicate portability authority field'; end if;
+  if json_typeof(raw->'storage_binding')='string' and raw->>'storage_binding' !~ '^[0-9a-f]{64}$' then
+    raise exception using errcode='22023',message='invalid portability storage binding'; end if;
+  return raw;
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_prepare_command(bytea) from public;
+
+-- Construct every immutable row and the final digest in memory before the
+-- preparation row is inserted. The caller holds the V1 source locks.
+create function record_platform_internal.record_portability_v1_inventory_candidate(
+  v jsonb, p_export_jobs text[], p_import_jobs text[], p_removable_jobs text[], pdf boolean)
+returns jsonb language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare sources jsonb; owners jsonb; artifacts jsonb; obligations jsonb; targets jsonb:='[]'::jsonb;
+  framed_targets jsonb; all_obligations text[]; group_obligations text[]; g record; t public.record_portability_v1_targets;
+  expected text; evidence jsonb;
+  unresolved bigint:=0; removed bigint; digest bytea; source_ok boolean;
+begin
+  owners:=record_platform_internal.record_portability_v1_owners(v->>'record_id',p_export_jobs,p_import_jobs);
+  select coalesce(jsonb_agg(to_jsonb(s) order by s.source_kind collate "C",s.source_id collate "C"),'[]'::jsonb)
+    into sources from record_platform_internal.record_portability_v1_sources(v->>'record_id',p_export_jobs,p_import_jobs) s;
+  select coalesce(array_agg(x.value->>'obligation_id' order by (x.value->>'obligation_id') collate "C"),'{}'::text[])
+    into all_obligations from jsonb_array_elements(sources) x(value) where x.value->>'source_kind'='obligation';
+  for g in
+    select x.backend,x.key,x.version,x.namespace,x.incarnation,x.binding,min(x.created) created,
+      count(distinct (x.sha,x.size)) variants,min(x.sha) sha,min(x.size) size,
+      bool_and(isfinite(x.created)) all_finite
+    from (select s.value->>'backend_kind' backend,s.value->>'blob_key' key,s.value->>'object_version_id' version,
+      (s.value->>'namespace_id')::uuid namespace,(s.value->>'incarnation_id')::uuid incarnation,
+      (s.value->>'storage_binding')::bytea binding,(s.value->>'created_at')::timestamptz created,
+      s.value->>'sha256' sha,(s.value->>'byte_size')::bigint size from jsonb_array_elements(sources) s(value)) x
+    group by x.backend,x.key,x.version,x.namespace,x.incarnation,x.binding
+    order by x.backend collate "C",x.key collate "C",x.version collate "C",x.namespace,x.incarnation,x.binding
+  loop
+    t:=null; t.operation_id:=v->>'operation_id'; t.backend_kind:=g.backend; t.blob_key:=g.key;
+    t.object_version_id:=g.version; t.namespace_id:=g.namespace; t.incarnation_id:=g.incarnation;
+    t.storage_binding:=g.binding; t.blob_created_at:=g.created;
+    t.target_id:=record_platform_internal.record_portability_v1_target_id(t.operation_id,t.backend_kind,t.blob_key,
+      t.object_version_id,t.namespace_id,t.incarnation_id,t.storage_binding);
+    if g.variants=1 then t.sha256:=g.sha::bytea; t.byte_size:=g.size; end if;
+    select coalesce(array_agg(s.value->>'obligation_id' order by (s.value->>'obligation_id') collate "C"),'{}'::text[])
+      into group_obligations from jsonb_array_elements(sources) s(value)
+      where s.value->>'source_kind'='obligation' and
+        record_platform_internal.record_portability_v1_target_id(t.operation_id,s.value->>'backend_kind',s.value->>'blob_key',
+          s.value->>'object_version_id',(s.value->>'namespace_id')::uuid,(s.value->>'incarnation_id')::uuid,
+          (s.value->>'storage_binding')::bytea)=t.target_id;
+    t.obligation_id:=group_obligations[1];
+    if t.backend_kind='local' and t.object_version_id is not null then
+      select id into t.obligation_id from unnest(group_obligations) id where 'local-v2-'||id=t.object_version_id;
+    end if;
+    t.disposition:='unresolved'; t.retained_evidence:='[]'::jsonb;
+    source_ok:=g.all_finite is true and isfinite(t.blob_created_at) and t.sha256 is not null and t.byte_size is not null and t.byte_size>0
+      and t.blob_key='sha256/'||encode(t.sha256,'hex') and cardinality(group_obligations)>0
+      and not exists(select 1 from public.record_write_obligations o join public.blob_publication_intents p
+        on p.publication_id=o.publication_id where o.obligation_id=any(group_obligations)
+          and p.publication_state in ('prepared','published'));
+    if source_ok then
+      -- Every artifact's original obligation must be in this physical group;
+      -- a mismatched artifact/obligation route makes both groups unresolved.
+      source_ok:=not exists(select 1 from jsonb_array_elements(sources) s(value)
+        where s.value->>'source_kind' in ('export','import') and
+          ((record_platform_internal.record_portability_v1_target_id(t.operation_id,s.value->>'backend_kind',s.value->>'blob_key',
+            s.value->>'object_version_id',(s.value->>'namespace_id')::uuid,(s.value->>'incarnation_id')::uuid,
+            (s.value->>'storage_binding')::bytea)=t.target_id
+            and (s.value->>'obligation_id' is null or not (s.value->>'obligation_id'=any(group_obligations))))
+          or (s.value->>'obligation_id'=any(group_obligations) and
+            record_platform_internal.record_portability_v1_target_id(t.operation_id,s.value->>'backend_kind',s.value->>'blob_key',
+              s.value->>'object_version_id',(s.value->>'namespace_id')::uuid,(s.value->>'incarnation_id')::uuid,
+              (s.value->>'storage_binding')::bytea)<>t.target_id)));
+    end if;
+    if source_ok and t.backend_kind='local' then
+      source_ok:=t.obligation_id is not null and t.namespace_id is not null and t.incarnation_id is not null
+        and t.storage_binding is null and exists(select 1 from public.local_blob_namespaces n
+          where n.namespace_id=t.namespace_id and n.current_incarnation_id=t.incarnation_id and n.admission_state='active');
+      if source_ok then
+        select record_platform_internal.record_portability_v1_local_source_expected(s.value->'snapshot',t.obligation_id)
+          into expected from jsonb_array_elements(sources) s(value)
+          where s.value->>'source_kind'='obligation' and s.value->>'obligation_id'=t.obligation_id;
+        source_ok:=expected is not null and (t.object_version_id is null or t.object_version_id=expected)
+          and not exists(select 1 from jsonb_array_elements(sources) s(value)
+            where s.value->>'backend_kind'='local' and s.value->>'blob_key'=t.blob_key
+              and (s.value->>'namespace_id' is null or (s.value->>'namespace_id')::uuid=t.namespace_id)
+              and (s.value->>'incarnation_id' is null or (s.value->>'incarnation_id')::uuid=t.incarnation_id)
+              and (s.value->>'obligation_id' is null or not (s.value->>'obligation_id'=any(group_obligations))
+                or (s.value->>'object_version_id' is not null and s.value->>'object_version_id'<>expected)
+                or (s.value->>'source_kind' in ('export','import') and s.value->>'object_version_id' is distinct from expected)))
+          and not exists(select 1 from jsonb_array_elements(sources) s(value)
+            join public.record_write_obligations w on w.obligation_id=s.value->>'obligation_id'
+            where s.value->>'source_kind'='obligation' and w.obligation_id=any(group_obligations)
+              and w.obligation_id<>t.obligation_id and (w.object_version is distinct from expected
+                or not record_platform_internal.record_portability_v1_local_owner_version(w)
+                or (s.value->'snapshot'->'registration_command',s.value->'snapshot'->'return_command',s.value->'snapshot'->'dispatch_id')
+                  is distinct from (to_jsonb(w)->'registration_command',to_jsonb(w)->'return_command',to_jsonb(w)->'dispatch_id')));
+      end if;
+    elsif source_ok and t.backend_kind='s3' then
+      source_ok:=t.namespace_id is null and t.incarnation_id is null and t.storage_binding is not null
+        and octet_length(t.storage_binding)=32 and t.object_version_id is not null and t.object_version_id<>'null'
+        and octet_length(t.object_version_id) between 1 and 1024
+        and not exists(select 1 from jsonb_array_elements(sources) s(value)
+          where s.value->>'source_kind'='obligation' and s.value->>'obligation_id'=any(group_obligations)
+            and not record_platform_internal.record_portability_v1_s3_source_valid(s.value->'snapshot',s.value->>'obligation_id'));
+    else source_ok:=false; end if;
+    if source_ok then
+      t.disposition:=t.backend_kind;
+      evidence:=record_platform_internal.record_portability_v1_retained_candidates(t,v->>'record_id');
+      if record_platform_internal.record_portability_v1_ambiguous_references(t,v->>'record_id',p_removable_jobs,all_obligations,evidence) then
+        t.disposition:='unresolved';
+      elsif jsonb_array_length(evidence)>0 then
+        t.disposition:='retained_shared'; t.retained_evidence:=evidence;
+      elsif t.backend_kind='s3' then t.deletion_state:='pending'; end if;
+    end if;
+    if t.disposition='unresolved' then unresolved:=unresolved+1; end if;
+    targets:=targets||jsonb_build_array(to_jsonb(t));
+  end loop;
+  if pdf then unresolved:=unresolved+1; end if;
+  removed:=case when unresolved=0 then record_platform_internal.record_portability_v1_removed_count(v->>'record_id',p_export_jobs,p_removable_jobs) else 0 end;
+  if unresolved=0 then
+    select coalesce(jsonb_agg(case when x.value->>'disposition'='local' then x.value||jsonb_build_object('local_deletion_id',
+      'bgd_'||encode(sha256(convert_to(jsonb_build_array('HOUFENG-PORTABILITY-LOCAL-TASK-V1',v->>'operation_id',x.value->>'target_id')::text,'UTF8')),'hex'))
+      else x.value end order by (x.value->>'target_id') collate "C"),'[]'::jsonb) into targets from jsonb_array_elements(targets) x(value);
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_array(v->>'operation_id',s.value->>'source_kind',s.value->>'source_id',
+    s.value->>'job_id',s.value->>'artifact_role',s.value->>'backend_kind',s.value->>'blob_key',s.value->>'object_version_id',
+    substr(s.value->>'sha256',3),(s.value->>'byte_size')::bigint,to_jsonb((s.value->>'created_at')::timestamptz at time zone 'UTC'),
+    (s.value->>'namespace_id')::uuid,(s.value->>'incarnation_id')::uuid,s.value->>'obligation_id',
+    record_platform_internal.record_portability_v1_target_id(v->>'operation_id',s.value->>'backend_kind',s.value->>'blob_key',
+      s.value->>'object_version_id',(s.value->>'namespace_id')::uuid,(s.value->>'incarnation_id')::uuid,
+      (s.value->>'storage_binding')::bytea)) order by (s.value->>'source_kind') collate "C",(s.value->>'source_id') collate "C"),'[]'::jsonb)
+    into artifacts from jsonb_array_elements(sources) s(value) where s.value->>'source_kind' in ('export','import');
+  select coalesce(jsonb_agg(jsonb_build_array(v->>'operation_id',s.value->>'obligation_id',s.value->'snapshot',
+    record_platform_internal.record_portability_v1_target_id(v->>'operation_id',s.value->>'backend_kind',s.value->>'blob_key',
+      s.value->>'object_version_id',(s.value->>'namespace_id')::uuid,(s.value->>'incarnation_id')::uuid,
+      (s.value->>'storage_binding')::bytea)) order by (s.value->>'obligation_id') collate "C"),'[]'::jsonb)
+    into obligations from jsonb_array_elements(sources) s(value) where s.value->>'source_kind'='obligation';
+  select coalesce(jsonb_agg(jsonb_build_array(x.operation_id,x.target_id,x.backend_kind,x.blob_key,x.object_version_id,
+    encode(x.sha256,'hex'),x.byte_size,to_jsonb(x.blob_created_at at time zone 'UTC'),x.namespace_id,x.incarnation_id,x.obligation_id,
+    encode(x.storage_binding,'hex'),x.disposition,x.retained_evidence,x.local_deletion_id) order by x.target_id collate "C"),'[]'::jsonb)
+    into framed_targets from jsonb_array_elements(targets) tv(value)
+    cross join lateral jsonb_populate_record(null::public.record_portability_v1_targets,tv.value) x;
+  digest:=record_platform_internal.record_portability_v1_frame_digest(v->>'operation_id','default',v->>'record_id',
+    decode(v->>'surface_digest','hex'),decode(v->>'ledger_domain','hex'),(v->>'ledger_sequence')::bigint,
+    decode(v->>'ledger_entry_hash','hex'),decode(v->>'witness_proof_digest','hex'),owners,removed,pdf,artifacts,obligations,framed_targets);
+  return jsonb_build_object('owners',owners,'artifacts',artifacts,'obligations',obligations,'targets',targets,
+    'removed_rows',removed,'pdf_pending',pdf,'unresolved_count',unresolved,'inventory_digest',encode(digest,'hex'));
+end $$;
+revoke all on function record_platform_internal.record_portability_v1_inventory_candidate(jsonb,text[],text[],text[],boolean) from public;
+
+create function record_platform_internal.record_portability_v1_preparation_projection(body bytea, fresh boolean)
+returns jsonb language plpgsql security definer set search_path=pg_catalog as $$
+declare raw json; auth json; v jsonb; p public.record_portability_v1_preparations;
+  binding bytea; unresolved bigint; local_targets jsonb; s3_targets jsonb; required jsonb;
+begin
+  raw:=record_platform_internal.record_portability_v1_prepare_command(body);
+  auth:=raw->'authority';
+  if json_typeof(raw->'storage_binding')='string' then binding:=decode(raw->>'storage_binding','hex'); end if;
+  v:=record_platform_internal.legacy_adapter_lock(convert_to(auth::text,'UTF8'),'record_portability');
+  select x.* into p from public.record_portability_v1_preparations x where x.operation_id=v->>'operation_id';
+  if not found or (p.project_id,p.record_id,p.surface_digest,p.ledger_domain,p.ledger_sequence,p.ledger_entry_hash,p.witness_proof_digest)
+    is distinct from ('default',v->>'record_id',decode(v->>'surface_digest','hex'),decode(v->>'ledger_domain','hex'),
+      (v->>'ledger_sequence')::bigint,decode(v->>'ledger_entry_hash','hex'),decode(v->>'witness_proof_digest','hex'))
+    or p.inventory_digest is distinct from record_platform_internal.record_portability_v1_inventory_digest(p.operation_id)
+    or not record_platform_internal.record_portability_v1_source_links(p.operation_id)
+    or exists(select 1 from public.record_portability_v1_targets t where t.operation_id=p.operation_id
+      and not isfinite(t.blob_created_at) and t.disposition<>'unresolved') then
+    raise exception using errcode='55000',message='portability preparation unavailable or conflicting'; end if;
+  select count(*)+(case when p.pdf_pending then 1 else 0 end) into unresolved
+    from public.record_portability_v1_targets t where t.operation_id=p.operation_id and t.disposition='unresolved';
+  if unresolved=0 then
+    if exists(select 1 from public.record_portability_v1_targets t left join public.blob_gc_deletions g on g.deletion_id=t.local_deletion_id
+      where t.operation_id=p.operation_id and t.disposition='local' and (record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id) is null
+        or g.deletion_id is null or g.operation_id is distinct from p.operation_id
+        or g.project_id is distinct from p.project_id or g.backend_kind is distinct from 'local' or g.purge_mode is distinct from 'permanent'
+        or g.local_contract_version<>2 or (g.namespace_id,g.incarnation_id,g.blob_key,g.sha256_digest)
+          is distinct from (t.namespace_id,t.incarnation_id,t.blob_key,t.sha256)
+        or (g.final_identity_bound and g.final_was_present and (g.object_version,g.size_bytes)
+          is distinct from (record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id),t.byte_size))))
+      or exists(select 1 from public.record_portability_v1_targets t where t.operation_id=p.operation_id and t.disposition='s3'
+        and t.storage_binding is distinct from binding)
+      or exists(select 1 from public.record_portability_v1_targets t where t.operation_id=p.operation_id
+        and t.disposition='retained_shared'
+        and not record_platform_internal.record_portability_v1_retained_proof(t.operation_id,t.target_id,null,null))
+      or exists(select 1 from public.record_export_jobs j where j.project_id=p.project_id and j.record_id=p.record_id)
+      or exists(select 1 from public.record_origins o where o.project_id=p.project_id and o.source_record_id=p.record_id)
+      or exists(select 1 from public.record_import_entity_mappings m where m.entity_kind='record' and m.target_id=p.record_id
+        or m.entity_kind in ('evidence','attachment') and m.owner_target_record_id=p.record_id)
+      or exists(select 1 from public.record_write_obligation_targets ot join public.record_write_obligations o using(obligation_id)
+        where ot.record_id=p.record_id and o.origin_kind='import_archive' and ot.handed_off_at is null) then
+      raise exception using errcode='55000',message='portability preparation handoff unavailable'; end if;
+    select coalesce(jsonb_agg(jsonb_build_object('deletion_id',t.local_deletion_id,'namespace_id',t.namespace_id,
+      'incarnation_id',t.incarnation_id,'key',t.blob_key,'expected_version',record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id))
+      order by t.target_id collate "C"),'[]'::jsonb) into local_targets
+      from public.record_portability_v1_targets t where t.operation_id=p.operation_id and t.disposition='local';
+    select coalesce(jsonb_agg(t.target_id order by t.target_id collate "C"),'[]'::jsonb) into s3_targets
+      from public.record_portability_v1_targets t where t.operation_id=p.operation_id and t.disposition='s3';
+  else
+    if p.removed_rows<>0 or exists(select 1 from public.record_portability_v1_targets t
+      where t.operation_id=p.operation_id and (t.local_deletion_id is not null or t.deletion_state not in ('pending'))) then
+      raise exception using errcode='55000',message='ineligible portability inventory has dispatched work'; end if;
+    local_targets:='[]'::jsonb; s3_targets:='[]'::jsonb;
+  end if;
+  if fresh and unresolved=0 then
+    select coalesce(jsonb_agg(x.backend_kind order by x.backend_kind collate "C"),'[]'::jsonb) into required
+      from (select distinct t.backend_kind from public.record_portability_v1_targets t
+        where t.operation_id=p.operation_id and t.disposition in ('local','s3')) x;
+  else required:='[]'::jsonb; end if;
+  perform record_platform_internal.legacy_adapter_lock(convert_to(auth::text,'UTF8'),'record_portability');
+  return jsonb_build_object('inventory_digest',encode(p.inventory_digest,'hex'),'unresolved_count',unresolved,
+    'required_backends',required,'local_targets',local_targets,'s3_targets',s3_targets);
+end $$;
+create function public.record_portability_purge_prepare_resolve_v1(bytea)
+returns jsonb language sql security definer set search_path=pg_catalog
+as $$ select record_platform_internal.record_portability_v1_preparation_projection($1,false) $$;
+revoke all on function record_platform_internal.record_portability_v1_preparation_projection(bytea,boolean),
+  public.record_portability_purge_prepare_resolve_v1(bytea) from public;
+
+-- The V1 owner/ledger authority and the complete immutable inventory precede
+-- all logical handoff and task creation. No physical I/O occurs in this call.
+create function public.record_portability_purge_prepare_v1(bytea)
+returns jsonb language plpgsql security definer set search_path=pg_catalog as $$
+declare body alias for $1; raw json; auth json; authority_bytes bytea; v jsonb; inventory jsonb; target_row public.record_portability_v1_targets;
+  task public.blob_gc_deletions; export_jobs text[]; import_jobs text[]; removable_jobs text[];
+  pdf boolean; changed bigint; removed bigint:=0; expected text;
+begin
+  raw:=record_platform_internal.record_portability_v1_prepare_command(body);
+  auth:=raw->'authority'; authority_bytes:=convert_to(auth::text,'UTF8');
+  update record_platform_internal.record_portability_v1_epoch set epoch=case when epoch=9223372036854775807 then 0 else epoch+1 end where singleton;
+  if not found then raise exception using errcode='55000',message='portability V1 serialization epoch unavailable'; end if;
+  v:=record_platform_internal.legacy_adapter_lock(authority_bytes,'record_portability');
+  if exists(select 1 from public.record_portability_v1_preparations p where p.operation_id=v->>'operation_id') then
+    return record_platform_internal.record_portability_v1_preparation_projection(body,false);
+  end if;
+  select coalesce(array_agg(j.export_job_id order by j.export_job_id collate "C"),'{}'::text[]) into export_jobs
+    from public.record_export_jobs j where j.project_id='default' and j.record_id=v->>'record_id';
+  select coalesce(array_agg(affected.job_id order by affected.job_id collate "C"),'{}'::text[]) into import_jobs from (
+    select p.import_job_id job_id from public.record_import_plans p join public.record_import_entity_mappings m using(import_plan_id)
+      where (m.entity_kind='record' and m.target_id=v->>'record_id')
+        or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id=v->>'record_id')
+    union
+    select o.origin_id from public.record_write_obligations o where o.origin_kind in ('import_archive','import_attachment')
+      and (o.record_id=v->>'record_id' or exists(select 1 from public.record_write_obligation_targets ot
+        where ot.obligation_id=o.obligation_id and ot.record_id=v->>'record_id'))
+  ) affected;
+  begin
+    perform 1 from public.record_export_jobs j where j.export_job_id=any(export_jobs) order by j.export_job_id collate "C" for update nowait;
+    perform 1 from public.record_import_jobs j where j.import_job_id=any(import_jobs) order by j.import_job_id collate "C" for update nowait;
+  exception when lock_not_available then
+    raise exception using errcode='40001',message='portability source route changed; restart transaction';
+  end;
+  removable_jobs:=record_platform_internal.record_portability_v1_removable_jobs(v->>'record_id',import_jobs);
+  select exists(select 1 from public.record_export_jobs j where j.export_job_id=any(export_jobs) and j.export_kind='pdf') into pdf;
+  inventory:=record_platform_internal.record_portability_v1_inventory_candidate(v,export_jobs,import_jobs,removable_jobs,pdf);
+  insert into public.record_portability_v1_preparations(operation_id,project_id,record_id,surface_digest,ledger_domain,
+    ledger_sequence,ledger_entry_hash,witness_proof_digest,owners,inventory_digest,removed_rows,pdf_pending)
+    values(v->>'operation_id','default',v->>'record_id',decode(v->>'surface_digest','hex'),decode(v->>'ledger_domain','hex'),
+      (v->>'ledger_sequence')::bigint,decode(v->>'ledger_entry_hash','hex'),decode(v->>'witness_proof_digest','hex'),
+      inventory->'owners',decode(inventory->>'inventory_digest','hex'),(inventory->>'removed_rows')::bigint,pdf);
+  insert into public.record_portability_v1_targets(operation_id,target_id,backend_kind,blob_key,object_version_id,sha256,byte_size,
+    blob_created_at,namespace_id,incarnation_id,obligation_id,storage_binding,disposition,retained_evidence,local_deletion_id,deletion_state)
+    select x.operation_id,x.target_id,x.backend_kind,x.blob_key,x.object_version_id,x.sha256,x.byte_size,x.blob_created_at,
+      x.namespace_id,x.incarnation_id,x.obligation_id,x.storage_binding,x.disposition,x.retained_evidence,x.local_deletion_id,x.deletion_state
+    from jsonb_array_elements(inventory->'targets') item(value)
+    cross join lateral jsonb_populate_record(null::public.record_portability_v1_targets,item.value) x;
+  insert into public.record_portability_v1_artifacts(operation_id,source_kind,artifact_id,job_id,artifact_role,backend_kind,blob_key,
+    object_version_id,sha256,byte_size,created_at,namespace_id,incarnation_id,obligation_id,target_id)
+    select item.value->>0,item.value->>1,item.value->>2,item.value->>3,item.value->>4,item.value->>5,item.value->>6,
+      item.value->>7,decode(item.value->>8,'hex'),(item.value->>9)::bigint,(item.value->>10)::timestamp at time zone 'UTC',
+      (item.value->>11)::uuid,(item.value->>12)::uuid,item.value->>13,item.value->>14
+    from jsonb_array_elements(inventory->'artifacts') item(value);
+  insert into public.record_portability_v1_obligations(operation_id,obligation_id,snapshot,target_id)
+    select item.value->>0,item.value->>1,item.value->2,item.value->>3 from jsonb_array_elements(inventory->'obligations') item(value);
+  if decode(inventory->>'inventory_digest','hex') is distinct from record_platform_internal.record_portability_v1_inventory_digest(v->>'operation_id')
+    or not record_platform_internal.record_portability_v1_source_links(v->>'operation_id') then
+    raise exception using errcode='55000',message='portability V1 inventory assembly conflict'; end if;
+  if (inventory->>'unresolved_count')::bigint>0 then
+    perform record_platform_internal.legacy_adapter_lock(authority_bytes,'record_portability');
+    perform record_platform_internal.record_deletion_queue_owner_commit_check(v->>'operation_id',v->>'owner_id',
+      (v->>'owner_generation')::bigint,(v->>'owner_expires_at')::timestamptz);
+    return record_platform_internal.record_portability_v1_preparation_projection(body,false);
+  end if;
+  if not record_platform_internal.record_portability_v1_eligible(v->>'operation_id') then
+    raise exception using errcode='55000',message='portability V1 inventory is not eligible'; end if;
+  insert into record_platform_internal.record_deletion_effect_scopes
+    (transaction_id,backend_pid,record_id,operation_id,authority_kind,authority_digest,effect_kind)
+    values(pg_current_xact_id(),pg_backend_pid(),v->>'record_id',v->>'operation_id','online_v1',decode(inventory->>'inventory_digest','hex'),'portability');
+  if exists(select 1 from public.record_portability_v1_obligations c join public.record_portability_v1_targets t using(operation_id,target_id)
+    join public.record_write_obligations o on o.obligation_id=c.obligation_id where c.operation_id=v->>'operation_id'
+      and t.disposition in ('local','s3') and o.operation_id is not null and o.operation_id<>v->>'operation_id') then
+    raise exception using errcode='55000',message='portability responsibility already handed to another operation'; end if;
+  update public.record_write_obligations o set operation_id=v->>'operation_id',
+    handed_off_at=coalesce(o.handed_off_at,clock_timestamp()),
+    outcome=case when o.backend_kind='local' and o.dispatched_at is null then 'local_excluded' else o.outcome end
+    where exists(select 1 from public.record_portability_v1_obligations c join public.record_portability_v1_targets t using(operation_id,target_id)
+      where c.operation_id=v->>'operation_id' and c.obligation_id=o.obligation_id and t.disposition in ('local','s3'));
+  for target_row in select t.* from public.record_portability_v1_targets t
+    where t.operation_id=v->>'operation_id' and t.disposition='local' order by t.target_id collate "C" loop
+    expected:=record_platform_internal.record_portability_v1_local_expected_version(target_row.operation_id,target_row.target_id);
+    if expected is null then raise exception using errcode='55000',message='portability local source identity unavailable'; end if;
+    task:=record_platform_internal.local_blob_gc_prepare(convert_to(jsonb_build_object(
+      'deletion_id',target_row.local_deletion_id,'namespace_id',target_row.namespace_id,'incarnation_id',target_row.incarnation_id,
+      'key',target_row.blob_key,'operation_id',v->>'operation_id','operation_owner_id',v->>'owner_id',
+      'operation_generation',(v->>'owner_generation')::bigint,'operation_expires_at',v->>'owner_expires_at',
+      'expected_version',expected,'orphaned_before',null,'publication_id',null)::text,'UTF8'),true,authority_bytes);
+    if (task.deletion_id,task.operation_id,task.namespace_id,task.incarnation_id,task.blob_key)
+      is distinct from (target_row.local_deletion_id,target_row.operation_id,target_row.namespace_id,target_row.incarnation_id,target_row.blob_key) then
+      raise exception using errcode='55000',message='portability local task identity conflict'; end if;
+    insert into public.local_blob_gc_obligations(deletion_id,obligation_id,seal_obligation)
+      select task.deletion_id,o.obligation_id,true from public.record_portability_v1_obligations c
+      join public.record_write_obligations o using(obligation_id)
+      where (c.operation_id,c.target_id)=(target_row.operation_id,target_row.target_id)
+        and o.operation_id=task.operation_id and o.cleanup_completed_at is null
+        and (o.namespace_id,o.incarnation_id,o.canonical_key)=(task.namespace_id,task.incarnation_id,task.blob_key)
+      on conflict (deletion_id,obligation_id) do update set seal_obligation=true
+        where not public.local_blob_gc_obligations.seal_obligation;
+  end loop;
+  insert into public.record_origin_tombstones(project_id,origin_digest,operation_id)
+    select distinct 'default',j.archive_digest,v->>'operation_id' from public.record_import_jobs j where j.import_job_id=any(import_jobs)
+    on conflict do nothing;
+  insert into public.record_origin_tombstones(project_id,origin_digest,operation_id)
+    select o.project_id,o.origin_digest,v->>'operation_id' from public.record_origins o where o.project_id='default' and o.source_record_id=v->>'record_id'
+    on conflict do nothing;
+  update public.record_write_obligation_targets ot set handed_off_at=coalesce(ot.handed_off_at,clock_timestamp())
+    where ot.record_id=v->>'record_id' and exists(select 1 from public.record_write_obligations o
+      where o.obligation_id=ot.obligation_id and o.origin_kind='import_archive' and o.origin_id=any(import_jobs));
+  delete from public.record_import_entity_mappings m where (m.entity_kind='record' and m.target_id=v->>'record_id')
+    or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id=v->>'record_id');
+  get diagnostics changed=row_count; removed:=removed+changed;
+  delete from public.record_export_artifacts a where a.export_job_id=any(export_jobs);
+  get diagnostics changed=row_count; removed:=removed+changed;
+  delete from public.record_export_jobs j where j.export_job_id=any(export_jobs);
+  get diagnostics changed=row_count; removed:=removed+changed;
+  delete from public.record_import_artifacts a where a.import_job_id=any(removable_jobs);
+  get diagnostics changed=row_count; removed:=removed+changed;
+  delete from public.record_import_plans p where p.import_job_id=any(removable_jobs);
+  get diagnostics changed=row_count; removed:=removed+changed;
+  delete from public.record_import_jobs j where j.import_job_id=any(removable_jobs);
+  get diagnostics changed=row_count; removed:=removed+changed;
+  delete from public.record_origins o where o.project_id='default' and o.source_record_id=v->>'record_id';
+  get diagnostics changed=row_count; removed:=removed+changed;
+  if removed<>(inventory->>'removed_rows')::bigint then
+    raise exception using errcode='55000',message='portability logical deletion count changed'; end if;
+  delete from record_platform_internal.record_deletion_effect_scopes s where s.transaction_id=pg_current_xact_id()
+    and s.backend_pid=pg_backend_pid() and s.record_id=v->>'record_id' and s.operation_id=v->>'operation_id' and s.effect_kind='portability';
+  perform record_platform_internal.legacy_adapter_lock(authority_bytes,'record_portability');
+  perform record_platform_internal.record_deletion_queue_owner_commit_check(v->>'operation_id',v->>'owner_id',
+    (v->>'owner_generation')::bigint,(v->>'owner_expires_at')::timestamptz);
+  return record_platform_internal.record_portability_v1_preparation_projection(body,true);
+end $$;
+revoke all on function public.record_portability_purge_prepare_v1(bytea) from public;
+
+-- Finish reuses the persisted source inventory; it never rediscovers deleted
+-- metadata or treats a retained owner as proof of physical absence.
+create function record_platform_internal.record_portability_v1_finished(op text)
+returns boolean language plpgsql volatile security definer set search_path=pg_catalog as $$
+declare p public.record_portability_v1_preparations;
+begin
+  select * into p from public.record_portability_v1_preparations where operation_id=op;
+  if not found or not record_platform_internal.record_portability_v1_eligible(op) then return false; end if;
+  if exists(select 1 from public.record_portability_v1_targets t where t.operation_id=op
+    and t.target_id is distinct from record_platform_internal.record_portability_v1_target_id(t.operation_id,
+      t.backend_kind,t.blob_key,t.object_version_id,t.namespace_id,t.incarnation_id,t.storage_binding)) then return false; end if;
+  if exists(select 1 from public.record_export_jobs j where j.project_id=p.project_id and j.record_id=p.record_id)
+    or exists(select 1 from public.record_origins o where o.project_id=p.project_id and o.source_record_id=p.record_id)
+    or exists(select 1 from public.record_import_entity_mappings m where
+      (m.entity_kind='record' and m.target_id=p.record_id)
+      or (m.entity_kind in ('evidence','attachment') and m.owner_target_record_id=p.record_id))
+    or exists(select 1 from public.record_write_obligation_targets ot join public.record_write_obligations o using(obligation_id)
+      where ot.record_id=p.record_id and o.origin_kind='import_archive' and ot.handed_off_at is null)
+    or exists(select 1 from public.record_portability_v1_targets t where t.operation_id=op
+      and t.disposition='retained_shared'
+      and not record_platform_internal.record_portability_v1_retained_proof(t.operation_id,t.target_id,null,null)) then
+    return false;
+  end if;
+  if exists(select 1 from public.record_portability_v1_targets t
+    left join public.blob_gc_deletions g on g.deletion_id=t.local_deletion_id
+    left join public.local_blob_key_anchors a on (a.namespace_id,a.incarnation_id,a.canonical_key)=
+      (t.namespace_id,t.incarnation_id,t.blob_key)
+    where t.operation_id=op and t.disposition='local' and (
+      record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id) is null
+      or g.deletion_id is null or g.operation_id is distinct from op or g.local_contract_version<>2
+      or g.project_id is distinct from p.project_id or g.backend_kind is distinct from 'local'
+      or g.purge_mode is distinct from 'permanent' or a.lock_inode is null
+      or (g.namespace_id,g.incarnation_id,g.blob_key,g.sha256_digest)
+        is distinct from (t.namespace_id,t.incarnation_id,t.blob_key,t.sha256)
+      or not record_platform_internal.record_portability_v1_local_task_proof(g)
+      or (g.final_was_present and (g.object_version,g.size_bytes) is distinct from
+        (record_platform_internal.record_portability_v1_local_expected_version(t.operation_id,t.target_id),t.byte_size))
+      or not exists(select 1 from public.local_blob_gc_obligations l where l.deletion_id=g.deletion_id
+        and l.obligation_id=t.obligation_id and l.seal_obligation)))
+    or exists(select 1 from public.record_portability_v1_obligations member
+      join public.record_portability_v1_targets t using(operation_id,target_id)
+      join public.record_write_obligations w on w.obligation_id=member.obligation_id
+      left join public.blob_gc_deletions g on g.deletion_id=t.local_deletion_id
+      left join public.local_blob_gc_obligations l on (l.deletion_id,l.obligation_id)=(g.deletion_id,w.obligation_id)
+      where member.operation_id=op and t.disposition='local' and (
+        (w.backend_kind,w.namespace_id,w.incarnation_id,w.canonical_key,w.sha256_digest,w.size_bytes)
+          is distinct from ('local',t.namespace_id,t.incarnation_id,t.blob_key,t.sha256,t.byte_size)
+        or l.obligation_id is null
+        or (l.seal_obligation and (w.handed_off_at is null or w.cleanup_completed_at is null
+          or w.quota_settled_at is null or (w.cleanup_outcome,w.cleanup_receipt)
+            is distinct from (g.physical_delete_result,g.receipt_digest)))
+        or not l.seal_obligation))
+    or exists(select 1 from public.record_portability_v1_targets t
+      join public.local_blob_gc_obligations l on l.deletion_id=t.local_deletion_id
+      where t.operation_id=op and t.disposition='local' and (not l.seal_obligation or not exists(
+        select 1 from public.record_portability_v1_obligations c where (c.operation_id,c.target_id,c.obligation_id)=
+          (t.operation_id,t.target_id,l.obligation_id))))
+    or exists(select 1 from public.record_portability_v1_targets t where t.operation_id=op and t.disposition='s3'
+      and (t.backend_kind<>'s3' or t.blob_key is distinct from 'sha256/'||encode(t.sha256,'hex')
+        or t.object_version_id is null or octet_length(t.object_version_id) not between 1 and 1024 or t.object_version_id='null'
+        or t.namespace_id is not null or t.incarnation_id is not null or t.byte_size is null or t.byte_size<=0
+        or t.storage_binding is null or octet_length(t.storage_binding)<>32
+        or t.deletion_state<>'completed' or t.completed_at is null or not isfinite(t.completed_at) or t.retry_at is not null
+        or t.cleanup_owner_id is null or t.cleanup_owner_generation is null or t.cleanup_owner_generation<1
+        or t.attempt is null or t.attempt<1 or t.cleanup_expires_at is null or not isfinite(t.cleanup_expires_at)
+        or t.physical_delete_result is null or t.physical_delete_result not in ('deleted','already_absent')
+        or t.receipt_digest is distinct from record_platform_internal.record_portability_v1_gc_digest(t,t.physical_delete_result)))
+    or exists(select 1 from public.record_portability_v1_obligations c
+      join public.record_portability_v1_targets t using(operation_id,target_id)
+      join public.record_write_obligations w on w.obligation_id=c.obligation_id
+      where c.operation_id=op and t.disposition='s3' and (
+        w.outcome is distinct from 'materialized' or w.object_version is distinct from t.object_version_id
+        or w.dispatch_id is null or w.dispatched_at is null or w.returned_at is null or w.return_command is null
+        or (to_jsonb(w)->'dispatch_id',to_jsonb(w)->'return_command',to_jsonb(w)->'object_version')
+          is distinct from (c.snapshot->'dispatch_id',c.snapshot->'return_command',c.snapshot->'object_version')
+        or w.dispatched_at is distinct from (c.snapshot->>'dispatched_at')::timestamptz
+        or w.returned_at is distinct from (c.snapshot->>'returned_at')::timestamptz)) then
+    return false;
+  end if;
+  return true;
+exception when invalid_text_representation or numeric_value_out_of_range or datetime_field_overflow or invalid_datetime_format then
+  return false;
+end $$;
+
+create function record_platform_internal.record_portability_finish_v1(bytea,boolean)
+returns table(removed_surface_digest bytea,receipt_digest bytea,removed_row_count bigint,verified_absent_at timestamptz)
+language plpgsql security definer set search_path=pg_catalog as $$
+declare v jsonb; p public.record_portability_v1_preparations; expected bytea;
+begin
+  v:=record_platform_internal.legacy_adapter_lock($1,'record_portability');
+  select x.* into p from public.record_portability_v1_preparations x where x.operation_id=v->>'operation_id';
+  if not found or (p.project_id,p.record_id,p.surface_digest,p.ledger_domain,p.ledger_sequence,p.ledger_entry_hash,p.witness_proof_digest)
+    is distinct from ('default',v->>'record_id',decode(v->>'surface_digest','hex'),decode(v->>'ledger_domain','hex'),
+      (v->>'ledger_sequence')::bigint,decode(v->>'ledger_entry_hash','hex'),decode(v->>'witness_proof_digest','hex'))
+    or not record_platform_internal.record_portability_v1_finished(v->>'operation_id') then
+    raise exception using errcode='55000',message='portability V1 completion proof unavailable';
+  end if;
+  expected:=record_platform_internal.digest(
+    record_platform_internal.client_purge_field(convert_to('houfeng.record-portability.deletion-receipt.v1','UTF8'))
+    ||record_platform_internal.client_purge_field(convert_to(p.operation_id,'UTF8'))
+    ||record_platform_internal.client_purge_field(convert_to(p.project_id,'UTF8'))
+    ||record_platform_internal.client_purge_field(convert_to(p.record_id,'UTF8'))
+    ||record_platform_internal.client_purge_field(p.surface_digest)
+    ||record_platform_internal.client_purge_field(int8send(p.removed_rows)),'sha256');
+  if not $2 then
+    insert into public.record_portability_purge_receipts(operation_id,removed_surface_digest,receipt_digest,removed_row_count,verified_absent_at)
+      values(p.operation_id,p.surface_digest,expected,p.removed_rows,clock_timestamp()) on conflict do nothing;
+  end if;
+  return query select r.removed_surface_digest,r.receipt_digest,r.removed_row_count,r.verified_absent_at
+    from public.record_portability_purge_receipts r where r.operation_id=p.operation_id
+      and r.adapter_name='record_portability' and r.removed_surface_digest=p.surface_digest
+      and r.receipt_digest=expected and r.removed_row_count=p.removed_rows and r.verified_absent_at is not null;
+  if not found then raise exception using errcode='55000',message='portability V1 receipt unavailable or conflicting'; end if;
+  perform record_platform_internal.legacy_adapter_lock($1,'record_portability');
+  if not $2 then
+    perform record_platform_internal.record_deletion_queue_owner_commit_check(v->>'operation_id',v->>'owner_id',
+      (v->>'owner_generation')::bigint,(v->>'owner_expires_at')::timestamptz);
+  end if;
+end $$;
+create function public.record_portability_purge_v1(bytea)
+returns table(removed_surface_digest bytea,receipt_digest bytea,removed_row_count bigint,verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog as $$ select * from record_platform_internal.record_portability_finish_v1($1,false) $$;
+create function public.record_portability_purge_verify_v1(bytea)
+returns table(removed_surface_digest bytea,receipt_digest bytea,removed_row_count bigint,verified_absent_at timestamptz)
+language sql security definer set search_path=pg_catalog as $$ select * from record_platform_internal.record_portability_finish_v1($1,true) $$;
+revoke all on function record_platform_internal.record_portability_v1_finished(text),
+  record_platform_internal.record_portability_finish_v1(bytea,boolean),public.record_portability_purge_v1(bytea),
+  public.record_portability_purge_verify_v1(bytea) from public;

@@ -206,6 +206,7 @@ type RevisionMutationWriteObligation struct {
 	NamespaceID, IncarnationID                                   string
 	BackendKind                                                  attachments.BackendKind
 	CanonicalKey                                                 string
+	StorageBinding                                               string
 	SHA256, PlanDigest, ArchiveDigest                            [32]byte
 	SizeBytes                                                    int64
 	PublicationID, ObjectVersion, Outcome, DispatchID            string
@@ -493,7 +494,7 @@ func CombineRevisionMutationResources(sets ...RevisionMutationResources) (Revisi
 	})
 	out.WriteObligations, err = normalizeMutationFamilyUnlessError(err, out.WriteObligations, func(v RevisionMutationWriteObligation) (string, bool) {
 		validOrigin := v.OriginKind == "upload" || v.OriginKind == "processor_preview" || v.OriginKind == "import_attachment" || v.OriginKind == "export_artifact" || v.OriginKind == "import_archive"
-		validBackend := (v.BackendKind == attachments.BackendKindLocal && v.NamespaceID != "" && v.IncarnationID != "") || (v.BackendKind == attachments.BackendKindS3 && v.NamespaceID == "" && v.IncarnationID == "")
+		validBackend := (v.BackendKind == attachments.BackendKindLocal && v.NamespaceID != "" && v.IncarnationID != "" && v.StorageBinding == "") || (v.BackendKind == attachments.BackendKindS3 && v.NamespaceID == "" && v.IncarnationID == "" && (v.StorageBinding == "" || len(v.StorageBinding) == 64 && v.StorageBinding == strings.ToLower(v.StorageBinding) && func() bool { _, err := hex.DecodeString(v.StorageBinding); return err == nil }()))
 		validOutcome := v.Outcome == "registered" || v.Outcome == "materialized" || v.Outcome == "failed" || v.Outcome == "local_excluded" || v.Outcome == "remote_unknown"
 		return v.ObligationID, mutationWriteObligationID(v.ObligationID) && mutationProject(v.ProjectID) && validOrigin && v.OriginID != "" && v.OriginGeneration > 0 && v.OriginOwnerGeneration >= 0 && v.RequestSeq >= 0 && v.TemporaryDevice >= 0 && v.TemporaryInode >= 0 && (v.RecordID == "" || recordidentity.IsValid(v.RecordID)) && v.RecordEpoch >= 0 && validBackend && v.CanonicalKey == "sha256/"+hex.EncodeToString(v.SHA256[:]) && v.SizeBytes > 0 && validOutcome && v.CleanupGeneration >= 0 && (v.QuotaSettlementID == "" || mutationWriteObligationID(v.QuotaSettlementID))
 	})

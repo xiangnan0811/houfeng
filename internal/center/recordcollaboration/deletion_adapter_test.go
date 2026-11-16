@@ -30,8 +30,9 @@ func TestDeletionAdapterDelegatesClosedCollaborationContract(t *testing.T) {
 		OwnerID: "collaboration_worker", Generation: 4, ExpiresAt: verifiedAt.Add(time.Hour),
 	}}
 	store := &collaborationDeletionStoreStub{health: health, preview: preview}
+	expectedOperation := operation
 	store.purge = func(command DeletionCommand) (recorddeletion.AdapterPurgeReceipt, error) {
-		if command.Operation != operation || command.OwnerClaim != claim || command.SurfaceDigest != recorddeletion.RecordCollaborationSurfaceDigest() {
+		if command.Operation != expectedOperation || command.OwnerClaim != claim || command.SurfaceDigest != recorddeletion.RecordCollaborationSurfaceDigest() {
 			t.Fatalf("collaboration purge command = %#v", command)
 		}
 		return recorddeletion.AdapterPurgeReceipt{
@@ -75,13 +76,25 @@ func TestDeletionAdapterDelegatesClosedCollaborationContract(t *testing.T) {
 	if err := legacyTarget.Validate(); err != nil {
 		t.Fatalf("legacy target must otherwise be valid: %v", err)
 	}
-	if _, err := adapter.PurgeDeletion(context.Background(), legacyTarget); !errors.Is(err, ErrInvalidDeletionAdapter) {
-		t.Fatalf("PurgeDeletion(legacy surface) error = %v", err)
+	expectedOperation = legacy
+	legacyReceipt, err := adapter.PurgeDeletion(context.Background(), legacyTarget)
+	if err != nil {
+		t.Fatalf("PurgeDeletion(legacy continuation) error = %v", err)
 	}
-	if err := adapter.VerifyDeletion(context.Background(), legacyTarget, receipt); !errors.Is(err, ErrInvalidDeletionAdapter) {
-		t.Fatalf("VerifyDeletion(legacy surface) error = %v", err)
+	if err := adapter.VerifyDeletion(context.Background(), legacyTarget, legacyReceipt); err != nil {
+		t.Fatalf("VerifyDeletion(legacy continuation) error = %v", err)
 	}
-	if store.healthCalls != 1 || store.previewCalls != 1 || store.purgeCalls != 1 || store.verifyCalls != 1 {
+	invalid := legacyTarget
+	invalid.OwnerClaim.OperationID = "rpo_other"
+	if _, err := adapter.PurgeDeletion(context.Background(), invalid); !errors.Is(err, ErrInvalidDeletionAdapter) {
+		t.Fatalf("PurgeDeletion(invalid owner) error = %v", err)
+	}
+	invalid = legacyTarget
+	invalid.Operation.ContractVersion = 0
+	if err := adapter.VerifyDeletion(context.Background(), invalid, legacyReceipt); !errors.Is(err, ErrInvalidDeletionAdapter) {
+		t.Fatalf("VerifyDeletion(unknown version) error = %v", err)
+	}
+	if store.healthCalls != 1 || store.previewCalls != 1 || store.purgeCalls != 2 || store.verifyCalls != 2 {
 		t.Fatalf("store calls health=%d preview=%d purge=%d verify=%d", store.healthCalls, store.previewCalls, store.purgeCalls, store.verifyCalls)
 	}
 }

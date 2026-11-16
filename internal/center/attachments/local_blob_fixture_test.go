@@ -4,10 +4,13 @@ package attachments
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -88,7 +91,7 @@ func (repository *localBlobTestRepository) RegisterWrite(_ context.Context, r Wr
 	}
 	temporary := "sha256/.blob-tmp-" + r.ObligationID
 	o := WriteObligation{ID: r.ObligationID, WriterInstance: r.WriterInstance, RequestSeq: r.RequestSeq, ProjectID: r.ProjectID,
-		NamespaceID: r.NamespaceID, IncarnationID: r.IncarnationID, BackendKind: r.BackendKind, Key: r.Key, SHA256: r.SHA256, Size: r.Size, TemporaryKey: &temporary, Outcome: "registered"}
+		NamespaceID: r.NamespaceID, IncarnationID: r.IncarnationID, BackendKind: r.BackendKind, StorageBinding: r.StorageBinding, Key: r.Key, SHA256: r.SHA256, Size: r.Size, TemporaryKey: &temporary, Outcome: "registered"}
 	repository.writes[o.ID], repository.lastID = o, o.ID
 	return o, nil
 }
@@ -181,4 +184,185 @@ func newTestLocalBlobStore(t *testing.T, root string, hooks localBlobHooks) *loc
 		t.Fatal(err)
 	}
 	return &localBlobTestStore{LocalBlobStore: store, writer: writer, repository: repository}
+}
+
+// routeTestBlob is the invoked in-memory provider; its random identity belongs
+// to that provider instance and changes only when the test rotates it.
+type routeTestBlob struct {
+	route            [32]byte
+	checks           int
+	failCheck        int
+	rotateCheck      int
+	rotateAfterWrite bool
+	writes           int
+}
+
+func (b *routeTestBlob) GCStorageIdentity() ([32]byte, error) {
+	b.checks++
+	if b.checks == b.rotateCheck {
+		_, _ = rand.Read(b.route[:])
+	}
+	if b.checks == b.failCheck {
+		return [32]byte{}, ErrInvalidBlobStoreConfig
+	}
+	return b.route, nil
+}
+func (b *routeTestBlob) Put(_ context.Context, r PutRequest, in io.Reader) (ObjectVersion, error) {
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return ObjectVersion{}, err
+	}
+	b.writes++
+	result := ObjectVersion{Key: "sha256/" + hexDigest(r.ExpectedSHA256), VersionID: "real-return-version", SHA256: sha256.Sum256(data), SizeBytes: int64(len(data))}
+	if b.rotateAfterWrite {
+		_, _ = rand.Read(b.route[:])
+	}
+	return result, nil
+}
+func (b *routeTestBlob) Open(context.Context, ObjectVersion, ByteRange) (io.ReadCloser, error) {
+	return nil, ErrBlobNotFound
+}
+func (b *routeTestBlob) Stat(context.Context, ObjectVersion) (ObjectInfo, error) {
+	return ObjectInfo{}, ErrBlobNotFound
+}
+func (b *routeTestBlob) Delete(context.Context, ObjectVersion) (DeletionReceipt, error) {
+	return DeletionReceipt{}, ErrBlobNotFound
+}
+func (b *routeTestBlob) ResolveTemporaryVersion(context.Context, string) (TemporaryObjectVersion, error) {
+	return TemporaryObjectVersion{}, ErrBlobNotFound
+}
+func (b *routeTestBlob) OpenTemporaryVersion(context.Context, TemporaryObjectReadRequest) (io.ReadCloser, error) {
+	return nil, ErrBlobNotFound
+}
+func (b *routeTestBlob) DeleteTemporaryVersion(context.Context, TemporaryObjectVersion) error {
+	return nil
+}
+func (b *routeTestBlob) PublishTemporaryVersion(ctx context.Context, r TemporaryObjectPublishRequest) (ObjectVersion, error) {
+	return b.Put(ctx, PutRequest{ExpectedSHA256: r.ExpectedSHA256, ExpectedSizeBytes: r.ExpectedSizeBytes}, strings.NewReader("content"))
+}
+
+type routeTestNoIdentity struct{ BlobStore }
+
+type routeTestRepository struct {
+	*localBlobTestRepository
+	loseRegister bool
+	loseReturn   bool
+}
+
+func (r *routeTestRepository) RegisterWrite(ctx context.Context, request WriteRegistration) (WriteObligation, error) {
+	o, err := r.localBlobTestRepository.RegisterWrite(ctx, request)
+	if err == nil && r.loseRegister {
+		r.loseRegister = false
+		return WriteObligation{}, errors.New("registration response lost")
+	}
+	return o, err
+}
+func (r *routeTestRepository) RecordWriteReturn(ctx context.Context, request WriteReturn) (WriteObligation, error) {
+	o, err := r.localBlobTestRepository.RecordWriteReturn(ctx, request)
+	if err == nil && r.loseReturn {
+		r.loseReturn = false
+		return WriteObligation{}, errors.New("return response lost")
+	}
+	return o, err
+}
+
+func TestManagedBlobWriterSourceBinding(t *testing.T) {
+	newFixture := func(t *testing.T) (*routeTestBlob, *routeTestRepository) {
+		t.Helper()
+		blob := &routeTestBlob{}
+		if _, err := rand.Read(blob.route[:]); err != nil {
+			t.Fatal(err)
+		}
+		return blob, &routeTestRepository{localBlobTestRepository: &localBlobTestRepository{writes: make(map[string]WriteObligation)}}
+	}
+	request := WriteRequest{Content: PutRequest{ExpectedSHA256: sha256.Sum256([]byte("content")), ExpectedSizeBytes: 7}, ProjectID: "default", Origin: WriteOrigin{Kind: "import_archive", ID: "rij_fixture", Generation: 1}}
+	t.Run("capability_and_typed_nil", func(t *testing.T) {
+		blob, repo := newFixture(t)
+		if _, err := NewManagedBlobWriter(routeTestNoIdentity{blob}, BackendKindS3, repo); !errors.Is(err, ErrInvalidBlobStoreConfig) {
+			t.Fatalf("missing identity: %v", err)
+		}
+		var nilBlob *routeTestBlob
+		if _, err := NewManagedBlobWriter(nilBlob, BackendKindS3, repo); !errors.Is(err, ErrInvalidBlobStoreConfig) {
+			t.Fatalf("typed nil: %v", err)
+		}
+	})
+	for _, tc := range []struct {
+		name        string
+		fail        int
+		rotate      bool
+		lose        bool
+		wantWrites  int
+		wantOutcome string
+	}{
+		{"before_registration", 2, false, false, 0, ""},
+		{"before_dispatch", 3, false, false, 0, "registered"},
+		{"before_io", 4, false, false, 0, "registered"},
+		{"after_io", 0, true, false, 1, "remote_unknown"},
+		{"commit_response_loss", 0, false, true, 1, "materialized"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blob, repo := newFixture(t)
+			blob.failCheck, blob.rotateAfterWrite = tc.fail, tc.rotate
+			if tc.lose {
+				repo.loseRegister, repo.loseReturn = true, true
+				repo.dispatchError, repo.dispatchCommitted = true, true
+			}
+			writer, err := NewManagedBlobWriter(blob, BackendKindS3, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			written, err := writer.Put(context.Background(), request, strings.NewReader("content"))
+			if tc.lose && err != nil {
+				t.Fatal(err)
+			}
+			if !tc.lose && err == nil {
+				t.Fatal("expected route failure")
+			}
+			if blob.writes != tc.wantWrites {
+				t.Fatalf("writes=%d", blob.writes)
+			}
+			if !tc.lose && written.ObligationID != "" {
+				t.Fatal("reported success after route failure")
+			}
+			if tc.wantOutcome != "" {
+				o := repo.writes[repo.lastID]
+				if o.Outcome != tc.wantOutcome || o.StorageBinding == nil {
+					t.Fatalf("obligation=%+v", o)
+				}
+				if tc.rotate && (o.Version == nil || *o.Version != "real-return-version") {
+					t.Fatalf("lost returned version: %+v", o)
+				}
+			}
+		})
+	}
+	t.Run("route_changed_before_dispatch", func(t *testing.T) {
+		blob, repo := newFixture(t)
+		blob.rotateCheck = 3
+		writer, err := NewManagedBlobWriter(blob, BackendKindS3, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		written, err := writer.Put(context.Background(), request, strings.NewReader("content"))
+		if err == nil || written.ObligationID != "" || blob.writes != 0 || repo.writes[repo.lastID].DispatchedAt != nil {
+			t.Fatalf("route drift dispatch = %+v, %v", written, err)
+		}
+	})
+	t.Run("temporary_promotion_changed_route", func(t *testing.T) {
+		blob, repo := newFixture(t)
+		blob.rotateAfterWrite = true
+		writer, err := NewManagedBlobWriter(blob, BackendKindS3, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		promote := request
+		promote.Content.TemporaryKey = "temporary/source"
+		written, err := writer.PublishTemporaryVersion(context.Background(), promote, TemporaryObjectVersion{Key: promote.Content.TemporaryKey, VersionID: "source-version"})
+		if err == nil || written.ObligationID != "" || blob.writes != 1 {
+			t.Fatalf("promotion = %+v, %v", written, err)
+		}
+		o := repo.writes[repo.lastID]
+		if o.Outcome != "remote_unknown" || o.Version == nil || *o.Version != "real-return-version" {
+			t.Fatalf("promotion return = %+v", o)
+		}
+	})
 }

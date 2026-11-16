@@ -2,10 +2,8 @@ package store
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -86,6 +84,14 @@ func requireCollaborationDeletionFunctions(ctx context.Context, tx pgx.Tx) error
 	if err := tx.QueryRow(ctx, `
 		select count(*)::bigint
 		from (values
+		  ('public.record_collaboration_purge_v1(bytea)',
+		   array['removed_surface_digest','receipt_digest','removed_row_count','verified_absent_at'],
+		   array['bytea'::regtype::oid,'bytea'::regtype::oid,'bigint'::regtype::oid,'timestamptz'::regtype::oid]),
+		  ('public.record_collaboration_purge_verify_v1(bytea)',
+		   array['removed_surface_digest','receipt_digest','removed_row_count','verified_absent_at'],
+		   array['bytea'::regtype::oid,'bytea'::regtype::oid,'bigint'::regtype::oid,'timestamptz'::regtype::oid]),
+		  ('public.record_outbox_drain_v1(bytea)',
+		   array['drained_count','remaining'], array['bigint'::regtype::oid,'boolean'::regtype::oid]),
 		  ('public.record_collaboration_purge_v2(bytea)',
 		   array['removed_surface_digest','receipt_digest','removed_row_count','verified_absent_at'],
 		   array['bytea'::regtype::oid,'bytea'::regtype::oid,'bigint'::regtype::oid,'timestamptz'::regtype::oid]),
@@ -299,7 +305,7 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordCollaboration(
 		var err error
 		receipt, err = runClientComparisonPurgeFunction(ctx, transaction.tx, `
 			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_collaboration_purge_v2($1)`, recorddeletion.AdapterNameRecordCollaboration,
+			from public.record_collaboration_purge_v2($1)`, `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_collaboration_purge_v1($1)`, recorddeletion.AdapterNameRecordCollaboration,
 			command.Operation, command.OwnerClaim, command.SurfaceDigest)
 		return err
 	})
@@ -315,26 +321,20 @@ func (repository *PostgresRecordDeletionRepository) drainCollaborationOutbox(
 	ctx context.Context,
 	command recordcollaboration.DeletionCommand,
 ) error {
-	expires := command.OwnerClaim.Owner.ExpiresAt.UTC()
-	expiresText := expires.Format(time.RFC3339Nano)
-	parsed, err := time.Parse(time.RFC3339Nano, expiresText)
-	if err != nil || !parsed.Equal(expires) || expires.Nanosecond()%1000 != 0 {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	encoded, err := encodeRecordPurgeCommand(clientComparisonPurgeEnvelope{
-		OperationID: command.Operation.OperationID, RecordID: command.Operation.Object.ObjectID,
-		ReservationID: command.Operation.ReservationID, FenceEpoch: uint64(command.Operation.FenceEpoch),
-		OwnerID: command.OwnerClaim.Owner.OwnerID, OwnerGeneration: command.OwnerClaim.Owner.Generation,
-		OwnerExpiresAt: expiresText, SurfaceDigest: hex.EncodeToString(command.SurfaceDigest[:]),
-	})
-	if err != nil {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
 	for {
 		var drained int64
 		var remaining bool
 		err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-			if err := transaction.tx.QueryRow(ctx, `select drained_count, remaining from public.record_outbox_drain_v2($1)`, encoded).Scan(&drained, &remaining); err != nil {
+			body, err := deletionAdapterEnvelope(ctx, transaction.tx,
+				recorddeletion.PurgeTarget{Operation: command.Operation, OwnerClaim: command.OwnerClaim}, command.SurfaceDigest)
+			if err != nil {
+				return err
+			}
+			query := `select drained_count, remaining from public.record_outbox_drain_v2($1)`
+			if command.Operation.ContractVersion == recorddeletion.DeletionContractV1 {
+				query = `select drained_count, remaining from public.record_outbox_drain_v1($1)`
+			}
+			if err := transaction.tx.QueryRow(ctx, query, body).Scan(&drained, &remaining); err != nil {
 				return fmt.Errorf("drain collaboration outbox: %w", err)
 			}
 			if drained < 0 || drained > 100 || (remaining && drained == 0) {
@@ -367,7 +367,7 @@ func (repository *PostgresRecordDeletionRepository) VerifyRecordCollaborationPur
 	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		actual, err := runClientComparisonPurgeFunction(ctx, transaction.tx, `
 			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_collaboration_purge_verify_v2($1)`, recorddeletion.AdapterNameRecordCollaboration,
+			from public.record_collaboration_purge_verify_v2($1)`, `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_collaboration_purge_verify_v1($1)`, recorddeletion.AdapterNameRecordCollaboration,
 			command.Operation, command.OwnerClaim, command.SurfaceDigest)
 		if err != nil {
 			return err

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -31,12 +32,15 @@ const (
 )
 
 type PostgresRecordDeletionRepository struct {
-	platform           *PostgresRecordPlatformRepository
-	pool               *pgxpool.Pool
-	portabilityCleanup atomic.Pointer[attachments.LocalCleanupCoordinator]
-	newReservationID   func() (string, error)
-	newOperationID     func() (string, error)
-	newAuditID         func() (string, error)
+	platform                *PostgresRecordPlatformRepository
+	pool                    *pgxpool.Pool
+	portabilityCleanup      atomic.Pointer[attachments.LocalCleanupCoordinator]
+	portabilityBlobMu       sync.Mutex
+	portabilityBlob         attachments.BlobGCDeleter
+	portabilityBlobIdentity [sha256.Size]byte
+	newReservationID        func() (string, error)
+	newOperationID          func() (string, error)
+	newAuditID              func() (string, error)
 }
 
 var (
@@ -731,45 +735,6 @@ func (row persistedRecordDeletionWork) claim(owner recordplatform.OwnerLease) (r
 	return claim, nil
 }
 
-const recordDeletionPermanentFenceAppliedSQL = `
-	select exists (
-		select 1
-		from public.record_purge_operations as operation
-		join public.deletion_reservations as reservation
-		  on reservation.reservation_id = operation.reservation_id
-		 and reservation.project_id = operation.project_id
-		where operation.operation_id = $1
-		  and operation.operation_state = $2
-		  and operation.ledger_entry_type = 'delete_commit'
-		  and operation.ledger_sequence = $3
-		  and operation.ledger_entry_hash = $4
-		  and operation.witness_proof_digest is not null
-		  and operation.owner_id = $5
-		  and operation.owner_generation = $6
-		  and operation.owner_expires_at = $7
-		  and reservation.project_id = $8
-		  and reservation.object_kind = $9
-		  and reservation.object_id = $10
-		  and reservation.fence_epoch = $11
-		  and reservation.state = 'committed'
-		  and not exists (
-			select 1
-			from public.deletion_fence_leases as fence
-			where fence.project_id = reservation.project_id
-			  and fence.object_kind = reservation.object_kind
-			  and fence.object_id = reservation.object_id
-			  and fence.expires_at > transaction_timestamp()
-		  )
-		  and not exists (
-			select 1
-			from public.object_content_leases as content_lease
-			where content_lease.project_id = reservation.project_id
-			  and content_lease.object_kind = reservation.object_kind
-			  and content_lease.object_id = reservation.object_id
-			  and content_lease.expires_at > transaction_timestamp()
-		  )
-	) as permanent_fence_applied`
-
 func (repository *PostgresRecordDeletionRepository) MarkDeleteCommitUnknown(ctx context.Context, claim recorddeletion.ClaimedDeletionWork) error {
 	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkAppendDeleteCommit {
 		return ErrRecordDeletionStoreUnavailable
@@ -905,25 +870,20 @@ func (repository *PostgresRecordDeletionRepository) PermanentFenceApplied(
 	ctx context.Context,
 	claim recorddeletion.ClaimedDeletionWork,
 ) (bool, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkPropagatePermanentFence {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkPropagatePermanentFence {
+		return false, ErrRecordDeletionStoreUnavailable
+	}
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return false, err
+	}
+	body, err := encodeRecordPurgeCommand(ledger)
+	if err != nil {
 		return false, ErrRecordDeletionStoreUnavailable
 	}
 	var ready bool
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := transaction.tx.QueryRow(ctx, recordDeletionPermanentFenceAppliedSQL,
-			claim.Operation.OperationID,
-			recorddeletion.DeletionStateFencePropagating,
-			claim.Operation.LedgerSequence,
-			claim.Operation.LedgerEntryHash[:],
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-			claim.Operation.Object.ProjectID,
-			claim.Operation.Object.ObjectKind,
-			claim.Operation.Object.ObjectID,
-			claim.Operation.FenceEpoch,
-		).Scan(&ready); err != nil {
+	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := transaction.tx.QueryRow(ctx, `select public.record_deletion_permanent_fence_applied_v1($1)`, body).Scan(&ready); err != nil {
 			return fmt.Errorf("read permanent deletion fence propagation: %w", err)
 		}
 		return nil

@@ -10,8 +10,8 @@
 
 |工作包|当前范围和下一动作|关闭条件与依赖|
 |---|---|---|
-|N：source/native|历史 selection144/build148 的 exact 失败，当前 runner 身份已漂移。先阅读已有 receipt、serial、type7 与控制诊断，定位 postgres-uid removal-settlement 缺口；截断或 unknown scan limit 不能推断原因。下一候选先新 browser prepare，再 source build，再最多一次 exact，失败也 verify。|build 未通过不运行 exact；exact 和独立 verify 均真实通过后才运行 observer-capability、bpf-authorization 和剩余 source。原锁下串行，最终 51 PASS、0 FAIL、0 NOT_RUN，含 33 baseline、13 fault、18 terminal/reader 输入及四 owner、四 launcher 反例。历史 selection 可读不等于当前 build gate 通过。|
-|P：独立产品和 M1|ordinary/prepared V2、三版本 catalog、local/S3-race、issuer/九 adapter、client/comparison 浏览器可与 N、K 调查并行。|历史 PASS 与当前候选分列；source-bound issuer 和全 writer 接受仍等真实 source 准入。M1 为 G2-01/05/06 联合验收，再依次 G2-02→03→04；最终同指纹重验。|
+|N：source/native|本阶段取证尚未实现、未接受，prepare/build/exact/verify 均 NOT_RUN。历史 selection144/build148 exact 失败，当前 runner 身份已漂移。先闭合并交付 P，再实现已批准的 ABI V5、固定容量 settlement evidence 与失败 readback；定向验证及独立审查后，新 browser prepare→source build→最多一次 exact，失败也 verify。|build 未通过不运行 exact；单次取证有效可为 INCONCLUSIVE，但不等于 scenario PASS。verify 是全 51 场景聚合，应单独核 exact case 与 evidence，其他 NOT_RUN 如实保留。完整 source 门禁继续要求 51 PASS、0 FAIL、0 NOT_RUN；后续矩阵另行续接，历史 selection 可读不等于当前 build gate 通过。|
+|P：独立产品和 M1|受限历史 V1 fence、client/outbox 与完整九 adapter continuation 已实现；portability 以 immutable inventory、source provenance、shared handoff 和 exact physical receipt 闭环，ordinary/V2 行为保留。`final-r17` 本地接受：focused 178/178、lane03 668/668、local 584/584、真实 MinIO S3 818/818，均 0 FAIL/0 SKIP；完整 migrate 包、docs、vet 通过。独立 GPT 完成全部 P 改动的发现性审查及定向修复复核，P-GPT-001～006 与相关集成发现已关闭；最后复核核对 45 个文件指纹一致。|以上是本候选本地接受与独立审查，不代表生产或完整 G2 接受。historical NULL 不回填，pending handoff 不称 absence，worker 无原表权限。阶段交付仍须同候选 commit/pre-push hooks 与 PR #635 required CI，通过后才启动 N；M1/source-bound issuer、全 writer 接受、K、J 与真实 HTTP smoke 独立待验。|
 |K：正向物理恢复|独立调查设计输入：可信 stopped-writer/restore-unit producer、同 generation APP/W2、旧凭据及 namespace 撤销、W2 inventory/prepare、真实 filesystem identity/handoff、root-independent 义务、seal→activation producer/证据与失败闭合。|现无完整 source recovery coordinator/CLI。具体协议、真实 CLI envelope 和正向 driver 必须先形成决策完整的后续原生 Plan 并获批准。通用 restore 或 local/S3 `--all` 不能关闭此项；见 [集成恢复合同](../spec/contracts/records/integration-recovery.md) 和 [Compose authority](../spec/contracts/platform/compose-authority.md)。|
 |J：联合接受|N、P、K 闭合后冻结完整源码、产品、工具链、配置和输入，冻结后不并发写产品。|同 APP/RID、多 generation、C81 fresh/dual carriers/systemd、三 normal/recovery、source handoff/V1 reconcile、birth/namespace/跨 RID、root-absent/late I/O/quota-once 和 D1–D7 均须真实闭合；OLD 未解差异和未知远端 provider 义务各有独立关闭条件。|
 |D：阶段交付|完整候选经过适用门禁与独立审查后，可提交、推送并建立或更新 draft PR，持续 required CI。|区分源码迁移与未完成的产品验收；完整 index 一起交付，不隐藏候选。阶段提交不等于 G2 READY；不合并、发布、部署或开放永久删除 HTTP。|
@@ -54,7 +54,7 @@ source、产品和恢复的独立调查可以并行；M1 的合法 source 签发
 
 ## 后续执行：N source/native
 
-以下是后续命令，本轮源码收敛不执行 VM、browser prepare 或 source build。`R` 指向保留的历史运行数据，代码入口使用维护树。先检查已有证据；一次候选仅在 build gate 通过后运行一次 exact，exact 非零仍运行 verify，失败停止后续 source。原锁必须贯穿 source build/run/verify/negative 的串行操作。
+本阶段按 P→N 两次交付执行；P 的九 adapter continuation 缺口未闭合前，N 实现和 VM 均未启动。`R` 指向保留的历史运行数据，代码入口使用维护树。P 阶段完成后，N 按已批准的有界取证合同实施，验证、独立审查和 build gate 均通过后仅运行一次 exact，exact 非零仍运行 verify，失败停止后续 source。每个命令自己取得原 `source-vm.lock`，不在外层先持同一非重入锁。
 
 维护树的轻量检查是 `make test-g2-layout`（随 `make test-ci-tools` 运行，不需要历史资产）。依赖历史 R/P0 数据的 source 单元测试在 `scripts/g2/source` 下运行 `python3 -B -m unittest -v source_protocol_test source_copy_test source_resource_test source_retirement_test`；其中 `test_go_early_fixture` 需先用 `go test -c ./source_supervisor/bpf-authority` 生成测试二进制，并以 `G2_EARLY_RESULT_TEST_BINARY` 指向它，缺失即错误，不能以 skip 放行。
 
@@ -64,7 +64,7 @@ python3 -B scripts/g2/source/browser_negative.py prepare --run-dir "$R"
 python3 -B scripts/g2/source/source_host.py build --run-dir "$R"
 ```
 
-确认 prepare 和 build 均 PASS 后，执行 exact；即使失败也必须执行 verify，并保存两者退出状态。任一非零、结果非 PASS 或必要 native 证据缺失时停在此处。
+确认 prepare 和 build 均实际 PASS 且 build gate 通过后，执行唯一一次 exact；即使失败也必须执行 verify，并保存两者退出状态。verify 为全 51 场景聚合，新 selection 只执行 exact 时，其余 NOT_RUN 会令 aggregate NOT_READY/exit1；必须独立读取 report 中 `realm-negative/bpf-broker-kill` 的 case 状态与取证质量，不能将 aggregate 非零直接当作 exact 失败，也不能将有效 INCONCLUSIVE 取证当作 case PASS。
 
 ```bash
 exact_status=0
@@ -74,7 +74,7 @@ python3 -B scripts/g2/source/source_host.py verify --run-dir "$R" || verify_stat
 printf 'exact=%s verify=%s\n' "$exact_status" "$verify_status"
 ```
 
-仅 exact、独立 verify 和必要 native 证据均通过后，逐步执行以下命令，每一步失败停止后续步骤：
+以下 observer-capability、bpf-authorization 和后续矩阵不在本阶段一次 exact 授权内。只有 exact case 独立 PASS、必要 native 证据通过并取得后续续接授权后，才逐步执行；每一步失败停止后续步骤：
 
 ```bash
 python3 -B scripts/g2/source/source_host.py run --case realm-negative --scenario observer-capability --run-dir "$R"

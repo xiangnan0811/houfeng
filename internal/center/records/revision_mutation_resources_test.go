@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,15 @@ func TestRevisionMutationWriteObligationObservations(t *testing.T) {
 	changed.TemporaryInode = 9
 	if _, err := CombineRevisionMutationResources(RevisionMutationResources{WriteObligations: []RevisionMutationWriteObligation{first, changed}}); !errors.Is(err, ErrInvalidRevisionMutationResources) {
 		t.Fatalf("changed temporary target was accepted: %v", err)
+	}
+	changed = first
+	changed.StorageBinding = strings.Repeat("ab", 32)
+	if _, err := CombineRevisionMutationResources(RevisionMutationResources{WriteObligations: []RevisionMutationWriteObligation{first, changed}}); !errors.Is(err, ErrInvalidRevisionMutationResources) {
+		t.Fatalf("changed source storage binding was accepted: %v", err)
+	}
+	changed.StorageBinding = strings.Repeat("AB", 32)
+	if _, err := CombineRevisionMutationResources(RevisionMutationResources{WriteObligations: []RevisionMutationWriteObligation{changed}}); !errors.Is(err, ErrInvalidRevisionMutationResources) {
+		t.Fatalf("noncanonical source storage binding was accepted: %v", err)
 	}
 }
 

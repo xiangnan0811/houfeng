@@ -540,6 +540,13 @@ func TestPublishComposeAuthorityDeploymentIDCreatesOnlyPublicDerivedCopy(t *test
 	if err := os.Mkdir(publicDirectory, 0o755); err != nil {
 		t.Fatalf("create Center public directory: %v", err)
 	}
+	if err := os.Chmod(publicDirectory, 0o755); err != nil {
+		t.Fatalf("set Center public directory mode: %v", err)
+	}
+	publicInfo, err := os.Lstat(publicDirectory)
+	if err != nil || !publicInfo.IsDir() || publicInfo.Mode().Perm() != 0o755 {
+		t.Fatalf("Center public directory fixture = %v, error = %v; want directory 0755", publicInfo, err)
+	}
 	destination := filepath.Join(publicDirectory, "deployment-id")
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := publishComposeAuthorityDeploymentID(root, state, destination); err != nil {

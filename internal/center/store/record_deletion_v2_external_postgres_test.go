@@ -8,6 +8,18 @@ import (
 	"houfeng/internal/center/store"
 )
 
+func TestPostgresIntegrationRecordDeletionDeleteCommitPurgesCoreAndDeliveryEpoch(t *testing.T) {
+	store.RunV1DeletionDeleteCommit(t, func(repository *store.PostgresRecordDeletionRepository) (recorddeletion.Adapter, error) {
+		return portability.NewDeletionAdapter(repository)
+	})
+}
+
+func TestPostgresIntegrationRecordDeletionV1AdapterContinuation(t *testing.T) {
+	store.RunV1AdapterContinuation(t, func(repository *store.PostgresRecordDeletionRepository) (recorddeletion.Adapter, error) {
+		return portability.NewDeletionAdapter(repository)
+	})
+}
+
 func TestPostgresIntegrationRecordDeletionV2FinishResponsibilities(t *testing.T) {
 	store.RunV2FinishResponsibilities(t, func(repository *store.PostgresRecordDeletionRepository) (recorddeletion.Adapter, error) {
 		return portability.NewDeletionAdapter(repository)

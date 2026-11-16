@@ -20,7 +20,7 @@ type MarkdownClientPurgeCommand struct {
 
 func (command MarkdownClientPurgeCommand) Validate() error {
 	target := PurgeTarget{Operation: command.Operation, OwnerClaim: command.OwnerClaim}
-	if command.Operation.ContractVersion != DeletionContractV2 || target.Validate() != nil ||
+	if (command.Operation.ContractVersion != DeletionContractV1 && command.Operation.ContractVersion != DeletionContractV2) || target.Validate() != nil ||
 		command.SurfaceDigest != RecordMarkdownClientSurfaceDigest() {
 		return ErrInvalidMarkdownClientAdapter
 	}
@@ -92,7 +92,7 @@ func (adapter *MarkdownClientAdapter) PreviewDeletion(ctx context.Context, targe
 
 func (adapter *MarkdownClientAdapter) PurgeDeletion(ctx context.Context, target PurgeTarget) (AdapterPurgeReceipt, error) {
 	if ctx == nil || adapter == nil || nilDeletionServiceDependency(adapter.store) ||
-		target.Validate() != nil || target.Operation.ContractVersion != DeletionContractV2 {
+		target.Validate() != nil {
 		return AdapterPurgeReceipt{}, ErrInvalidMarkdownClientAdapter
 	}
 	command := MarkdownClientPurgeCommand{
@@ -113,7 +113,7 @@ func (adapter *MarkdownClientAdapter) PurgeDeletion(ctx context.Context, target 
 
 func (adapter *MarkdownClientAdapter) VerifyDeletion(ctx context.Context, target PurgeTarget, receipt AdapterPurgeReceipt) error {
 	if ctx == nil || adapter == nil || nilDeletionServiceDependency(adapter.store) ||
-		target.Validate() != nil || target.Operation.ContractVersion != DeletionContractV2 {
+		target.Validate() != nil {
 		return ErrInvalidMarkdownClientAdapter
 	}
 	if err := receipt.validate(target, adapter.descriptor); err != nil {

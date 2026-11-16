@@ -39,6 +39,197 @@ C81 保留 primary-subject validator 的同一 identity、函数体与两个 AFT
 
 通用 serving lease 的 `record_serving_deletion_fence_lock(bytea)` 仅授 direct runtime EXEC，输入精确为 `{project_id,object_kind,object_id}`，沿原 ObjectRef 校验。命令要求 READ COMMITTED 与 applicable source admission，按 epoch→existing fence 行锁顺序执行，取得全部锁后用 fresh DB clock 判断 live；不取 comparison advisory fence、不恢复 runtime 原始 UPDATE。无 epoch 拒绝；无 fence 返回零行，由原 Go helper 保持 generation0/live=false 的分类。reservation fencing、content lease 与 serving acquire/renew 共用该受限入口，保留原 owner/expiry/token/revocation 语义。
 
+V1 worker 的永久 fence 传播检查通过 worker-only `public.record_deletion_permanent_fence_applied_v1(bytea)` 继续既有历史 operation，不重新开放 V1 issuer。输入为原十字段 continuation envelope：`operation_id,reservation_id,project_id,record_id,fence_epoch,owner_id,owner_generation,owner_expires_at,ledger_sequence,ledger_entry_hash`。同一 admitted READ COMMITTED transaction 内复用 direct LOGIN、worker/source admission、原锁序、exact owner tuple 和 independently verified entry；operation 必须为 `fence_propagating`、reservation 为 `committed`，persisted 与 verified entry 的 `delete_commit` 类型、sequence/hash/witness 全等。身份、状态、ledger 或 stale owner 以 `42501` 拒绝；只有同 object 的 live deletion fence 或 content lease（沿用 `transaction_timestamp()` 判断）使结果为 `false,nil`。取得全部锁后仍须以 fresh `clock_timestamp()` 重核 owner expiry/tuple，才返回 bool。`false` 表示继续等待，不能进入 retry-required；`true` 允许原 worker 继续推进 read-fenced。检查不修改 operation、reservation、epoch 或 audit，不授予 worker 原表 SELECT，也不借用要求 online-purging 的十二字段 adapter authority。
+
+V1 continuation 回归从预置历史 reservation/operation 和真实历史 `fenced` audit 开始，以独立 LOGIN worker 及真实独立 ledger/witness 校验续接；不声称已关闭的 V1 issuer 仍可创建这些事实。core/delivery-epoch 终态须由完整九 adapter registry 的实际 receipts 与 aggregate 证明；缺任一必要 receipt 的直接 CompleteOnlinePurge 必须拒绝且保留 owner/epoch。not-committed 的 absence-proof test double 只证明应用恢复边界，不能替代真实 source absence。V2 issuer 分别证明旧 preview 在真实 revision 漂移后 pre-write 拒绝且零持久 residue，以及真实 issue 已在原事务写入后因 Commit sentinel 整体回滚、正常 outcome readback 无 operation，同一合法请求恢复后仍可成功。
+
+历史 V1 的 markdown、comparison、collaboration 与 portability 使用独立 worker-only
+continuation 命令，authority 始终为 caller 原十二字段 legacy adapter envelope。
+`legacy_adapter_lock` 的闭合 surface 集按九 adapter digest 校验，保留 direct LOGIN、
+READ COMMITTED、source admission、verified delete_commit、committed reservation、锁序与
+fresh exact-owner 检查，不要求或制造 V2 gate。十字段 fence bool 只读，不授权 adapter purge。
+client metadata 与 outbox 共享既有效果算法，但每处 owner 重核按版本独立执行；V1 首次真实
+metadata purge 原子发布 exact browser event，verify 缺 event 不补写。root-independent
+event/target/ack 和真实 start/fact/completion/handoff 的边界见[协作通知合同](collaboration-notifications.md)。
+
+V1 portability 在任何逻辑身份消失前，先以四张 immutable 控制表保存 preparation、物理
+targets、每条 export/import artifact 的原始字段，以及每条相关 write obligation 的完整
+`to_jsonb` snapshot。发现范围包括 obligation-only、root-independent、record target 关联和
+共享 import plans/jobs/mappings；不能仅从 artifact 枚举 key。owners 固定为 export_jobs、
+import_jobs、import_plans、mappings、origins 五组按 C 字节序排序的原 tuple。
+target 按 operation/backend/key/exact version/namespace/incarnation/storage binding 合并，
+原始非 canonical key、NULL 和冲突值均保留；hash/size 冲突不选择任一原值充当已知身份。
+inventory digest 使用 `HOUFENG-PORTABILITY-INVENTORY-V1` framing，绑定 operation、record、
+surface、ledger domain/sequence/hash/witness、owners、removed_rows、pdf_pending 和有序
+artifact/obligation/target immutable 列（含原始物理 created_at），排除 mutable claim、prepared_at
+和 receipt；每次重验从保存列独立重算，不能从已删除的 source 重建或重写 snapshot。
+frame 中 artifact 的 created_at 与 target 的 blob_created_at 统一使用
+`to_jsonb(value AT TIME ZONE 'UTC')`：无时区的 ISO timestamp scalar 在本合同中明确表示 UTC，
+NULL 保持 NULL；预计算和保存列重算采用同一编码，不受 session TimeZone 影响。
+完整 obligation snapshot 按捕获的 JSON 原值参与 digest，不重写其中 timestamp 字符串。
+历史 source 的非有限 timestamp 也按原值保存，相关 target 为 unresolved；不替换为当前时间或
+NULL，不删 source 或建可 dispatch task。物理 eligibility、claim 与 completion 仍要求有限时间。
+
+`record_portability_purge_prepare_v1(bytea)` 的外层精确为 authority、storage_binding 两键。
+它锁定完整发现范围并复读 route/identity，在同一事务持久 inventory、移交义务、写 origin
+tombstone、删除本 record 的逻辑关系并注册 exact local tasks；预先计算和实际 removed rows
+必须相同。unknown identity 或 PDF workspace 只保存完整 inventory，removed_rows 为零，
+不删 source、不建可 dispatch task。projection 精确包含 inventory_digest、unresolved_count、
+required_backends、local_targets、s3_targets；fresh known prepare 在 COMMIT 前由 Go 核所需
+backend 与 local binding，缺配置整体 rollback。空 inventory 是完整正常路径；unknown 和
+replay 不以当前配置回填历史身份。unknown 永久 pending，返回 `ErrDeletionSafetyUnavailable`，
+不发 I/O、不签终态 receipt，也不自动 adopt、清空或替换 manifest。
+prepare COMMIT 结果未知时，以原输入和 caller owner 重读既存 immutable projection，核同一
+inventory 与所需配置后才继续；不重做 logical effects，不把未确认 candidate 当作物理许可。
+已有 preparation 只重验持久 inventory、handoff 与 remaining absence，不依赖已删除 source
+重新发现。未知结果、重启或 takeover 均不能隐式采用新 owner、补 identity 或重复结算 quota。
+只读回查入口为 worker-only `record_portability_purge_prepare_resolve_v1(bytea)`，输入仍精确为
+authority/storage_binding，返回同一五键 projection；继续使用原 legacy authority 与锁序。
+缺 preparation、manifest/handoff/binding 不符即拒绝，不能转调 fresh prepare、建 task、刷新
+claim/dispatch 或补 receipt/event；未确认 candidate 仍不构成 I/O 许可。
+
+target disposition 仅 local、s3、retained_shared、unresolved。local 必须有真实已准入的
+namespace/incarnation、obligation/provenance 与原 `local-v2-<obligation_id>` 身份；关闭但未
+materialize 的 obligation-only target 仍由 bind_final 独立证明存在/不存在，不预判 absence。
+legacy local-v1、NULL namespace、缺 obligation、冲突 expected final version 均 unresolved。
+S3 必须是 canonical SHA256 key、真实非空且非 `null` 的 exact version、匹配 digest/size，
+相关 writer/remote 责任已结清，并绑定可信 APP 配置的 endpoint+bucket routing fingerprint。
+缺 version、非 canonical、remote_unknown 或配置连续性/能力 closure 不足均 unresolved；
+routing fingerprint 只证明该配置路由连续性，不证明 bucket incarnation 或未知 provider 的 D3。
+
+新的 S3 write obligation 在真实 configured `ManagedBlobWriter` 登记时保存 nullable immutable
+`storage_binding`，仅 S3 可为 32 bytes；local 保持 NULL。fresh S3 registration 的唯一精确
+JSON shape 必含 lowercase 64-hex binding，local 对应值为 null，65536-byte 预算不变。
+writer 从同一个实际 blob/temporary store 派生并固定 identity，在登记前、dispatch/I/O 前及
+返回后核验；request/HTTP caller 不提供该值。配置或能力漂移不得返回成功 WrittenBlob，
+真实已返回 version 作为事实保留，并沿原 S3 remote_unknown 责任记录不确定结果。
+registration replay、dispatch/return readback、完整 discovery/recheck 和 artifact publication
+均核原不可变 binding、writer/principal/origin/dispatch 与 exact physical tuple；artifact 通过
+原 obligation FK 保留来源，不在 publication、late return、handoff 或 cleanup 回填历史 NULL。
+SQL 认证受信 APP writer 与持久关联，不独立证明进程实际使用的网络客户端。
+
+known S3 inventory 的 binding 来自已登记 obligation；artifact 必须以该 obligation 的真实
+成功 dispatch/return 与 origin、key/version/hash/size 关联证明，obligation-only 同样可成立。
+prepare 当前 fingerprint 只与已持久 source binding 核兼容；可信 source 已知但配置缺失或
+不符时 fresh prepare 整体 rollback，source provenance 缺失则保存完整 unresolved inventory。
+已有 source NULL、remote_unknown、冲突返回或未结 writer 责任不因新字段成为 known；原
+ordinary/local GC wire、cleanup hash 和 V2 inventory framing 不变，不改历史 migration/库存。
+
+retained_shared 必须有真实仍存的外部 record/job/artifact/blob accounting owner 和 durable
+清理责任，证据为按 kind/id 排序的 `[kind,id,identity_digest]`，绑定完整物理 tuple 与 route。
+lease/pin 的时间、未结 writer 或两个删除 operation 相互引用不能代替 handoff。共享 import
+只移除本 record mapping，保留其他 owner 的 job/plans/artifacts。最后 owner 移除必须在同一
+事务先将同一 exact identity 交给 V1/V2 portability manifest、generic local/S3 GC task 或真实
+completed physical receipt；之后 replay 可核该 handoff/删除证明，不将 retention 称为 absence。
+reference guard 覆盖 portable jobs/artifacts/plans/mappings、attachments/upload parts/pins/blob
+objects、publication intents 与 write obligations/targets；沿同一 parent/job 锁序串行化新增引用
+和 prepare。writer 先提交则纳入 inventory，prepare 先提交则拒绝 exclusive exact target 的
+新 ownership；不阻挡 append-only provider 返回事实、其他 S3 version 或合法新 local incarnation。
+移除最后 retained owner 同样核 durable handoff，V1 自身逻辑删除只能消费 exact transaction-local
+portability effect scope 和 manifest membership，不能按 session_user 旁路。
+import archive 可先于 plan 注册，原 obligation 的 NULL plan_digest 不回填。target handoff
+须在真实 plan 删除前，验证 captured archive 的原 job、owners 中的 plan/job tuple 和锁定
+plan 的实际 digest 与 target 一致；snapshot 若已有 digest 也必须一致。不能用两处 NULL
+或已消失 plan 代替该证明。
+
+live owner 的完整 digest 在 BEFORE removal/ownership-changing UPDATE 时，以仍存的 OLD 与
+parent route 校验。源行消失后的 alternate handoff 改由 target 原始 captured obligation、
+`local-v2-<原 obligation_id>`、真实 sealed GC link、不可变 preparation/target 与原 command/
+receipt 证明同一物理责任；不能以相同 tuple/task ID 替代 source linkage，也不声称重建已消失
+attachment/upload-part 的 digest preimage。pending task 只证明后续清理责任，不能证明 absence。
+已验证 original source/provenance 的 closed local obligation 即使 actual version 为 NULL，
+identity matching 仍可使用其唯一 expected `local-v2-<原 obligation_id>`，以区分旧版本重放与
+同 key 的新来源；不回填 actual version 或预判 absence。未知、冲突、legacy 或未封闭来源
+不能据此补造 expected identity，继续按原保守匹配阻止替代授权。
+V1 local claim 只 link/seal 本次保存的 target membership。同 key 的未捕获历史仅在原始 source
+证明唯一 expected identity、该 identity 与本次 target 不同，且原 exact sealed task/receipt
+证明物理清理已完成时才可排除；actual version 为 NULL 的已完成来源也适用，NULL 保持原样。
+旧 final 曾存在时，task 的已绑定版本须等于该已认证身份；旧 final 缺失时，task 版本须为 NULL。
+这两个完成分支均不得用来源的 actual NULL 代替身份比较或跳过原物理完成证明。
+未完成、身份未知、冲突或完成证明不完整的未捕获来源仍拒绝 claim，不能挪入新 task。
+
+source guard 的 13 表集合之外，attachment_uploads、attachment_processor_jobs 与 record_drafts
+仅对影响上述 child proof 的 parent route UPDATE/DELETE 增加 dependency guard；lease/retry/
+普通 state/expiry bookkeeping 保持原义。guard 以 default-project quota 行作共同序列化锚，
+按 blob/upload/parent/source 锁序取得锁，再 fresh READ COMMITTED 重读；向更早序取锁必须
+NOWAIT，竞争以 `40001` 整体回滚。live 查询为 VOLATILE，不能只锁已发现 owner 来证明空集合。
+
+ownership removal 另有 DEFERRABLE INITIALLY DEFERRED AFTER DELETE/UPDATE constraint check，
+在执行时核最终 surviving owner 或完整 exact successor/receipt；条件在函数内判断，不用事件时
+求值的 WHEN。父行消失不能跳过旧 target，task/link/obligation/provenance 后续失效同样触发
+重验；GC task 与 sealed-link 的 INSERT/UPDATE/DELETE 也维护该责任连续性。批量或并发删除
+不能让两个已删除 owner 相互作 survivor。调用者提前 `SET CONSTRAINTS ... IMMEDIATE` 可因
+中间态不完整被安全拒绝，命令不代改 constraint mode，后续变动不能复用早先成功作为豁免。
+
+private portability GC barrier 在每个匹配的 V1、普通、V2 local authority、claim/complete、
+identity guard 与 attachment V1 S3 claim 授权边界独立核整个 manifest eligibility 和 digest。
+unknown namespace/version 对同 backend/key 保守匹配，不能把 NULL 当作不匹配；不同已知
+namespace/incarnation 或 S3 version 不混同。exclusive eligible target 只允许其注册 task，
+retained target 只允许真实 owner 或 durable-handoff task；整个 manifest 尚 unresolved/pdf 时，
+任何替代路径均不能获得 dispatch/receipt。最终 complete 也独立重核，不能仅信 coordinator。
+
+旧 attachment/ordinary S3 GC 行与原 wire 没有可信历史 storage binding；该 route 为 unknown，
+不能用当前配置回填或据此排除相同 backend/key/兼容 version 的保护。六参数 barrier 对这些
+潜在同一身份保守匹配；每个匹配 manifest 都必须通过 eligibility 和真实 task/owner/handoff
+校验，否则 `55000` 且不授 I/O。已知不同 backend/key/version 或 local namespace/incarnation
+不受该 target 阻挡。新 V1 private/reference 协议具有可信 binding 时仍精确区分 route，并独立
+核 binding；barrier 成功只解除这一层 blocker，不替代其他物理授权或证明历史 route 连续性。
+
+local physical cleanup 复用同一个 immutable LocalBlobStore 和既有五方法 repository 协议。
+`LocalCleanupCoordinator.WithRepository` 拒绝 nil/typed nil，不重开或改变 namespace；V1
+repository 每事务重新发送 caller 原 target authority，不从数据库采用新 owner。local common
+函数第三参数为 legacy authority，NULL 保留原 ordinary/V2 路径；非 NULL 只在 purge=true 时
+接受，并逐次校验 manifest、exact registered task、namespace/incarnation/key/version、dispatch、
+writer/anchor/provenance、guard/final inode/inventory/reference/quota。五个 V1 local wrapper
+外层精确为 authority/request，保留原 flat request bytes、262144-byte nested 预算和
+`HOUFENG-LOCAL-GC-V2` completion hash。physical local_contract_version=2 不改变 operation
+deletion_contract_version=1；resolve 只读，不刷新 dispatch 或授权。
+
+private `local_blob_gc_authority(jsonb,boolean,bytea,boolean)` 的第四参 preparing 仅由
+`local_blob_gc_prepare` 的三次 authority 调用显式传 true；其他 current/claim/resolve/bind/
+complete 调用均传 false，无 DEFAULT/旧 overload。两种模式都保留原 LOGIN、namespace、
+operation/caller 与 fresh owner 校验。preparation-only barrier 只允许符合原 authority、
+manifest/source 与 candidate identity 的 pending task 登记，不适用于 dispatch、claim 或 receipt。
+普通 prepare 只按原 sealing 条件提前建立 closed-origin source link；V2 portability 在原
+operation assignment 与 immutable preparation 完成后、返回前建立真实 link，不能 seal 共享
+保留 source。claim 先建立/重验真实 link 再转 claimed，true seal 不降级。最终责任检查仍要求
+实际 preparation/target/source operation/link 完整；公共 request bytes、cleanup hash 不变。
+
+S3 portability 使用 targets 中独立的 pending/claimed/retry_wait/completed 状态，不写 attachment
+GC pool、不重复扣 attachment quota。claim、claim_resolve、complete、retry、resolve 均经独立
+worker-only 命令；claim 固定一分钟，首次 generation/attempt=1，合法到期接管分别递增，
+同 live owner 返回原 tuple，其他 live owner 不接管。exact claim COMMIT 确认后才在事务外
+`DeleteGCVersion`；响应未知先以只读 claim_resolve 核原 tuple，不用再次 claim 延长许可。
+receipt 精确绑定 key/version/SHA/size/deleted/storage_binding，以
+`houfeng.record-portability.blob-gc-receipt.v1` framing 保存 deleted/already_absent。complete/retry
+同时核 operation 与 cleanup owner live；completion resolve 只确认同 receipt，completed 不可变。
+删除失败按原 DefaultBlobGCRetryDelay 保留 retry_wait，旧 owner 只保留已确认 dispatch 的
+exact-version I/O 责任，不能续期、创建 dispatch 或完成 SQL。
+
+`ConfigurePortabilityDeletionBlobStore` 只绑定非 nil/typed-nil S3 deleter，且必须实现
+`BlobGCStorageIdentity.GCStorageIdentity() ([32]byte,error)`；同实例幂等、异实例拒绝。
+真实 S3 fingerprint 为 SHA256(length-framed `houfeng.s3-gc-storage-route.v1`、实际 client
+EndpointURL().String()、bucket)，不含秘密、不联网。bootstrap 绑定同一已配置 attachment
+S3 store。restart 和每次 I/O 前后核 immutable fingerprint，漂移或配置丢失保持 pending、
+零新 I/O，不能换 route 或清 inventory；测试包装也必须转发真实 store 的身份。
+
+V1 portability 最后 purge/verify 只核已经提交的 inventory/handoff/absence 与 exact physical
+proof，不再次删除逻辑 source。local 每 target 均要求 registered GC、completion command、
+inode/inventory/obligation；private S3 每 target 独立核 exact claim 和 domain receipt；retention
+核 surviving owner 或 durable successor。receipt 保留原
+`houfeng.record-portability.deletion-receipt.v1` framing、manifest removed_rows 和首次真实
+verified time，重放稳定、不重复 I/O/quota；verify 缺 proof/receipt 为 `55000`，不能补 prepare。
+九 adapter terminal oracle 同时要求 browser event、manifest/handoff、真实九 logical receipts
+和 actual aggregate。generic operation GC 与 attachment 原 S3/local-v1、portable local-v2 的
+归属使用 set equality：missing、duplicate、orphan 均拒绝。只有 online_purging/live owner
+可 mutation/complete；online_purged 不因缺 manifest 获得弱校验例外。历史 terminal status/
+recovery 仍按原只读合同读取，不补造新证明；新 adapter verify/resolve 只接受已有完整新证明。
+pending-obligation 校验仅对 exact captured source 接受等价证明：其 eligible target 已有完整
+private S3 completion，或 retained_shared 已验证真实 surviving owner/durable successor。
+原 obligation 的 cleanup_completed_at 可继续为 NULL，不为通过终态而补完成字段或结算 quota；
+未捕获、关联矛盾、open/remote_unknown 等其他未闭合义务仍阻止完成。
+
+
 V1 S3 purge 的 prepare/verify 与 claim/complete/retry/resolve 只经六个 worker-only SECURITY DEFINER 命令。authority 为 caller 提交的原 12 字段 owner/operation/ledger/witness envelope，由既有 private `legacy_adapter_lock` 的 `record_attachments` 分支复核 independently installed entry、reservation/epoch/fence 与 applicable source admission；不从数据库补造 caller owner。prepare 在同一事务移除逻辑依赖、结算 logical quota、保留共享引用并写稳定三 surface receipt 和 exclusive exact-version durable claim。claim 从 INSERT 绑定不可变 `operation_id`、V1/S3 身份，不以可变 cleanup owner 充当 operation 索引；ordinary raw GC 不处理这些受保护行。GC 命令分别严格解析 `{authority,deletion_id,cleanup_owner_id,cleanup_lease_ms}`、`{authority,claim,receipt}` 或 `{authority,claim,retry_at}`，拒绝重复/未知字段、错误 scalar 类型、非微秒时间及不匹配 tuple。claim COMMIT 确认后才执行原 `DeleteGCVersion`，网络 I/O 不持 SQL 锁；COMMIT unknown 按原 ID 解析，不能盲目重发。已确认 dispatch 的 exact-version 删除权不被 lease 过期或 takeover 撤回，迟到旧 tuple 不得完成新 claim；complete 校验真实 deleted/already_absent receipt 并一次结算 physical quota，resolve 只读、不授新 I/O。active publication/write obligation 保持 pending；V2/local 与 ordinary GC 继续使用各自原合同，不能把 S3 重贴为 local。实际 source、remote capability 与完整 G2 验收分别保留。
 
 初次 V1 preparation 的私有返回含 exact `required_backends`，由本事务枚举的全部对象生成，包含仍由其他 record 保留的共享对象。coordinator 在 COMMIT 前核实每个 backend 已配置；缺配置时目标依赖、quota、claim 与 receipt 一起 rollback。空对象集合不要求 S3 配置。该字段只供首次提交前检查，现有 preparation 的 replay/verify 返回空数组；unknown COMMIT 仍按原稳定 counts 与 exact claims 解析，不把临时配置检查结果当作新的物理删除权限。
@@ -421,12 +612,16 @@ recreate/updown 在本次真实 IPv6 路由文件读取完成后、原始返回�
 | preview 后授权、record CAS、dependency/inventory、adapter digest 或 witness head 漂移 | stale/conflict；不建立 provisional fence。 |
 | delete append/resolve 或 outcome append 结果未知 | operation 保持 `ledger_commit_unknown` / `release_pending` 且 fence 保留；等待 authoritative resolution。 |
 | delete commit 已 witness，purge/fence propagation/receipt 失败 | `retry_required` 记录 exact retry stage；不得回退为未删除或释放 fence。 |
+| 合法 V1 fence-propagating owner 仍有同 object 的 live deletion/content lease | worker-only bool 检查返回 `false,nil`，保持等待；drain 后 `true,nil`，检查本身不写业务行、不触发 retry-required。 |
 | sealed absence 未证明或 `attempt_not_committed` 未 witness | 不释放 reservation/fence、不恢复普通读写。 |
 | core receipt 含正文、identity 漂移、surface/receipt digest 不符或仍有 owned row | rollback/verification error；operation 不得进入 `online_purged`。 |
 | recovery cursor 不连续、previous hash/witness/fingerprint/surface digest 不符 | `ErrRecoveryContractUnavailable`；0 content/projection/cursor change。 |
 | recovery 要释放的 exact owner tuple 已被续租、替换或不存在 | `ErrRecoveryContractUnavailable`；transaction rollback，不得触碰当前 fence。 |
 | terminal/idempotent replay 时对象存在另一个 active fence | replay 按自身 receipt/audit/cursor 合同成功；另一个 fence 的 owner/generation/expiry 完全不变。 |
 | status projection missing 且无 authoritative fallback | `ErrDeletionStatusUnavailable`，由 HTTP 映射为 opaque 503。 |
+| V1 portability inventory 含 unresolved/PDF 或 digest/source→target 关联不符 | 保留原 snapshot 与 source；所有匹配 V1/ordinary/V2 GC dispatch、complete 和 terminal receipt 拒绝，零物理 I/O。 |
+| 最后 retained owner 移除而无同 identity durable handoff，或 late writer 新增 exclusive target 引用 | 事务拒绝；既有 owner、inventory、bytes、quota 和清理责任不丢失。 |
+| manifest、client event、九 receipt 或 GC target/task set 有 missing/duplicate/orphan | complete 拒绝且 operation owner/epoch 不变；terminal 不引入无 manifest 的兼容旁路。 |
 
 ### 5. Good / Base / Bad Cases
 
@@ -451,6 +646,10 @@ scripts/test-record-platform-integration.sh postgres -- \
 
 - Registry/service tests必须覆盖 exact nine-adapter readiness、preview reauthorization/CAS/digest drift、same-key replay/reuse、unknown ledger outcome、witness pending 和 sealed-absence-only release。
 - Worker/store tests必须覆盖每个 durable cut point、stale owner、permanent fence、retry stage、content-free receipt、core exact ownership 和 purge rollback。
+- V1 真实 PostgreSQL continuation 保留 `PreviewReserveAndExpiredReplay`、`ReserveCASDriftRollsBackFenceAndOperation`、`DeleteCommitPurgesCoreAndDeliveryEpoch`、`NotCommittedTakeoverRejectsStaleOwnerAndRestoresRead` 四个公开测试名，并实际运行 `TestPostgresIntegrationRecordDeletionV1PermanentFenceAuthority`。direct worker 下 live content/deletion lease 的 `false,nil`→drain 后 `true,nil`→read-fenced、错 tuple/hash/状态与 stale owner 的 `42501`、runtime/admin/PUBLIC 无 EXECUTE、worker 原表 SELECT 拒绝及只读零变更均须验证。九 logical adapter 分别核其实际 surface receipts（attachment 三 surface、evidence 专属形状），不能以九行单表或 core-only purger 代替。V2 issuer 的 `revision_cas_drift_zero_writes` 与 `post_issue_rollback` 分别验证真实 revision 提交后的旧 token 拒绝，以及真实 issue 写后 Commit 注入、defer rollback、无持久 residue 和恢复 seam 后成功；任何所选 parent/subtest skip 均不构成验收。
+- `TestPostgresIntegrationRecordDeletionV1AdapterContinuation` 的 `client_event_and_outbox`、`known_local_and_shared_handoff`、`unresolved_inventory_no_dispatch`、`authority_and_crash_cuts`、`reference_serialization_and_terminal_sets` 必须真实 RUN/PASS。client/outbox 以十二字段 V1 authority、无 gate、真实 metadata 与超过 100 项的 batch 证明 event/receipt 原子、root-independent target/ack、predecessor/started/late-provider handoff。local 用真实 processed bytes、已登记 obligation 和 namespace，证明共享 A 保留 B、最后 B durable task 与 quota 一次；unknown 原值不清空、不补 identity，不经普通/V2 GC 绕过。两连接交错、COMMIT response loss、bind/physical return loss、takeover、constraint/expiry rollback 和 terminal set tamper 均核真实持久效果。
+- obligation-only 无 artifact 的 known local、known exact-version S3、remote_unknown 三类必须独立重算完整 inventory digest 和 source→target membership。known 两类经真实各自物理协议完成；remote_unknown 保留完整 snapshot 并拒绝所有替代 dispatch。`RunV1DeletionDeleteCommit` 必须以非空合法 local portability/client/outbox 输入完成真实九 adapter，先拒绝缺 receipt 的非零 bogus aggregate，再核 actual aggregate、core-last、owner 清除和稳定终态。
+- S3 profile 另须真实运行 `TestPostgresMinIOIntegrationRecordDeletionV1Portability` 的 `historical_version_preserves_current`、`prepare_commit_unknown`、`delete_ack_loss_process_restart`、`route_binding_mismatch`：授权 historical version 删除、current/neighbor 原 bytes 保留，未确认 claim 零 I/O，真实删除后 kill/接管 exact absence，endpoint/bucket 漂移零 I/O。另核多 artifact 去重、外部引用 handoff、storage/null-version/receipt tamper 拒绝和 private claims 不混入 attachment 计数。该固定 MinIO fixture 不证明未知 provider 的 D3。
 - Recovery PostgreSQL tests必须覆盖 existing operation、preview-only reservation、synthetic terminal projection、delete/not-committed replay、连续 cursor、幂等重放、较新/无关 active fence 的 exact tuple 保留，以及 receipt failure 全事务回滚；runner 中任何 `SKIP` 都不能作为验收证据。
 - `scripts/run-records-integration.sh --profile s3` 必须真实覆盖
   `TestPostgresMinIOIntegrationAttachmentBlobGCHistoricalVersionWorkflow` 的

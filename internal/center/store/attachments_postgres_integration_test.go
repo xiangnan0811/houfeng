@@ -5374,8 +5374,9 @@ func preparePublishedAttachmentIntent(
 	if request.OwnerKind == attachments.BlobPublicationOwnerProcessorPreview {
 		origin.OwnerID, origin.OwnerGeneration, origin.OwnerExpiresAt = &request.ClaimOwnerID, &request.OwnerGeneration, &request.ClaimExpiresAt
 	}
+	binding := configuredTestS3Binding(t)
 	registration := attachments.WriteRegistration{WriteOrigin: origin, ObligationID: "rwo_" + strings.ReplaceAll(localBlobFixtureUUID(t), "-", ""), WriterInstance: localBlobFixtureUUID(t), RequestSeq: 1,
-		ProjectID: request.ProjectID, BackendKind: attachments.BackendKindS3, Key: object.Key, SHA256: hex.EncodeToString(object.SHA256[:]), Size: object.SizeBytes}
+		ProjectID: request.ProjectID, BackendKind: attachments.BackendKindS3, StorageBinding: &binding, Key: object.Key, SHA256: hex.EncodeToString(object.SHA256[:]), Size: object.SizeBytes}
 	if _, err := managed.RegisterWrite(ctx, registration); err != nil {
 		t.Fatal(err)
 	}

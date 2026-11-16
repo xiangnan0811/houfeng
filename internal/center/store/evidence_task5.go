@@ -368,38 +368,6 @@ func (repository *PostgresEvidenceRepository) VerifyRecordEvidencePurge(
 	})
 }
 
-func validateLockedEvidencePurgeOperation(
-	ctx context.Context,
-	tx pgx.Tx,
-	operation recorddeletion.DeletionOperation,
-) error {
-	var state, reason, objectID, projectID string
-	var sequence, fenceEpoch int64
-	var entryHash []byte
-	err := tx.QueryRow(ctx, `
-		select operation.operation_state, operation.reason_code,
-		       operation.ledger_sequence, operation.ledger_entry_hash,
-		       reservation.object_id, reservation.project_id, reservation.fence_epoch
-		from public.record_purge_operations as operation
-		join public.deletion_reservations as reservation on reservation.reservation_id = operation.reservation_id
-		where operation.operation_id = $1
-		  and operation.reservation_id = $2
-		  and operation.project_id = $3
-		  and reservation.project_id = $3
-		  and reservation.object_kind = 'record'
-		  and reservation.object_id = $4
-		for update of operation, reservation`,
-		operation.OperationID, operation.ReservationID, operation.Object.ProjectID, operation.Object.ObjectID,
-	).Scan(&state, &reason, &sequence, &entryHash, &objectID, &projectID, &fenceEpoch)
-	if err != nil || state != string(recorddeletion.DeletionStateOnlinePurging) ||
-		reason != string(operation.ReasonCode) || sequence != int64(operation.LedgerSequence) ||
-		len(entryHash) != sha256.Size || objectID != operation.Object.ObjectID || projectID != operation.Object.ProjectID ||
-		fenceEpoch != int64(operation.FenceEpoch) || !equalEvidenceDigest(entryHash, operation.LedgerEntryHash) {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return nil
-}
-
 func evidenceDeletionReceiptDigest(
 	command evidence.EvidenceDeletionCommand,
 	removed uint64,

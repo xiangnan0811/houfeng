@@ -2,6 +2,7 @@ package attachments
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"io"
 	"math"
@@ -24,14 +25,16 @@ type TemporaryBlobWriter interface {
 }
 
 type ManagedBlobWriter struct {
-	blob         BlobStore
-	temporary    TemporaryObjectStore
-	local        *LocalBlobStore
-	repository   ManagedWriteRepository
-	backend      BackendKind
-	instance     string
-	registration sync.Mutex
-	sequence     int64
+	blob            BlobStore
+	temporary       TemporaryObjectStore
+	local           *LocalBlobStore
+	storageIdentity BlobGCStorageIdentity
+	storageBinding  string
+	repository      ManagedWriteRepository
+	backend         BackendKind
+	instance        string
+	registration    sync.Mutex
+	sequence        int64
 }
 
 func NewManagedBlobWriter(blob BlobStore, backend BackendKind, repository ManagedWriteRepository) (*ManagedBlobWriter, error) {
@@ -42,12 +45,39 @@ func NewManagedBlobWriter(blob BlobStore, backend BackendKind, repository Manage
 	if (backend == BackendKindLocal) != isLocal {
 		return nil, ErrInvalidBlobStoreConfig
 	}
+	var identity BlobGCStorageIdentity
+	var binding string
+	if backend == BackendKindS3 {
+		identity, _ = blob.(BlobGCStorageIdentity)
+		if nilUploadServiceDependency(identity) {
+			return nil, ErrInvalidBlobStoreConfig
+		}
+		route, err := identity.GCStorageIdentity()
+		if err != nil || route == [32]byte{} {
+			return nil, errors.Join(ErrInvalidBlobStoreConfig, err)
+		}
+		binding = hex.EncodeToString(route[:])
+	}
 	instance, err := newLocalUUID()
 	if err != nil {
 		return nil, err
 	}
 	temporary, _ := blob.(TemporaryObjectStore)
-	return &ManagedBlobWriter{blob: blob, temporary: temporary, local: local, repository: repository, backend: backend, instance: instance}, nil
+	return &ManagedBlobWriter{blob: blob, temporary: temporary, local: local, storageIdentity: identity, storageBinding: binding, repository: repository, backend: backend, instance: instance}, nil
+}
+
+func (writer *ManagedBlobWriter) checkStorageIdentity() error {
+	if writer.backend != BackendKindS3 {
+		return nil
+	}
+	if nilUploadServiceDependency(writer.storageIdentity) || writer.storageBinding == "" {
+		return ErrInvalidBlobStoreConfig
+	}
+	route, err := writer.storageIdentity.GCStorageIdentity()
+	if err != nil || route == [32]byte{} || hex.EncodeToString(route[:]) != writer.storageBinding {
+		return errors.Join(ErrInvalidBlobStoreConfig, err)
+	}
+	return nil
 }
 
 func (writer *ManagedBlobWriter) NamespaceID() string {
@@ -89,6 +119,9 @@ func (writer *ManagedBlobWriter) write(ctx context.Context, request WriteRequest
 	}
 	identity := WriteIdentity{ObligationID: obligation.ID, WriterInstance: writer.instance}
 	run := func(ctx context.Context, guard *LocalKeyGuard) error {
+		if err := writer.checkStorageIdentity(); err != nil {
+			return err
+		}
 		dispatch := WriteDispatch{WriteIdentity: identity, DispatchID: dispatchID}
 		if guard != nil {
 			dispatch.AnchorInode = &guard.anchor.Inode
@@ -109,6 +142,9 @@ func (writer *ManagedBlobWriter) write(ctx context.Context, request WriteRequest
 			return ErrWriteOutcomeUnknown
 		}
 		obligation = dispatched
+		if err := writer.checkStorageIdentity(); err != nil {
+			return err
+		}
 		var version ObjectVersion
 		var writeErr error
 		if guard != nil {
@@ -129,6 +165,9 @@ func (writer *ManagedBlobWriter) write(ctx context.Context, request WriteRequest
 			version, writeErr = writer.temporary.PublishTemporaryVersion(ctx, TemporaryObjectPublishRequest{Version: source, ExpectedSHA256: request.Content.ExpectedSHA256, ExpectedSizeBytes: request.Content.ExpectedSizeBytes})
 		} else {
 			version, writeErr = writer.blob.Put(ctx, request.Content, reader)
+		}
+		if err := writer.checkStorageIdentity(); err != nil {
+			writeErr = errors.Join(writeErr, err)
 		}
 		returned := WriteReturn{WriteIdentity: identity, DispatchID: dispatchID, Outcome: "materialized", Key: obligation.Key, SHA256: obligation.SHA256, Size: obligation.Size}
 		if version.Validate() == nil && version.Key == obligation.Key && version.SHA256 == request.Content.ExpectedSHA256 && version.SizeBytes == obligation.Size {
@@ -185,6 +224,9 @@ func (writer *ManagedBlobWriter) register(ctx context.Context, request WriteRequ
 	if err := ctx.Err(); err != nil {
 		return WriteObligation{}, err
 	}
+	if err := writer.checkStorageIdentity(); err != nil {
+		return WriteObligation{}, err
+	}
 	if writer.sequence == math.MaxInt64 {
 		return WriteObligation{}, ErrInvalidBlobRequest
 	}
@@ -195,6 +237,10 @@ func (writer *ManagedBlobWriter) register(ctx context.Context, request WriteRequ
 	}
 	registration := WriteRegistration{WriteOrigin: request.Origin, ObligationID: "rwo_" + strings.ReplaceAll(id, "-", ""), WriterInstance: writer.instance, RequestSeq: writer.sequence,
 		ProjectID: request.ProjectID, BackendKind: writer.backend, Key: "sha256/" + hexDigest(request.Content.ExpectedSHA256), SHA256: hexDigest(request.Content.ExpectedSHA256), Size: request.Content.ExpectedSizeBytes}
+	if writer.backend == BackendKindS3 {
+		binding := writer.storageBinding
+		registration.StorageBinding = &binding
+	}
 	if writer.local != nil {
 		n := writer.local.Namespace()
 		registration.NamespaceID = &n.NamespaceID
@@ -213,7 +259,7 @@ func (writer *ManagedBlobWriter) register(ctx context.Context, request WriteRequ
 			return WriteObligation{}, errors.Join(ErrWriteOutcomeUnknown, err)
 		}
 	}
-	if obligation.ID != registration.ObligationID || obligation.WriterInstance != writer.instance || obligation.RequestSeq != registration.RequestSeq || obligation.ProjectID != registration.ProjectID || obligation.BackendKind != registration.BackendKind || obligation.Key != registration.Key || obligation.SHA256 != registration.SHA256 || obligation.Size != registration.Size || !sameOptionalString(obligation.NamespaceID, registration.NamespaceID) || !sameOptionalString(obligation.IncarnationID, registration.IncarnationID) {
+	if obligation.ID != registration.ObligationID || obligation.WriterInstance != writer.instance || obligation.RequestSeq != registration.RequestSeq || obligation.ProjectID != registration.ProjectID || obligation.BackendKind != registration.BackendKind || obligation.Key != registration.Key || obligation.SHA256 != registration.SHA256 || obligation.Size != registration.Size || !sameOptionalString(obligation.NamespaceID, registration.NamespaceID) || !sameOptionalString(obligation.IncarnationID, registration.IncarnationID) || !sameOptionalString(obligation.StorageBinding, registration.StorageBinding) {
 		return WriteObligation{}, ErrWriteOutcomeUnknown
 	}
 	return obligation, nil
@@ -229,7 +275,7 @@ func sameOptionalString(left, right *string) bool {
 	return (left == nil && right == nil) || (left != nil && right != nil && *left == *right)
 }
 func sameWriteDispatch(actual, expected WriteObligation, dispatch string) bool {
-	return actual.ID == expected.ID && actual.WriterInstance == expected.WriterInstance && actual.RequestSeq == expected.RequestSeq && actual.ProjectID == expected.ProjectID && actual.BackendKind == expected.BackendKind && actual.Key == expected.Key && actual.SHA256 == expected.SHA256 && actual.Size == expected.Size && sameOptionalString(actual.NamespaceID, expected.NamespaceID) && sameOptionalString(actual.IncarnationID, expected.IncarnationID) && sameOptionalString(actual.TemporaryKey, expected.TemporaryKey) && actual.DispatchID != nil && *actual.DispatchID == dispatch && actual.DispatchedAt != nil
+	return actual.ID == expected.ID && actual.WriterInstance == expected.WriterInstance && actual.RequestSeq == expected.RequestSeq && actual.ProjectID == expected.ProjectID && actual.BackendKind == expected.BackendKind && actual.Key == expected.Key && actual.SHA256 == expected.SHA256 && actual.Size == expected.Size && sameOptionalString(actual.NamespaceID, expected.NamespaceID) && sameOptionalString(actual.IncarnationID, expected.IncarnationID) && sameOptionalString(actual.StorageBinding, expected.StorageBinding) && sameOptionalString(actual.TemporaryKey, expected.TemporaryKey) && actual.DispatchID != nil && *actual.DispatchID == dispatch && actual.DispatchedAt != nil
 }
 func sameWriteReturn(actual, expected WriteObligation, returned WriteReturn) bool {
 	return sameWriteDispatch(actual, expected, returned.DispatchID) && actual.ReturnedAt != nil && actual.Outcome == returned.Outcome && sameOptionalString(actual.Version, returned.Version)

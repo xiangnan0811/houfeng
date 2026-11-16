@@ -177,7 +177,23 @@ func (processorTestBlob) ResolveBlobPublicationObject(context.Context, attachmen
 	return attachments.ObjectVersion{}, attachments.ErrBlobNotFound
 }
 
-type processorTestTemporaryStore struct{ processorTestBlob }
+type processorTestTemporaryStore struct {
+	processorTestBlob
+	attachments.BlobGCStorageIdentity
+}
+
+func newProcessorTestTemporaryStore(t *testing.T, config contentProcessorConfig) processorTestTemporaryStore {
+	t.Helper()
+	blob, err := newProcessorBlobStore(context.Background(), config, nil)
+	if err != nil {
+		t.Fatalf("create S3 route identity: %v", err)
+	}
+	identity, ok := blob.(attachments.BlobGCStorageIdentity)
+	if !ok {
+		t.Fatal("configured Blob store does not provide S3 route identity")
+	}
+	return processorTestTemporaryStore{BlobGCStorageIdentity: identity}
+}
 
 func (processorTestTemporaryStore) ResolveTemporaryVersion(context.Context, string) (attachments.TemporaryObjectVersion, error) {
 	return attachments.TemporaryObjectVersion{}, attachments.ErrBlobNotFound
@@ -488,9 +504,12 @@ func TestContentProcessorRestartReconciliationResolvesUncommittedS3Version(t *te
 		State:              attachments.UploadStateExpired, ExpiresAt: time.Now().UTC().Add(-time.Minute),
 	}
 	repository := &processorRestartReconciliationRepository{candidate: &candidate}
-	store := &processorRestartTemporaryStore{resolved: attachments.TemporaryObjectVersion{
-		Key: candidate.TemporaryObjectKey, VersionID: "restart-observed-v1",
-	}}
+	store := &processorRestartTemporaryStore{
+		processorTestTemporaryStore: newProcessorTestTemporaryStore(t, config),
+		resolved: attachments.TemporaryObjectVersion{
+			Key: candidate.TemporaryObjectKey, VersionID: "restart-observed-v1",
+		},
+	}
 	newDependencies := func(cutpoint func(string) error) processorBootstrapDeps {
 		return processorBootstrapDeps{
 			loadRuntimeLaunch:   processorTestLaunch,
@@ -623,8 +642,8 @@ func TestContentProcessorBootstrapCancellationStopsBeforeClaimAndWorker(t *testi
 		newAttachmentRepository: func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error) {
 			return processorTestRepository{}, func() {}, nil
 		},
-		newBlobStore: func(context.Context, contentProcessorConfig, attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
-			return processorTestTemporaryStore{}, nil
+		newBlobStore: func(_ context.Context, config contentProcessorConfig, _ attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
+			return newProcessorTestTemporaryStore(t, config), nil
 		},
 		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
 			return testPreviewProcessor(), nil
@@ -668,8 +687,8 @@ func TestContentProcessorBootstrapBoundsReconciliationFailures(t *testing.T) {
 		newAttachmentRepository: func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error) {
 			return processorTestRepository{}, func() {}, nil
 		},
-		newBlobStore: func(context.Context, contentProcessorConfig, attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
-			return processorTestTemporaryStore{}, nil
+		newBlobStore: func(_ context.Context, config contentProcessorConfig, _ attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
+			return newProcessorTestTemporaryStore(t, config), nil
 		},
 		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
 			return testPreviewProcessor(), nil
@@ -1103,8 +1122,8 @@ func TestContentProcessorRunClosesDatabaseAfterWorkerFailure(t *testing.T) {
 		newAttachmentRepository: func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error) {
 			return processorTestRepository{}, func() { authorityCloses++ }, nil
 		},
-		newBlobStore: func(context.Context, contentProcessorConfig, attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
-			return processorTestTemporaryStore{}, nil
+		newBlobStore: func(_ context.Context, config contentProcessorConfig, _ attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
+			return newProcessorTestTemporaryStore(t, config), nil
 		},
 		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
 			return testPreviewProcessor(), nil

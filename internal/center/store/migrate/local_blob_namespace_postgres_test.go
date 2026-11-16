@@ -123,7 +123,7 @@ func TestPostgresIntegrationLocalBlobNamespaceAuthority(t *testing.T) {
 			"project_id": "default", "origin_kind": "import_archive", "origin_id": job, "origin_generation": 1,
 			"origin_owner_id": nil, "origin_owner_generation": nil, "origin_owner_expires_at": nil,
 			"draft_id": nil, "plan_digest": nil, "archive_digest": strings.Repeat("01", 32),
-			"namespace_id": namespace, "incarnation_id": incarnation, "backend_kind": "local",
+			"namespace_id": namespace, "incarnation_id": incarnation, "backend_kind": "local", "storage_binding": nil,
 			"key": anchor["key"], "sha256": strings.Repeat("01", 32), "size": 4,
 			"publication_id": nil, "target_record_id": nil, "target_attachment_id": nil,
 		}

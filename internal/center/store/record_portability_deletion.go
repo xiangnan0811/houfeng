@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -65,6 +64,29 @@ func portabilityDeletionHealthInTransaction(
 	}
 	if err := requireClientComparisonPurgeFunctions(ctx, tx, "public.local_portability_purge_verify(bytea)", "public.local_portability_purge_verify(bytea)"); err != nil {
 		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	var v1Present bool
+	if err := tx.QueryRow(ctx, `select bool_and(pg_catalog.to_regprocedure(required.signature) is not null)
+   from unnest(array[
+     'public.record_portability_purge_prepare_v1(bytea)',
+     'public.record_portability_purge_prepare_resolve_v1(bytea)',
+     'public.record_portability_purge_v1(bytea)',
+     'public.record_portability_purge_verify_v1(bytea)',
+     'public.record_portability_local_prepare_v1(bytea)',
+     'public.record_portability_local_claim_v1(bytea)',
+     'public.record_portability_local_resolve_v1(bytea)',
+     'public.record_portability_local_bind_final_v1(bytea)',
+     'public.record_portability_local_complete_v1(bytea)',
+     'public.record_portability_gc_claim_v1(bytea)',
+     'public.record_portability_gc_claim_resolve_v1(bytea)',
+     'public.record_portability_gc_complete_v1(bytea)',
+     'public.record_portability_gc_retry_v1(bytea)',
+     'public.record_portability_gc_resolve_v1(bytea)'
+   ]::text[]) as required(signature)`).Scan(&v1Present); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, fmt.Errorf("read V1 portability deletion functions: %w", err)
+	}
+	if !v1Present {
+		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	health, err := recorddeletion.NewAdapterHealthSnapshot(
 		true, 1, digestRecordPurgeStrings(portabilityDeletionHealthDigestDomainV1, names...),
@@ -201,83 +223,15 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordPortability(
 	target recorddeletion.PurgeTarget,
 	surfaceDigest [sha256.Size]byte,
 ) (recorddeletion.AdapterPurgeReceipt, error) {
-	operation := target.Operation
-	if ctx == nil || repository == nil || repository.platform == nil ||
-		target.Validate() != nil ||
+	if ctx == nil || repository == nil || repository.platform == nil || target.Validate() != nil ||
 		surfaceDigest != recorddeletion.RecordPortabilitySurfaceDigest() ||
-		operation.LedgerSequence > math.MaxInt64 || uint64(operation.FenceEpoch) > math.MaxInt64 {
+		target.Operation.LedgerSequence > math.MaxInt64 || uint64(target.Operation.FenceEpoch) > math.MaxInt64 {
 		return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
 	}
-	if operation.ContractVersion == recorddeletion.DeletionContractV2 {
+	if target.Operation.ContractVersion == recorddeletion.DeletionContractV2 {
 		return repository.purgeLocalRecordPortability(ctx, target, surfaceDigest)
 	}
-	var receipt recorddeletion.AdapterPurgeReceipt
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := validateLockedEvidencePurgeOperation(ctx, transaction.tx, operation); err != nil {
-			return err
-		}
-		existing, found, err := loadPortabilityPurgeReceipt(ctx, transaction.tx, operation, surfaceDigest)
-		if err != nil {
-			return err
-		}
-		if found {
-			if err := assertRecordPortabilitySurfacesAbsent(ctx, transaction.tx, operation.Object.ObjectID); err != nil {
-				return err
-			}
-			receipt = existing
-			return nil
-		}
-		var removed int64
-		encoded, err := encodeRecordPurgeCommand(recordPurgeFunctionCommand{
-			OperationID: operation.OperationID, ReservationID: operation.ReservationID,
-			ProjectID: operation.Object.ProjectID, RecordID: operation.Object.ObjectID,
-			FenceEpoch: int64(operation.FenceEpoch), LedgerSequence: int64(operation.LedgerSequence),
-			LedgerEntryHash: encodeRecordPurgeLedgerHash(operation.LedgerEntryHash),
-		})
-		if err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		if err := transaction.tx.QueryRow(ctx, `
-			select public.record_portability_purge($1)`, encoded,
-		).Scan(&removed); err != nil {
-			return fmt.Errorf("purge record portability through constrained function: %w", err)
-		}
-		if removed < 0 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		if err := assertRecordPortabilitySurfacesAbsent(ctx, transaction.tx, operation.Object.ObjectID); err != nil {
-			return err
-		}
-		removedRows := uint64(removed)
-		receiptDigest := portabilityDeletionReceiptDigest(operation, surfaceDigest, removedRows)
-		var verifiedAt time.Time
-		if err := transaction.tx.QueryRow(ctx, `
-			insert into public.record_portability_purge_receipts (
-				operation_id, removed_surface_digest, receipt_digest,
-				removed_row_count, verified_absent_at
-			) values ($1, $2, $3, $4, transaction_timestamp())
-			returning verified_absent_at`, operation.OperationID, surfaceDigest[:],
-			receiptDigest[:], removed,
-		).Scan(&verifiedAt); err != nil {
-			return fmt.Errorf("insert record portability purge receipt: %w", err)
-		}
-		if verifiedAt.IsZero() {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		receipt = recorddeletion.AdapterPurgeReceipt{
-			AdapterName: recorddeletion.AdapterNameRecordPortability, OperationID: operation.OperationID,
-			SurfaceDigest: surfaceDigest, ReceiptDigest: receiptDigest,
-			RemovedRowCount: removedRows, VerifiedAbsentAt: verifiedAt.UTC(),
-		}
-		return nil
-	})
-	if err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, err
-	}
-	if err := repository.VerifyRecordPortabilityPurge(ctx, target, surfaceDigest, receipt); err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, err
-	}
-	return receipt, nil
+	return repository.purgePortabilityV1(ctx, target, surfaceDigest)
 }
 
 func (repository *PostgresRecordDeletionRepository) VerifyRecordPortabilityPurge(
@@ -286,99 +240,20 @@ func (repository *PostgresRecordDeletionRepository) VerifyRecordPortabilityPurge
 	surfaceDigest [sha256.Size]byte,
 	receipt recorddeletion.AdapterPurgeReceipt,
 ) error {
-	operation := target.Operation
-	if ctx == nil || repository == nil || repository.platform == nil ||
-		target.Validate() != nil ||
+	if ctx == nil || repository == nil || repository.platform == nil || target.Validate() != nil ||
 		surfaceDigest != recorddeletion.RecordPortabilitySurfaceDigest() ||
 		receipt.AdapterName != recorddeletion.AdapterNameRecordPortability ||
-		receipt.OperationID != operation.OperationID || receipt.SurfaceDigest != surfaceDigest ||
-		receipt.VerifiedAbsentAt.IsZero() {
+		receipt.OperationID != target.Operation.OperationID || receipt.SurfaceDigest != surfaceDigest || receipt.VerifiedAbsentAt.IsZero() {
 		return recorddeletion.ErrDeletionSafetyUnavailable
 	}
-	if operation.ContractVersion == recorddeletion.DeletionContractV2 {
+	if target.Operation.ContractVersion == recorddeletion.DeletionContractV2 {
 		return repository.verifyLocalRecordPortabilityPurge(ctx, target, surfaceDigest, receipt)
 	}
-	if receipt.ReceiptDigest != portabilityDeletionReceiptDigest(operation, surfaceDigest, receipt.RemovedRowCount) {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := validateLockedEvidencePurgeOperation(ctx, transaction.tx, operation); err != nil {
-			return err
-		}
-		var rawSurface, rawReceipt []byte
-		var removed int64
-		var verifiedAt time.Time
-		if err := transaction.tx.QueryRow(ctx, `
-			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_portability_purge_receipts
-			where operation_id = $1 and adapter_name = 'record_portability'`,
-			operation.OperationID,
-		).Scan(&rawSurface, &rawReceipt, &removed, &verifiedAt); err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		if removed < 0 || uint64(removed) != receipt.RemovedRowCount ||
-			!verifiedAt.UTC().Equal(receipt.VerifiedAbsentAt) ||
-			!equalRecordPurgeDigest(rawSurface, receipt.SurfaceDigest) ||
-			!equalRecordPurgeDigest(rawReceipt, receipt.ReceiptDigest) {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return assertRecordPortabilitySurfacesAbsent(ctx, transaction.tx, operation.Object.ObjectID)
-	})
-}
-
-func assertRecordPortabilitySurfacesAbsent(ctx context.Context, tx pgx.Tx, recordID string) error {
-	var remaining int64
-	if err := tx.QueryRow(ctx, `
-		select
-		  (select count(*) from public.record_export_jobs where record_id = $1) +
-		  (select count(*) from public.record_export_artifacts as artifact
-		    join public.record_export_jobs as job on job.export_job_id = artifact.export_job_id
-		    where job.record_id = $1) +
-		  (select count(*) from public.record_origins where source_record_id = $1) +
-		  (select count(*) from public.record_import_entity_mappings
-		    where entity_kind = 'record' and target_id = $1)`, recordID,
-	).Scan(&remaining); err != nil {
-		return fmt.Errorf("verify record portability purge absence: %w", err)
-	}
-	if remaining != 0 {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return nil
-}
-
-func loadPortabilityPurgeReceipt(
-	ctx context.Context,
-	tx pgx.Tx,
-	operation recorddeletion.DeletionOperation,
-	surfaceDigest [sha256.Size]byte,
-) (recorddeletion.AdapterPurgeReceipt, bool, error) {
-	var rawSurface, rawReceipt []byte
-	var removed int64
-	var verifiedAt time.Time
-	err := tx.QueryRow(ctx, `
-		select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-		from public.record_portability_purge_receipts
-		where operation_id = $1 and adapter_name = 'record_portability'`,
-		operation.OperationID,
-	).Scan(&rawSurface, &rawReceipt, &removed, &verifiedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, nil
-	}
+	actual, err := repository.portabilityV1Finish(ctx, target, surfaceDigest, true)
 	if err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, false, fmt.Errorf("load record portability purge receipt: %w", err)
+		return err
 	}
-	if removed < 0 || verifiedAt.IsZero() || !equalRecordPurgeDigest(rawSurface, surfaceDigest) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	receipt := recorddeletion.AdapterPurgeReceipt{
-		AdapterName: recorddeletion.AdapterNameRecordPortability, OperationID: operation.OperationID,
-		SurfaceDigest: surfaceDigest, ReceiptDigest: portabilityDeletionReceiptDigest(operation, surfaceDigest, uint64(removed)),
-		RemovedRowCount: uint64(removed), VerifiedAbsentAt: verifiedAt.UTC(),
-	}
-	if !equalRecordPurgeDigest(rawReceipt, receipt.ReceiptDigest) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return receipt, true, nil
+	return matchClientComparisonPurgeReceipt(receipt, actual)
 }
 
 func portabilityDeletionReceiptDigest(

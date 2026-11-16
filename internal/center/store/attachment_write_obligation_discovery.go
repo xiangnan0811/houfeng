@@ -23,7 +23,7 @@ func readAttachmentWriteObligations(ctx context.Context, tx pgx.Tx, ids []string
 		coalesce(temporary_created_at,'0001-01-01 00:00:00+00'::timestamptz), origin_generation,
 		coalesce(origin_owner_generation,0), coalesce(origin_owner_expires_at,'0001-01-01 00:00:00+00'::timestamptz),
 		coalesce(record_id,''), coalesce(record_epoch,0), coalesce(namespace_id::text,''), coalesce(incarnation_id::text,''),
-		backend_kind, canonical_key, sha256_digest, plan_digest, archive_digest, size_bytes,
+		backend_kind, canonical_key, encode(storage_binding,'hex'), sha256_digest, plan_digest, archive_digest, size_bytes,
 		coalesce(publication_id,''), coalesce(object_version,''), outcome, coalesce(dispatch_id::text,''),
 		coalesce(dispatched_at,'0001-01-01 00:00:00+00'::timestamptz),
 		coalesce(returned_at,'0001-01-01 00:00:00+00'::timestamptz),
@@ -44,18 +44,22 @@ func readAttachmentWriteObligations(ctx context.Context, tx pgx.Tx, ids []string
 	for rows.Next() {
 		var item records.RevisionMutationWriteObligation
 		var digest, planDigest, archiveDigest, receipt []byte
+		var binding *string
 		if err := rows.Scan(&item.ProjectID, &item.ObligationID, &item.OriginKind, &item.OriginID, &item.OriginOwnerID,
 			&item.WriterInstance, &item.WriterPrincipal, &item.OperationID, &item.TemporaryKey,
 			&item.RequestSeq, &item.TemporaryDevice, &item.TemporaryInode, &item.TemporaryCreatedAt,
 			&item.OriginGeneration, &item.OriginOwnerGeneration, &item.OriginOwnerExpiresAt,
 			&item.RecordID, &item.RecordEpoch, &item.NamespaceID, &item.IncarnationID,
-			&item.BackendKind, &item.CanonicalKey, &digest, &planDigest, &archiveDigest, &item.SizeBytes,
+			&item.BackendKind, &item.CanonicalKey, &binding, &digest, &planDigest, &archiveDigest, &item.SizeBytes,
 			&item.PublicationID, &item.ObjectVersion, &item.Outcome, &item.DispatchID,
 			&item.DispatchedAt, &item.ReturnedAt, &item.HandedOffAt, &item.PublishedAt,
 			&item.CleanupOwnerID, &item.CleanupGeneration, &item.CleanupExpiresAt,
 			&item.CleanupDispatchID, &item.CleanupOutcome, &receipt, &item.CleanupCompletedAt,
 			&item.QuotaSettlementID, &item.QuotaSettledAt); err != nil {
 			return nil, fmt.Errorf("scan attachment write obligation: %w", err)
+		}
+		if binding != nil {
+			item.StorageBinding = *binding
 		}
 		if len(digest) != sha256.Size || (planDigest != nil && len(planDigest) != sha256.Size) ||
 			(archiveDigest != nil && len(archiveDigest) != sha256.Size) || (receipt != nil && len(receipt) != sha256.Size) {

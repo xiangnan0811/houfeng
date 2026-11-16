@@ -257,8 +257,10 @@ func TestRecordsRunnerLifecycleRejectsMissingRequiredIntegrationEvidence(t *test
 		{"local commit loss", "integration local", "TestPostgresIntegrationLocalWriteCommitLoss/dispatch_ack_lost_resolved"},
 		{"local mutation authority", "integration local", "TestPostgresIntegrationLocalMutationAuthority"},
 		{"local repeatable-read publication", "integration local", "TestPostgresIntegrationLocalPublicationRepeatableRead"},
+		{"local V1 nested authority", "integration local", "TestPostgresIntegrationRecordDeletionV1AdapterContinuation/authority_and_crash_cuts/command_authority_matrix/all_wrapper_acl"},
 		{"s3 publication", "integration s3", "TestPostgresMinIOIntegrationPublicationCleanupContract"},
 		{"s3 shared commit loss", "integration s3", "TestPostgresIntegrationLocalWriteCommitLoss/return_ack_lost_resolve_unavailable"},
+		{"s3 V1 nested portability", "integration s3", "TestPostgresMinIOIntegrationRecordDeletionV1Portability/historical_version_preserves_current/obligation_only"},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -1113,6 +1115,109 @@ if "-v" in args and "-run" in args:
             "dispatch_ack_lost_resolved", "dispatch_ack_lost_resolve_unavailable",
             "return_ack_lost_resolved", "return_ack_lost_resolve_unavailable",
         ],
+        # These are synthetic lifecycle-fixture outputs. The continuation uses
+        # helpers and table-driven nested tests that literal t.Run scans miss.
+        "TestPostgresIntegrationRecordDeletionV1AdapterContinuation": """
+            client_event_and_outbox
+            known_local_and_shared_handoff
+            unresolved_inventory_no_dispatch
+            authority_and_crash_cuts
+            reference_serialization_and_terminal_sets
+            unresolved_inventory_no_dispatch/historical_timestamp/finite_producer
+            unresolved_inventory_no_dispatch/historical_timestamp/historical_negative_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/artifact_negative_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/obligation_positive_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/obligation_negative_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/persisted_manifest_nonfinite_artifact
+            client_event_and_outbox/late_provider_and_rollback/started_late_provider_root_independent
+            client_event_and_outbox/late_provider_and_rollback/client_comparison_rollback_atomic
+            authority_and_crash_cuts/physical_crash_cuts/claim_commit_unknown
+            authority_and_crash_cuts/physical_crash_cuts/bind_commit_unknown
+            authority_and_crash_cuts/physical_crash_cuts/physical_return_loss_restart
+            authority_and_crash_cuts/physical_crash_cuts/owner_expiry_receipt_rollback
+            authority_and_crash_cuts/physical_crash_cuts/closed_no_final_sources
+            authority_and_crash_cuts/physical_crash_cuts/resolve_no_lease_extension
+            authority_and_crash_cuts/command_authority_matrix/all_wrapper_acl
+            authority_and_crash_cuts/command_authority_matrix/all_wrong_authority_no_effects
+            authority_and_crash_cuts/command_authority_matrix/local_claim_tuple_tamper
+            authority_and_crash_cuts/command_authority_matrix/verify_readonly_missing_proof
+            reference_serialization_and_terminal_sets/genuine_shared_archive/same_statement_last_owners
+            reference_serialization_and_terminal_sets/genuine_shared_archive/retained_artifact_and_obligation_identity
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/attachment_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/upload_part_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/artifact_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/obligation_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/handoff_order_and_prerequisites
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/last_owner_serialization
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/parent_route_and_early_constraint_invalidation
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/pending_key_and_distinct_identity
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/creator_first
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/deduplicated_first
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_distinct_owners
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_distinct_owners/read_committed
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_distinct_owners/repeatable_read
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_independent_exports
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_independent_exports/read_committed
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_independent_exports/repeatable_read
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/unknown_writer
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/parent_route_and_creator_identity
+            reference_serialization_and_terminal_sets/epoch_serialization/no_manifest_default_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/snapshot_before_prepare_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/snapshot_before_prepare_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/prepare_before_writer/default_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/prepare_before_writer/default_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/writer_before_prepare/default_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/writer_before_prepare/default_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/ordinary_gc_unrelated_waits/default_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/ordinary_gc_unrelated_waits/default_repeatable_read
+            reference_serialization_and_terminal_sets/nine_receipt_duplicate_target
+            reference_serialization_and_terminal_sets/nine_receipt_extra_artifact
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/orphan_pending_task
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/duplicate_identity_task
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/missing_portability_receipt
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/forged_portability_receipt
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/physical_proof_tamper
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/task_inventory
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/task_command
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/registered_task
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/source_snapshot
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/artifact_snapshot
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/sealed_link
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/target
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/manifest
+        """.split(),
+        "TestPostgresMinIOIntegrationManagedWriteSourceBinding": ["artifact", "obligation"],
+        "TestPostgresMinIOIntegrationRecordDeletionV1Portability": """
+            historical_version_preserves_current
+            historical_version_preserves_current/artifact
+            historical_version_preserves_current/obligation_only
+            same_object_artifact_dedup
+            independent_same_version_owners
+            independent_same_version_owners/carry_and_delete
+            independent_same_version_owners/prepare_commit_unknown
+            independent_same_version_owners/guarded_negative_inputs
+            independent_same_version_owners/guarded_negative_inputs/forged_predecessor_evidence
+            independent_same_version_owners/guarded_negative_inputs/altered_binding_or_version
+            independent_same_version_owners/guarded_negative_inputs/assigned_elsewhere
+            independent_same_version_owners/guarded_negative_inputs/absent_carried_source
+            independent_same_version_owners/concurrent_successor_prepares
+            shared_archive_final_handoff
+            unresolved_sources_no_dispatch
+            unresolved_sources_no_dispatch/legacy_null_route_and_version
+            unresolved_sources_no_dispatch/remote_unknown
+            claim_readback_and_tamper
+            prepare_commit_unknown
+            prepare_commit_unknown/prepare
+            prepare_commit_unknown/claim
+            unconfirmed_candidate_no_io
+            unconfirmed_candidate_no_io/prepare
+            unconfirmed_candidate_no_io/claim
+            delete_ack_loss_process_restart
+            route_binding_mismatch
+            route_post_io_identity_mismatch
+        """.split(),
     }
     for package in (arg for arg in args if arg.startswith("./") and os.path.isdir(arg)):
         for path in sorted(glob.glob(os.path.join(package, "*_test.go"))):

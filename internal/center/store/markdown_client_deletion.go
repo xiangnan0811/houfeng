@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -51,8 +50,10 @@ func markdownClientDeletionHealthInTransaction(
 	if err != nil {
 		return recorddeletion.AdapterHealthSnapshot{}, err
 	}
-	if err := requireClientComparisonPurgeFunctions(ctx, tx,
-		"public.record_markdown_client_purge(bytea)", "public.record_markdown_client_purge_verify(bytea)"); err != nil {
+	if err := requireClientPurgeFunctionContracts(ctx, tx, []string{
+		"public.record_markdown_client_purge(bytea)", "public.record_markdown_client_purge_verify(bytea)",
+		"public.record_markdown_client_purge_v1(bytea)", "public.record_markdown_client_purge_verify_v1(bytea)",
+	}); err != nil {
 		return recorddeletion.AdapterHealthSnapshot{}, err
 	}
 	health, err := recorddeletion.NewAdapterHealthSnapshot(true, 1,
@@ -95,6 +96,27 @@ func requireClientComparisonPurgeFunctions(ctx context.Context, tx interface {
 		return fmt.Errorf("read restricted deletion functions: %w", err)
 	}
 	if !present {
+		return recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return nil
+}
+
+func requireClientPurgeFunctionContracts(ctx context.Context, tx pgx.Tx, signatures []string) error {
+	var invalid int64
+	if err := tx.QueryRow(ctx, `
+		select count(*)::bigint from unnest($1::text[]) as required(signature)
+		left join pg_catalog.pg_proc as proc on proc.oid=pg_catalog.to_regprocedure(required.signature)
+		where proc.oid is null or proc.prosecdef is not true or proc.proretset is not true
+		  or proc.prorettype <> 'record'::regtype
+		  or not coalesce(proc.proconfig @> array['search_path=pg_catalog'],false)
+		  or proc.proargnames[(proc.pronargs::int+1):] is distinct from
+		    array['removed_surface_digest','receipt_digest','removed_row_count','verified_absent_at']
+		  or proc.proallargtypes[(proc.pronargs::int+1):] is distinct from
+		    array['bytea'::regtype::oid,'bytea'::regtype::oid,'bigint'::regtype::oid,'timestamptz'::regtype::oid]
+		  or proc.proargmodes[(proc.pronargs::int+1):] is distinct from array_fill('t'::"char",array[4])`, signatures).Scan(&invalid); err != nil {
+		return fmt.Errorf("read client deletion function contracts: %w", err)
+	}
+	if invalid != 0 {
 		return recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	return nil
@@ -219,7 +241,7 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordMarkdownClient(
 		var err error
 		receipt, err = runClientComparisonPurgeFunction(ctx, transaction.tx, `
 			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_markdown_client_purge($1)`, recorddeletion.AdapterNameRecordMarkdownClient,
+			from public.record_markdown_client_purge($1)`, `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_markdown_client_purge_v1($1)`, recorddeletion.AdapterNameRecordMarkdownClient,
 			command.Operation, command.OwnerClaim, command.SurfaceDigest)
 		return err
 	})
@@ -245,7 +267,7 @@ func (repository *PostgresRecordDeletionRepository) VerifyRecordMarkdownClientPu
 	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		actual, err := runClientComparisonPurgeFunction(ctx, transaction.tx, `
 			select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at
-			from public.record_markdown_client_purge_verify($1)`, recorddeletion.AdapterNameRecordMarkdownClient,
+			from public.record_markdown_client_purge_verify($1)`, `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_markdown_client_purge_verify_v1($1)`, recorddeletion.AdapterNameRecordMarkdownClient,
 			command.Operation, command.OwnerClaim, command.SurfaceDigest)
 		if err != nil {
 			return err
@@ -271,25 +293,17 @@ func runClientComparisonPurgeFunction(
 	ctx context.Context,
 	tx pgx.Tx,
 	query string,
+	legacyQuery string,
 	name recorddeletion.AdapterName,
 	operation recorddeletion.DeletionOperation,
 	claim recorddeletion.OperationOwnerClaim,
 	surfaceDigest [sha256.Size]byte,
 ) (recorddeletion.AdapterPurgeReceipt, error) {
-	// PostgreSQL's timestamptz stores microseconds. Reject a caller-supplied
-	// sub-microsecond claim so SQL cannot round it to a different observed owner.
-	expires := claim.Owner.ExpiresAt.UTC()
-	expiresText := expires.Format(time.RFC3339Nano)
-	parsed, err := time.Parse(time.RFC3339Nano, expiresText)
-	if err != nil || !parsed.Equal(expires) || expires.Nanosecond()%1000 != 0 {
-		return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
+	target := recorddeletion.PurgeTarget{Operation: operation, OwnerClaim: claim}
+	encoded, err := deletionAdapterEnvelope(ctx, tx, target, surfaceDigest)
+	if operation.ContractVersion == recorddeletion.DeletionContractV1 {
+		query = legacyQuery
 	}
-	encoded, err := encodeRecordPurgeCommand(clientComparisonPurgeEnvelope{
-		OperationID: operation.OperationID, RecordID: operation.Object.ObjectID,
-		ReservationID: operation.ReservationID, FenceEpoch: uint64(operation.FenceEpoch),
-		OwnerID: claim.Owner.OwnerID, OwnerGeneration: claim.Owner.Generation,
-		OwnerExpiresAt: expiresText, SurfaceDigest: hex.EncodeToString(surfaceDigest[:]),
-	})
 	if err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
 	}

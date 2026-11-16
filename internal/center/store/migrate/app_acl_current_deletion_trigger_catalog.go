@@ -72,7 +72,73 @@ func verifyComparisonInputTriggerCatalog(ctx context.Context, tx pgx.Tx, owner s
 	if err := verifyBirthCheckpointTriggerCatalog(ctx, tx, owner); err != nil {
 		return err
 	}
+	if err := verifyPortabilityGuardTriggerCatalog(ctx, tx, owner); err != nil {
+		return err
+	}
 	return verifyRecordDeletionAuthorityCatalog(ctx, tx, owner)
+}
+
+func verifyPortabilityGuardTriggerCatalog(ctx context.Context, tx pgx.Tx, owner string) error {
+	type contract struct {
+		table, name, function string
+		bits                  int
+		deferred              bool
+	}
+	var contracts []contract
+	for _, table := range []string{
+		"record_export_jobs", "record_export_artifacts", "record_import_jobs", "record_import_artifacts",
+		"record_import_plans", "record_import_entity_mappings", "record_attachments", "attachment_upload_parts",
+		"blob_gc_pins", "blob_objects", "blob_publication_intents", "record_write_obligations", "record_write_obligation_targets",
+	} {
+		contracts = append(contracts, contract{table, "record_portability_v1_reference_guard", "record_portability_v1_reference_guard", 31, false},
+			contract{table, "record_portability_v1_reference_check", "record_portability_v1_reference_check", 25, true})
+	}
+	for _, table := range []string{"attachment_uploads", "attachment_processor_jobs", "record_drafts"} {
+		contracts = append(contracts, contract{table, "record_portability_v1_parent_guard", "record_portability_v1_parent_guard", 27, false},
+			contract{table, "record_portability_v1_parent_check", "record_portability_v1_parent_check", 25, true})
+	}
+	contracts = append(contracts,
+		contract{"local_blob_gc_obligations", "record_portability_v1_link_guard", "record_portability_v1_link_guard", 31, false},
+		contract{"local_blob_gc_obligations", "record_portability_v1_control_check", "record_portability_v1_control_check", 29, true},
+		contract{"blob_gc_deletions", "record_portability_v1_control_check", "record_portability_v1_control_check", 29, true})
+	contracts = append(contracts,
+		contract{"record_portability_cleanup_preparations", "record_portability_cleanup_preparation_immutable", "local_blob_immutable_identity", 27, false},
+		contract{"record_portability_cleanup_targets", "record_portability_cleanup_target_immutable", "local_blob_immutable_identity", 27, false},
+		contract{"record_portability_cleanup_preparations", "record_portability_cleanup_preparation_no_truncate", "local_blob_immutable_identity", 34, false},
+		contract{"record_portability_cleanup_targets", "record_portability_cleanup_target_no_truncate", "local_blob_immutable_identity", 34, false},
+		contract{"record_portability_v1_preparations", "record_portability_v1_preparation_immutable", "local_blob_immutable_identity", 58, false},
+		contract{"record_portability_v1_artifacts", "record_portability_v1_artifact_immutable", "local_blob_immutable_identity", 58, false},
+		contract{"record_portability_v1_obligations", "record_portability_v1_obligation_immutable", "local_blob_immutable_identity", 58, false},
+		contract{"record_portability_v1_targets", "record_portability_v1_target_no_truncate", "local_blob_immutable_identity", 34, false},
+		contract{"record_portability_v1_targets", "record_portability_v1_target_guard", "record_portability_v1_target_guard", 27, false},
+		contract{"blob_gc_deletions", "record_portability_v1_gc_transition_guard", "record_portability_v1_gc_transition_guard", 23, false})
+	for _, expected := range contracts {
+		var valid bool
+		err := tx.QueryRow(ctx, `select exists (
+			select 1 from pg_catalog.pg_trigger t
+			join pg_catalog.pg_class c on c.oid=t.tgrelid
+			join pg_catalog.pg_namespace n on n.oid=c.relnamespace
+			join pg_catalog.pg_proc p on p.oid=t.tgfoid
+			join pg_catalog.pg_namespace pn on pn.oid=p.pronamespace
+			left join pg_catalog.pg_constraint k on k.oid=t.tgconstraint
+			where n.nspname='public' and c.relname=$1 and t.tgname=$2 and p.proname=$3
+			  and pn.nspname='record_platform_internal' and p.pronargs=0 and p.prosecdef=(p.proname<>'local_blob_immutable_identity')
+			  and p.prorettype='pg_catalog.trigger'::regtype and pg_catalog.pg_get_userbyid(p.proowner)=$6
+			  and pg_catalog.pg_get_userbyid(c.relowner)=$6 and t.tgtype::integer=$4
+			  and not t.tgisinternal and t.tgenabled='O' and t.tgparentid=0
+			  and t.tgdeferrable=$5 and t.tginitdeferred=$5 and t.tgqual is null
+			  and t.tgnargs=0 and octet_length(t.tgargs)=0 and t.tgoldtable is null and t.tgnewtable is null
+			  and t.tgattr::text='' and (($5 and k.contype='t' and k.conrelid=c.oid
+			    and k.condeferrable and k.condeferred) or (not $5 and t.tgconstraint=0))
+		)`, expected.table, expected.name, expected.function, expected.bits, expected.deferred, owner).Scan(&valid)
+		if err != nil {
+			return fmt.Errorf("read portability trigger %s.%s: %w", expected.table, expected.name, err)
+		}
+		if !valid {
+			return fmt.Errorf("portability trigger %s.%s is missing, disabled, or has a different definition", expected.table, expected.name)
+		}
+	}
+	return nil
 }
 
 // The request checkpoint chain is authority-bearing even after its allocation

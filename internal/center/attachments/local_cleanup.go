@@ -113,6 +113,15 @@ func NewLocalCleanupCoordinator(store *LocalBlobStore, repository LocalCleanupRe
 	return &LocalCleanupCoordinator{store: store, repository: repository}, nil
 }
 
+// WithRepository reuses the configured local store with a different authority
+// repository while retaining the same namespace and incarnation.
+func (coordinator *LocalCleanupCoordinator) WithRepository(repository LocalCleanupRepository) (*LocalCleanupCoordinator, error) {
+	if coordinator == nil {
+		return nil, ErrInvalidBlobStoreConfig
+	}
+	return NewLocalCleanupCoordinator(coordinator.store, repository)
+}
+
 func (coordinator *LocalCleanupCoordinator) NamespaceID() string {
 	return coordinator.store.namespace.NamespaceID
 }

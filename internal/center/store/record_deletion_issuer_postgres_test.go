@@ -76,6 +76,53 @@ func RunV2Issuer(t *testing.T, newPortabilityAdapter func(*PostgresRecordDeletio
 	actor := creation.Actor
 	object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: recordID}
 	previewRequest := recorddeletion.PreviewRequest{Actor: actor, RecordID: recordID}
+	if !t.Run("revision_cas_drift_zero_writes", func(t *testing.T) {
+		preview, err := issuer.Preview(ctx, previewRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := recordplatform.ParseDeletionRequestTokenTransportV1(preview.Token.Transport())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var revision, previewRevision string
+		var lockVersion, authorizationEpoch, previewLock, previewAuthorization uint64
+		if err := fixture.db.QueryRow(ctx, `select r.current_revision_id,r.lock_version,r.authorization_epoch,p.expected_revision_id,p.expected_lock_version,p.expected_authorization_epoch from public.records r join public.record_deletion_previews p on p.record_id=r.record_id where r.record_id=$1 and p.reservation_id=$2`, recordID, preview.ReservationID).Scan(&revision, &lockVersion, &authorizationEpoch, &previewRevision, &previewLock, &previewAuthorization); err != nil {
+			t.Fatal(err)
+		}
+		if revision != previewRevision || lockVersion != previewLock || authorizationEpoch != previewAuthorization {
+			t.Fatalf("preview did not bind current revision: current=%s/%d/%d preview=%s/%d/%d", revision, lockVersion, authorizationEpoch, previewRevision, previewLock, previewAuthorization)
+		}
+		input := recordsPostgresCompleteRevisionInput(t, "V2 issuer revised workspace", creation.Input.AttachmentIDs()...)
+		if input.AuthorID() != actor.UserID || creation.Input.AuthorID() != actor.UserID || input.CanonicalHash() == creation.Input.CanonicalHash() {
+			t.Fatal("revision input must change canonical content while preserving the fixture actor")
+		}
+		repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtime, Gate: fixture.admissionGate}, NewRecordAttachmentRevisionParticipant())
+		command := recordsPostgresRevisionCommandForActor(t, recordplatform.OperationKindRecordUpdate, recordID, revision, lockVersion, authorizationEpoch, input, "v2-issuer-cas-advance", actor)
+		advanced, err := repository.CommitRevision(ctx, command)
+		if err != nil {
+			t.Fatalf("advance revision: %v", err)
+		}
+		var currentRevision string
+		var currentLock, currentAuthorization uint64
+		if err := fixture.db.QueryRow(ctx, `select current_revision_id,lock_version,authorization_epoch from public.records where record_id=$1`, recordID).Scan(&currentRevision, &currentLock, &currentAuthorization); err != nil {
+			t.Fatal(err)
+		}
+		if !advanced.Created || advanced.Replayed || advanced.RevisionID == revision || advanced.LockVersion <= lockVersion ||
+			currentRevision != advanced.RevisionID || currentLock != advanced.LockVersion || currentAuthorization != advanced.AuthorizationEpoch {
+			t.Fatalf("revision did not advance: before=%s/%d/%d result=%#v current=%s/%d/%d", revision, lockVersion, authorizationEpoch, advanced, currentRevision, currentLock, currentAuthorization)
+		}
+		before := issuerDeletionSnapshot(t, ctx, fixture, recordID, preview.ReservationID)
+		_, err = issuer.Execute(ctx, recorddeletion.ExecuteRequest{Actor: actor, RecordID: recordID, ReservationID: preview.ReservationID, Token: token, ReasonCode: recorddeletion.DeletionReasonUserConfirmed})
+		if !errors.Is(err, recorddeletion.ErrDeletionPreviewStale) {
+			t.Fatalf("stale revision execute: %v", err)
+		}
+		if after := issuerDeletionSnapshot(t, ctx, fixture, recordID, preview.ReservationID); after != before {
+			t.Fatalf("stale revision wrote deletion state: before=%s after=%s", before, after)
+		}
+	}) {
+		t.Fatal("revision CAS drift regression failed")
+	}
 	stale, err := issuer.Preview(ctx, previewRequest)
 	if err != nil {
 		t.Fatalf("first preview: %v", err)
@@ -147,25 +194,34 @@ func RunV2Issuer(t *testing.T, newPortabilityAdapter func(*PostgresRecordDeletio
 	if err := servingRepository.ReleaseObjectContentLease(ctx, object, serving.Owner); err != nil {
 		t.Fatal(err)
 	}
-	begin := issuer.repository.platform.beginTx
-	dropped := false
-	issuer.repository.platform.beginTx = func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-		tx, err := begin(ctx, options)
-		if err != nil {
-			return nil, err
+	var operation recorddeletion.DeletionOperation
+	if !t.Run("post_issue_rollback", func(t *testing.T) {
+		before := issuerDeletionSnapshot(t, ctx, fixture, recordID, preview.ReservationID)
+		sentinel := errors.New("test: abort issued transaction before commit")
+		begin := issuer.repository.platform.beginTx
+		fired, observed := false, false
+		issuer.repository.platform.beginTx = func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+			tx, err := begin(ctx, options)
+			if err != nil || options.AccessMode == pgx.ReadOnly {
+				return tx, err
+			}
+			return &issuerRollbackTx{Tx: tx, reservationID: preview.ReservationID, recordID: recordID, sentinel: sentinel, fired: &fired, observed: &observed}, nil
 		}
-		if options.AccessMode != pgx.ReadOnly && !dropped {
-			return &issuerCommitLossTx{Tx: tx, dropped: &dropped}, nil
+		defer func() { issuer.repository.platform.beginTx = begin }()
+		rolledBack, err := issuer.Execute(ctx, request)
+		if !fired || !observed || !errors.Is(err, sentinel) || rolledBack != (recorddeletion.DeletionOperation{}) {
+			t.Fatalf("rollback injection fired=%t observed=%t operation=%#v error=%v", fired, observed, rolledBack, err)
 		}
-		return tx, nil
-	}
-	operation, err := issuer.Execute(ctx, request)
-	issuer.repository.platform.beginTx = begin
-	if !dropped {
-		t.Fatal("issuer commit response was not lost")
-	}
-	if err != nil || operation.Validate() != nil || operation.State != recorddeletion.DeletionStateOnlinePurging {
-		t.Fatalf("execute: %#v %v", operation, err)
+		if after := issuerDeletionSnapshot(t, ctx, fixture, recordID, preview.ReservationID); after != before {
+			t.Fatalf("rollback left deletion residue: before=%s after=%s", before, after)
+		}
+		issuer.repository.platform.beginTx = begin
+		operation, err = issuer.Execute(ctx, request)
+		if err != nil || operation.Validate() != nil || operation.State != recorddeletion.DeletionStateOnlinePurging {
+			t.Fatalf("normal retry after rollback: %#v %v", operation, err)
+		}
+	}) {
+		t.Fatal("issuer rollback regression failed")
 	}
 	if _, err := servingRepository.RenewServingLease(ctx, serving, time.Minute); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
 		t.Fatalf("old serving renewal: %v", err)
@@ -250,6 +306,47 @@ func RunV2Issuer(t *testing.T, newPortabilityAdapter func(*PostgresRecordDeletio
 	if _, err := issuer.Execute(ctx, wrong); err == nil {
 		t.Fatal("wrong actor accepted after purge")
 	}
+	t.Run("commit_response_loss", func(t *testing.T) {
+		birthFixture := ImportAttachmentGCFixture{Runtime: runtime, Gate: fixture.admissionGate}
+		repository := newRevisionMutationAdmittedRepository(t, birthFixture)
+		input := recordsPostgresCompleteRevisionInput(t, "Issuer commit response loss")
+		if input.AuthorID() != actor.UserID {
+			t.Fatal("commit-loss record author differs from fixture actor")
+		}
+		creation := revisionBirthBatchCommandForActor(t, ctx, birthFixture, input, "v2-issuer-commit-loss", actor)
+		created, err := repository.CommitRevision(ctx, creation)
+		if err != nil {
+			t.Fatalf("create commit-loss record: %v", err)
+		}
+		preview, err := issuer.Preview(ctx, recorddeletion.PreviewRequest{Actor: actor, RecordID: created.RecordID})
+		if err != nil {
+			t.Fatalf("preview commit-loss record: %v", err)
+		}
+		token, err := recordplatform.ParseDeletionRequestTokenTransportV1(preview.Token.Transport())
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := recorddeletion.ExecuteRequest{Actor: actor, RecordID: created.RecordID, ReservationID: preview.ReservationID, Token: token, ReasonCode: recorddeletion.DeletionReasonUserConfirmed}
+		begin := issuer.repository.platform.beginTx
+		defer func() { issuer.repository.platform.beginTx = begin }()
+		dropped := false
+		issuer.repository.platform.beginTx = func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+			tx, err := begin(ctx, options)
+			if err != nil || options.AccessMode == pgx.ReadOnly || dropped {
+				return tx, err
+			}
+			return &issuerCommitLossTx{Tx: tx, reservationID: preview.ReservationID, dropped: &dropped}, nil
+		}
+		operation, err := issuer.Execute(ctx, request)
+		issuer.repository.platform.beginTx = begin
+		if !dropped || err != nil || operation.Validate() != nil || operation.State != recorddeletion.DeletionStateOnlinePurging {
+			t.Fatalf("commit response loss dropped=%t: %#v %v", dropped, operation, err)
+		}
+		replayed, err := issuer.Execute(ctx, request)
+		if err != nil || replayed != operation {
+			t.Fatalf("replay after lost commit response: %#v %v", replayed, err)
+		}
+	})
 }
 
 // This uses independent APP/W2 fixtures and direct runtime and witness roles.
@@ -413,13 +510,64 @@ func (reader issuerBirthDriftReader) Observe(ctx context.Context, binding record
 
 type issuerCommitLossTx struct {
 	pgx.Tx
-	dropped *bool
+	reservationID string
+	dropped       *bool
 }
 
 func (tx *issuerCommitLossTx) Commit(ctx context.Context) error {
+	var operationID *string
+	if err := tx.Tx.QueryRow(ctx, `select operation_id from public.record_deletion_previews where reservation_id=$1`, tx.reservationID).Scan(&operationID); err != nil {
+		return err
+	}
+	if operationID == nil {
+		return tx.Tx.Commit(ctx)
+	}
 	if err := tx.Tx.Commit(ctx); err != nil {
 		return err
 	}
 	*tx.dropped = true
 	return errors.New("test: committed issuer response lost")
+}
+
+func issuerDeletionSnapshot(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, recordID, reservationID string) string {
+	t.Helper()
+	var snapshot string
+	err := fixture.db.QueryRow(ctx, `select jsonb_build_object(
+		'epoch',(select to_jsonb(e) from public.content_delivery_epochs e where e.project_id='default' and e.object_kind='record' and e.object_id=$1),
+		'fences',(select coalesce(jsonb_agg(to_jsonb(f) order by f.owner_id),'[]'::jsonb) from public.deletion_fence_leases f where f.project_id='default' and f.object_kind='record' and f.object_id=$1),
+		'gates',(select coalesce(jsonb_agg(to_jsonb(g) order by g.operation_id),'[]'::jsonb) from public.record_deletion_gates g where g.record_id=$1),
+		'reservations',(select coalesce(jsonb_agg(to_jsonb(r) order by r.reservation_id),'[]'::jsonb) from public.deletion_reservations r where r.object_id=$1),
+		'operations',(select coalesce(jsonb_agg(to_jsonb(o) order by o.operation_id),'[]'::jsonb) from public.record_purge_operations o join public.deletion_reservations r using(reservation_id) where r.object_id=$1),
+		'audits',(select coalesce(jsonb_agg(to_jsonb(a) order by a.audit_id),'[]'::jsonb) from public.record_deletion_audits a join public.record_purge_operations o using(operation_id) join public.deletion_reservations r using(reservation_id) where r.object_id=$1),
+		'preview',(select to_jsonb(p) from public.record_deletion_previews p where p.reservation_id=$2))::text`, recordID, reservationID).Scan(&snapshot)
+	if err != nil {
+		t.Fatalf("read issuer deletion snapshot: %v", err)
+	}
+	return snapshot
+}
+
+type issuerRollbackTx struct {
+	pgx.Tx
+	reservationID, recordID string
+	sentinel                error
+	fired, observed         *bool
+}
+
+func (tx *issuerRollbackTx) Commit(ctx context.Context) error {
+	if *tx.fired {
+		return tx.Tx.Commit(ctx)
+	}
+	var operationID *string
+	var gate bool
+	var epoch int64
+	err := tx.Tx.QueryRow(ctx, `select p.operation_id,exists(select 1 from public.record_deletion_gates g where g.operation_id=p.operation_id),e.delivery_epoch from public.record_deletion_previews p join public.content_delivery_epochs e on e.project_id=p.project_id and e.object_kind='record' and e.object_id=p.record_id where p.reservation_id=$1 and p.record_id=$2`, tx.reservationID, tx.recordID).Scan(&operationID, &gate, &epoch)
+	if err != nil {
+		return err
+	}
+	if operationID == nil {
+		return tx.Tx.Commit(ctx)
+	}
+	*tx.fired = true
+	*tx.observed = gate && epoch > 0
+	return tx.sentinel
 }
