@@ -4,6 +4,7 @@
 
 #include <linux/errno.h>
 #include <linux/limits.h>
+#include <linux/ktime.h>
 #include <linux/poll.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
@@ -136,6 +137,14 @@ static int g2_event_ring_append_locked(struct g2_event_ring *ring,
 	next = ++ring->sequence;
 	slot = &ring->records[(next - 1) % G2_GUARD_RING_CAPACITY];
 	*slot = *record;
+	if (slot->kind == 2 || slot->kind == 4 || slot->kind == 5 || slot->kind == 6) {
+		__u64 observed = ktime_get_ns();
+		unsigned int i;
+
+		memset(slot->detail, 0, sizeof(slot->detail));
+		for (i = 0; i < sizeof(observed); i++)
+			slot->detail[i] = (__u8)(observed >> (8 * i));
+	}
 	if (!ring->sealed && slot->kind >= 1 && slot->kind <= 8)
 		slot->flags |= 4;
 	slot->sequence = next;

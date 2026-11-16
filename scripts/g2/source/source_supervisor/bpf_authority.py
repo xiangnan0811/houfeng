@@ -761,7 +761,12 @@ def _record_body(kind, body):
         elif snapshot is not None:
             _fail('non-publication guard has snapshot')
         if value['kind'] < 8:
-            if value['detail'] is not None or value['flags'] & 1 or (value['kind'] == 7 and value['audit_serial'] != 0):
+            detail = value['detail']
+            timestamped = (value['kind'] in (2, 4, 5, 6) and
+                           _object(detail, ('observed_mono_ns',)) and
+                           _integer(detail['observed_mono_ns'], minimum=1))
+            if (detail is not None and not timestamped or value['flags'] & 1 or
+                    value['kind'] == 7 and value['audit_serial'] != 0):
                 _fail('guard detail invalid')
         elif value['kind'] == 8:
             detail = value['detail']

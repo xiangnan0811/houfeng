@@ -16,6 +16,7 @@ type objectIncarnation struct {
 	programBytes                                 any
 	removalAuthorized                            bool
 	state                                        string
+	diagnosticIndex                              uint16
 }
 
 type objectTracker struct {

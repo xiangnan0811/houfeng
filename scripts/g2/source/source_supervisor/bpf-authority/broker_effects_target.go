@@ -20,7 +20,7 @@ func (b *authorityBroker) importGrantCgroup(inv *runtimeInvocation, h *heldNotif
 		return nil, err
 	}
 	var slot uint32
-	status, err := h.guard.status()
+	status, err := h.guard.statusObserved(4)
 	if err != nil || status.State != 1 || status.Sticky != 0 || status.Lost != 0 || status.ProbeMissed != 0 || hex.EncodeToString(status.Epoch[:]) != b.epoch || b.resolver == nil || status.BrokerCookie != b.resolver.brokerCookie {
 		b.checkpoint.markFault()
 		return nil, errGuardProtocol
@@ -109,6 +109,9 @@ func (b *authorityBroker) importGrantCgroup(inv *runtimeInvocation, h *heldNotif
 	if err = appendRuntimeRecord(b, "cgroup_enrollment", body); err != nil {
 		b.checkpoint.markFault()
 		return group, err
+	}
+	if b.diagnostic != nil {
+		b.diagnostic.enroll(grant, group)
 	}
 	if b.effects.registry.root != 0 && group.RootCookie != b.effects.registry.root {
 		b.checkpoint.markFault()

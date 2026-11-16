@@ -59,7 +59,11 @@ func (b *authorityBroker) observeRuntimeGuard(r guardRecord) error {
 				return errGuardProtocol
 			}
 		}
-		if err = b.effects.objects.publish(r, t.id, guardU32(t.attributes, 0), attrs, program); err != nil {
+		err = b.effects.objects.publish(r, t.id, guardU32(t.attributes, 0), attrs, program)
+		if b.diagnostic != nil {
+			b.diagnostic.trackerThrough = r.Sequence
+		}
+		if err != nil {
 			return err
 		}
 		if t.effectFD >= 0 {
@@ -97,6 +101,9 @@ func (b *authorityBroker) observeRuntimeGuard(r guardRecord) error {
 			b.effects.objectFD[r.ObjectCookie] = t.effectFD
 		}
 		b.effects.objectGrant[r.ObjectCookie] = t.grantID
+		if b.diagnostic != nil {
+			b.diagnostic.publish(b.grants[t.grantID], b.effects.objects.byCookie[r.ObjectCookie], r)
+		}
 		copyRecord := r
 		t.publication = &copyRecord
 		return nil
@@ -105,10 +112,55 @@ func (b *authorityBroker) observeRuntimeGuard(r guardRecord) error {
 		// transition or cleanup step 2, including outside a paused checkpoint.
 		item := b.checkpoint.lifecycle.objects[r.ObjectCookie]
 		if item == nil || !item.removalAllowed || item.removed || item.kernelID != r.KernelID {
+			if b.diagnostic != nil {
+				o := b.diagnostic.objectForRecord(&r)
+				if o != nil && o.id == r.KernelID {
+					reason := uint64(7)
+					if item != nil && !item.removalAllowed {
+						reason = 2
+					} else if item != nil && item.removed {
+						reason = 8
+					}
+					b.diagnostic.objectFact(o, 30, r.Sequence, 0, reason, r.Sequence)
+				}
+			}
 			return errGuardProtocol
 		}
-		if err := b.effects.objects.removed(r); err != nil {
-			return err
+		objectBefore := b.effects.objects.byCookie[r.ObjectCookie]
+		rejection := uint64(9)
+		if b.diagnostic != nil && objectBefore != nil {
+			switch {
+			case !objectBefore.removalAuthorized:
+				rejection = 2
+			case objectBefore.removalSeq != 0:
+				rejection = 8
+			case objectBefore.id != r.KernelID:
+				rejection = 4
+			case r.Sequence <= objectBefore.publicationSeq:
+				rejection = 6
+			case objectBefore.class == "program" && r.Kind != 2 || objectBefore.class == "map" && r.Kind != 4:
+				rejection = 5
+			}
+		}
+		trackerErr := b.effects.objects.removed(r)
+		if b.diagnostic != nil {
+			b.diagnostic.trackerThrough = r.Sequence
+		}
+		if b.diagnostic != nil && objectBefore != nil && b.diagnostic.objectForRecord(&r) == objectBefore {
+			decision, reason := uint64(1), uint64(0)
+			if trackerErr != nil {
+				decision, reason = 2, rejection
+			}
+			b.diagnostic.objectFact(objectBefore, 26, r.Sequence, 0, decision, reason)
+			if trackerErr != nil {
+				b.diagnostic.objectFact(objectBefore, 30, r.Sequence, 0, rejection, r.Sequence)
+			}
+			if trackerErr == nil {
+				b.diagnostic.objectFact(objectBefore, 29, r.Sequence, 0, objectBefore.removalSeq, 0)
+			}
+		}
+		if trackerErr != nil {
+			return trackerErr
 		}
 		if err := b.recordGrantObjectRemoval(r); err != nil {
 			return err
@@ -126,9 +178,15 @@ func (b *authorityBroker) observeRuntimeGuard(r guardRecord) error {
 		if !b.checkpoint.lifecycle.paused {
 			item := b.checkpoint.lifecycle.objects[r.ObjectCookie]
 			if item == nil || !item.removalAllowed || item.removed || item.kernelID != r.KernelID {
+				if b.diagnostic != nil {
+					b.diagnostic.lifecycleDecision(&r, 2, 7)
+				}
 				return errGuardProtocol
 			}
 			item.removed = true
+			if b.diagnostic != nil {
+				b.diagnostic.lifecycleDecision(&r, 1, 0)
+			}
 		}
 		return nil
 	case 5, 6:

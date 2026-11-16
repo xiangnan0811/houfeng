@@ -29,6 +29,7 @@ type checkpointLifecycle struct {
 	lineage       *daemonLineage
 	retiringTasks map[uint64]bool
 	runtimeGuard  func(guardRecord) error
+	diagnostic    *ownerProbeEvidenceState
 }
 
 func (c *checkpointLifecycle) observe(r guardRecord) error {
@@ -50,12 +51,29 @@ func (c *checkpointLifecycle) observe(r guardRecord) error {
 	case 2, 4:
 		item := c.objects[r.ObjectCookie]
 		if item == nil || !item.removalAllowed || item.removed || item.kernelID == 0 || item.kernelID != r.KernelID {
+			if c.diagnostic != nil {
+				reason := uint64(7)
+				if item != nil && !item.removalAllowed {
+					reason = 2
+				} else if item != nil && item.removed {
+					reason = 8
+				} else if item != nil && item.kernelID != r.KernelID {
+					reason = 4
+				}
+				c.diagnostic.lifecycleDecision(&r, 2, reason)
+			}
 			return errGuardProtocol
 		}
 		if r.Kind == 2 && item.class != "program" || r.Kind == 4 && item.class != "map" {
+			if c.diagnostic != nil {
+				c.diagnostic.lifecycleDecision(&r, 2, 5)
+			}
 			return errGuardProtocol
 		}
 		item.removed = true
+		if c.diagnostic != nil {
+			c.diagnostic.lifecycleDecision(&r, 1, 0)
+		}
 	case 5, 6:
 		item := c.cgroups[cgroupKey{r.RootCookie, r.CgroupID}]
 		if item == nil || item.enrollment == 0 || !item.retirementAllowed || item.released {

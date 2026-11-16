@@ -20,7 +20,7 @@ func (b *authorityBroker) settleNotification(t *runtimeEffectTransaction, h *hel
 		c.markFault()
 		return nil, false, err
 	}
-	status, e := c.guard.status()
+	status, e := c.guard.statusObserved(2)
 	if e != nil || status.State != 1 || status.Sticky != 0 || status.Lost != 0 || status.ProbeMissed != 0 || status.Sequence != c.cursor || status.AckCursor != c.cursor {
 		c.markFault()
 		return nil, false, errGuardProtocol
@@ -49,6 +49,19 @@ func (b *authorityBroker) settleNotification(t *runtimeEffectTransaction, h *hel
 	} else {
 		callErr = replyNotification(h.memory.listener, h.notice.ID, value, errno)
 	}
+	if b.diagnostic != nil && t.publication != nil && b.effects.objects != nil {
+		var code unix.Errno
+		_ = errors.As(callErr, &code)
+		kind := uint64(1)
+		if sourceFD >= 0 {
+			kind = 2
+		}
+		o := b.effects.objects.byCookie[t.publication.ObjectCookie]
+		b.diagnostic.objectFact(o, 18, 0, 0, kind, uint64(code))
+		if callErr != nil && code == 0 {
+			b.diagnostic.objectGap(o, 18)
+		}
+	}
 	if callErr != nil && !errors.Is(callErr, unix.ENOENT) {
 		c.markFault()
 		return nil, false, callErr
@@ -58,7 +71,7 @@ func (b *authorityBroker) settleNotification(t *runtimeEffectTransaction, h *hel
 		c.markFault()
 		return nil, false, err
 	}
-	status, e = c.guard.status()
+	status, e = c.guard.statusObserved(3)
 	if e != nil || status.State != 1 || status.Sticky != 0 || status.Lost != 0 || status.ProbeMissed != 0 || status.Sequence != c.cursor || status.AckCursor != c.cursor || c.cursor < before {
 		c.markFault()
 		return nil, false, errGuardProtocol

@@ -28,9 +28,11 @@ SUPERVISOR_FILES = ('contract.py', 'census.py', 'journal.py', 'maintenance.py', 
                     'extra_barrier.py', 'physical_backup.py', 'wrong_rpc.py', 'reboot_observer.py',
                     'listener_negative.py', 'callback_lifecycle.py', 'browser_process.py', 'app_rollback.py',
                     'bpf_authority.py')
-GUEST_FILES = ('source_guest.py', 'source_protocol.py') + SUPERVISOR_FILES
+ROOT_GUEST_FILES = ('source_guest.py', 'source_protocol.py', 'source_settlement_evidence.py')
+GUEST_FILES = ROOT_GUEST_FILES + SUPERVISOR_FILES
 RUNNER_FILES = ('source_host.py', 'source_build.py', 'source_vm.py', 'source_verify.py', 'source_protocol.py', 'source_protocol_test.py',
-                'source_resources.py', 'source_resource_test.py', 'source_copy_test.py',
+                'source_settlement_evidence.py', 'source_settlement_evidence_test.py', 'source_resources.py', 'source_resource_test.py', 'source_copy_test.py',
+                'source_vm_failure_fixture.py',
                 'source_retirement.py', 'source_retirement_test.py', 'source_boot.py', 'source_bpf_build.py',
                 'source_bpf_verify.py', 'source_bpf_core.py', 'source_kernel_observer.py',
                 'source_bpf_negative.py', 'browser_negative.py')
@@ -409,7 +411,7 @@ def _write_seed(host, frozen, result, program_paths, build_state, attempt, brows
     seed = attempt / 'seed'
     os.mkdir(seed, 0o700)
     for name in GUEST_FILES:
-        source = host.SOURCE_ROOT / name if name in ('source_guest.py', 'source_protocol.py') else host.SOURCE_ROOT / 'source_supervisor' / name
+        source = host.SOURCE_ROOT / name if name in ROOT_GUEST_FILES else host.SOURCE_ROOT / 'source_supervisor' / name
         _copy(host, source, seed / name, 0o600)
     for name in CARRIER_FILES:
         source = host.PHASE0 / name
@@ -435,7 +437,7 @@ runcmd:
   - [mkdir, -p, /mnt/g2-cidata, /mnt/g2-seed, /run/g2]
   - [mount, -t, vfat, -o, 'ro,nosuid,nodev,noexec', /dev/disk/by-id/virtio-G2CIDATA-part1, /mnt/g2-cidata]
   - [mount, -t, ext4, -o, 'ro,noload,nosuid,nodev,noexec', /dev/disk/by-id/virtio-G2SEED, /mnt/g2-seed]
-  - [sh, -c, 'cd /mnt/g2-seed && sha256sum -c SHA256SUMS && cp source_guest.py source_protocol.py contract.py census.py journal.py maintenance.py smoke.py phase.py permit.py ipc.py audit.py lifecycle.py callback_lifecycle.py browser_process.py app_rollback.py guest_storage.py guest_bootstrap.py guest_postgres.py pg_bootstrap.py pg_session.py negative_channel.py comparison_fixture.py extra_barrier.py physical_backup.py wrong_rpc.py reboot_observer.py listener_negative.py systemd_realm.py run_stop_observer.py volume_verify.py origins.py invoke.py heartbeat.py genesis.py ceremony.py cutpoints.py network_verify.py restart.py dns.py fence_transition.py bpf_authority.py guest.py handoff.py guest_matrix.py preparation.py prepare_launcher.py /run/g2/ && exec /usr/bin/python3 -B -c "import guest_bootstrap; guest_bootstrap.launch_source()"']
+  - [sh, -c, 'cd /mnt/g2-seed && sha256sum -c SHA256SUMS && cp source_guest.py source_protocol.py source_settlement_evidence.py contract.py census.py journal.py maintenance.py smoke.py phase.py permit.py ipc.py audit.py lifecycle.py callback_lifecycle.py browser_process.py app_rollback.py guest_storage.py guest_bootstrap.py guest_postgres.py pg_bootstrap.py pg_session.py negative_channel.py comparison_fixture.py extra_barrier.py physical_backup.py wrong_rpc.py reboot_observer.py listener_negative.py systemd_realm.py run_stop_observer.py volume_verify.py origins.py invoke.py heartbeat.py genesis.py ceremony.py cutpoints.py network_verify.py restart.py dns.py fence_transition.py bpf_authority.py guest.py handoff.py guest_matrix.py preparation.py prepare_launcher.py /run/g2/ && exec /usr/bin/python3 -B -c "import guest_bootstrap; guest_bootstrap.launch_source()"']
 power_state: {mode: poweroff, delay: now, timeout: 60}
 """
     _write(seed / 'user-data', cloud)
@@ -453,6 +455,7 @@ def _perform_build(host, frozen, env, attempt, attempt_id):
         boot = None
         try:
             result, _, _, pg = host.prepare_gate(frozen)
+            _require_settlement_guard_abi(host)
             boot = source_boot.derive(Path(result['hash_checks']['ubuntu:' + frozen.IMAGE]['path']),
                                       host.RUN / 'build/qemu/qemu-img', attempt / 'boot-inputs', env=env)
             browser = _selected_browser(host)
@@ -461,7 +464,7 @@ def _perform_build(host, frozen, env, attempt, attempt_id):
             for path in wrappers:
                 host.check_path(path, False)
             for name in GUEST_FILES:
-                source = host.SOURCE_ROOT / name if name in ('source_guest.py', 'source_protocol.py') else host.SOURCE_ROOT / 'source_supervisor' / name
+                source = host.SOURCE_ROOT / name if name in ROOT_GUEST_FILES else host.SOURCE_ROOT / 'source_supervisor' / name
                 host.check_path(source, False)
             build_dir = attempt / 'source-build'
             os.mkdir(build_dir, 0o700)
@@ -502,7 +505,7 @@ def _perform_build(host, frozen, env, attempt, attempt_id):
             state['stage'] = 'bpf-native-boot'
             frozen.receipt_save(receipt, state)
             bpf_sources = {p.name: host.digest(p)[0] for p in source_dirs['bpf-authority']}
-            supervisor_sources = {name: host.digest(host.SOURCE_ROOT / name if name in ('source_guest.py', 'source_protocol.py') else
+            supervisor_sources = {name: host.digest(host.SOURCE_ROOT / name if name in ROOT_GUEST_FILES else
                                   host.SOURCE_ROOT / 'source_supervisor' / name)[0] for name in GUEST_FILES}
             bpf_artifacts = source_bpf_build.build(host, frozen, env, attempt, result, boot,
                               programs['g2-bpf-authority'], bpf_sources, supervisor_sources)
@@ -599,6 +602,15 @@ def _selected(host, frozen):
     return state
 
 
+def _require_settlement_guard_abi(host):
+    header = host.SOURCE_ROOT / 'source_supervisor/bpf-authority/native/abi.h'
+    host.check_path(header, False)
+    data = header.read_bytes()
+    host.require(len(data) <= 65536 and
+                 re.findall(rb'(?m)^#define[ \t]+G2_GUARD_VERSION[ \t]+([^\s]+)[ \t]*$', data) == [b'5U'],
+                 'current settlement guard ABI is not V5')
+
+
 def _validate_current(host, frozen, state):
     host.validate_source_layout()
     host.require(type(state.get('boot_inputs')) is dict and type(state.get('bpf_authority')) is dict and
@@ -607,6 +619,8 @@ def _validate_current(host, frozen, state):
                  source_bpf_build.native_sources(host) == state['bpf_authority']['native_sources'] and
                  host.digest(source_bpf_build.AUDIT_SOURCE)[0] == source_bpf_build.AUDIT_SOURCE_SHA256,
                  'BPF boot inputs or native toolchain changed')
+    if 'source_settlement_evidence.py' in state.get('runner_inputs', {}):
+        _require_settlement_guard_abi(host)
     host.require('seed_toolchain' in state and seed_toolchain(host, frozen.task_environment()) == state['seed_toolchain'],
                  'seed filesystem toolchain changed after build')
     host.require(set(state['binaries']) == set(BINARIES), 'current fixed binary set changed')
@@ -616,7 +630,7 @@ def _validate_current(host, frozen, state):
                  state['seed_inputs']['browser-image.tar'] == browser['selection']['image_archive_sha256'],
                  'browser selection or seed changed after build')
     for name in GUEST_FILES:
-        source = host.SOURCE_ROOT / name if name in ('source_guest.py', 'source_protocol.py') else host.SOURCE_ROOT / 'source_supervisor' / name
+        source = host.SOURCE_ROOT / name if name in ROOT_GUEST_FILES else host.SOURCE_ROOT / 'source_supervisor' / name
         host.require(host.digest(source)[0] == state['seed_inputs'][name], 'guest source changed after build')
     for name, expected in state['runner_inputs'].items():
         host.require(host.digest(host.SOURCE_ROOT / name)[0] == expected, 'runner source changed')

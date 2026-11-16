@@ -41,6 +41,7 @@ type pendingAdmit struct {
 	deadline              time.Time
 	eventFD               int
 	result                chan admitIOResult
+	connection            *brokerControlConnection
 }
 
 func (b *authorityBroker) pendingControlFD() int {
@@ -352,26 +353,10 @@ func (b *authorityBroker) finishAdmitContainer() (*controlPrincipal, []byte, boo
 			return q.principal, nil, true, errGuardProtocol
 		}
 	}
-	_, _, err = b.transcript.append("grant", map[string]any{"id": jsonU64(id), "owner": jsonU64(q.principal.ID), "purpose": q.purpose, "container_id": q.cid, "config": q.config, "config_sha256": q.hash, "invocation": jsonU64(q.generation), "phase": "admitted", "retirement": "auto_empty"})
+	ack, err := b.commitAdmittedGrant(q, g)
 	if err != nil {
-		g2d1CaptureFailure("ADMIT_TRANSCRIPT", err)
 		return q.principal, nil, true, err
 	}
-	ack, err := controlACK(b.reads, q.principal, q.requestID, q.raw, "OK", map[string]any{"grant_id": jsonU64(id)})
-	if err != nil {
-		g2d1CaptureFailure("ADMIT_ACK", err)
-		b.checkpoint.markFault()
-		return q.principal, nil, true, err
-	}
-	if err = q.principal.commitReply(q.requestID, q.raw, ack, nil); err != nil {
-		g2d1CaptureFailure("ADMIT_COMMIT_REPLY", err)
-		b.checkpoint.markFault()
-		return q.principal, nil, true, err
-	}
-	if b.grants == nil {
-		b.grants = make(map[uint64]*brokerGrant)
-	}
-	b.grants[id] = g
 	if strings.HasPrefix(q.purpose, "postgres-init-") && result.secretRec != nil {
 		svc := strings.TrimPrefix(q.purpose, "postgres-init-")
 		b.serviceSecrets[svc] = result.secretRec
@@ -388,4 +373,40 @@ func (b *authorityBroker) finishAdmitContainer() (*controlPrincipal, []byte, boo
 	}
 	keep = true
 	return q.principal, ack, true, nil
+}
+
+// commitAdmittedGrant publishes the already validated grant and binds its
+// diagnostic evidence to the control connection that authenticated ADMIT.
+func (b *authorityBroker) commitAdmittedGrant(q *pendingAdmit, g *brokerGrant) ([]byte, error) {
+	_, _, err := b.transcript.append("grant", map[string]any{"id": jsonU64(g.id), "owner": jsonU64(q.principal.ID), "purpose": q.purpose, "container_id": q.cid, "config": q.config, "config_sha256": q.hash, "invocation": jsonU64(q.generation), "phase": "admitted", "retirement": "auto_empty"})
+	if err != nil {
+		g2d1CaptureFailure("ADMIT_TRANSCRIPT", err)
+		return nil, err
+	}
+	ack, err := controlACK(b.reads, q.principal, q.requestID, q.raw, "OK", map[string]any{"grant_id": jsonU64(g.id)})
+	if err != nil {
+		g2d1CaptureFailure("ADMIT_ACK", err)
+		b.checkpoint.markFault()
+		return nil, err
+	}
+	if err = q.principal.commitReply(q.requestID, q.raw, ack, nil); err != nil {
+		g2d1CaptureFailure("ADMIT_COMMIT_REPLY", err)
+		b.checkpoint.markFault()
+		return nil, err
+	}
+	if b.grants == nil {
+		b.grants = make(map[uint64]*brokerGrant)
+	}
+	b.grants[g.id] = g
+	if b.diagnostic != nil {
+		b.diagnostic.issue(b, g)
+		if e := b.diagnostic.grantFor(g); e != nil {
+			if q.connection == nil {
+				e.gap |= settlementGapUnbound
+			} else {
+				q.connection.associateEvidence(e)
+			}
+		}
+	}
+	return ack, nil
 }

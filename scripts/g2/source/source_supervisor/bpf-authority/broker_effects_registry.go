@@ -80,7 +80,7 @@ func (b *authorityBroker) effectRegistryGuard(cleanup bool) error {
 	if b == nil || b.authority == nil || b.checkpoint == nil || b.checkpoint.invalid && (!cleanup || !b.canObserveOwnerDeath()) {
 		return errGuardProtocol
 	}
-	s, err := b.authority.guard.status()
+	s, err := b.authority.guard.statusObserved(5)
 	if err != nil || s.State != 1 || s.Sticky != 0 || s.Lost != 0 || s.ProbeMissed != 0 || s.BrokerCookie != b.authority.brokerCookie || s.Epoch != b.authority.seal.Epoch || s.LinkIDs != b.authority.seal.LinkIDs {
 		b.checkpoint.markFault()
 		return errGuardProtocol

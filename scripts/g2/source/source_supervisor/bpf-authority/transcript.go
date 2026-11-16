@@ -27,8 +27,11 @@ func (r guardRecord) projection() (map[string]any, error) {
 	}
 	var detail any
 	if r.Kind < 8 {
-		if !guardZero(r.Detail[:]) || r.Flags&1 != 0 || (r.Kind == 7 && r.AuditSerial != 0) {
+		if !validLifecycleDetail(r.Kind, r.Detail[:]) || r.Flags&1 != 0 || (r.Kind == 7 && r.AuditSerial != 0) {
 			return nil, errGuardProtocol
+		}
+		if r.Kind == 2 || r.Kind == 4 || r.Kind == 5 || r.Kind == 6 {
+			detail = map[string]any{"observed_mono_ns": jsonU64(guardU64(r.Detail[:], 0))}
 		}
 	} else if r.Kind == 8 {
 		if _, err := r.auditKey(); err != nil {

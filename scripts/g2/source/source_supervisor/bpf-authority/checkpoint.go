@@ -156,6 +156,9 @@ func drainGuardEvents(g guardDevice, transcript *authorityTranscript, join *audi
 		if err != nil {
 			return err
 		}
+		if g.diagnostic != nil && batch.Last != 0 {
+			g.diagnostic.ringThrough = batch.Last
+		}
 		if batch.Sticky != 0 {
 			return errGuardProtocol
 		}
@@ -169,6 +172,9 @@ func drainGuardEvents(g guardDevice, transcript *authorityTranscript, join *audi
 			}
 			if _, _, err = transcript.append("guard", map[string]any{"record": projected}); err != nil {
 				return err
+			}
+			if g.diagnostic != nil {
+				g.diagnostic.pipeline(&record, 25)
 			}
 			*cursor = record.Sequence
 			fault := join.fault
@@ -202,17 +208,25 @@ func drainGuardEvents(g guardDevice, transcript *authorityTranscript, join *audi
 				}
 			}
 			if record.Kind >= 1 && record.Kind <= 6 && lifecycle.runtimeGuard != nil {
-				if err = lifecycle.runtimeGuard(record); err != nil {
+				err = lifecycle.runtimeGuard(record)
+				if err != nil {
 					return err
 				}
 			}
-			if err = lifecycle.observe(record); err != nil {
+			err = lifecycle.observe(record)
+			if g.diagnostic != nil {
+				g.diagnostic.pipeline(&record, 27)
+			}
+			if err != nil {
 				return err
 			}
 			if record.Kind == 7 || record.Kind == 8 || record.Kind == 13 {
 				if err = join.observeGuard(record); err != nil {
 					return err
 				}
+			}
+			if g.diagnostic != nil && lifecycle.runtimeGuard != nil {
+				g.diagnostic.trackerThrough = record.Sequence
 			}
 		}
 	}
@@ -285,7 +299,7 @@ func pollAuditWatermark(g guardDevice, a *auditMulticast, transcript *authorityT
 	if err := drainAuditMessages(a, join); err != nil {
 		return guardStatus{}, false, err
 	}
-	status, err := g.status()
+	status, err := g.statusObserved(1)
 	if errors.Is(err, unix.EAGAIN) {
 		return guardStatus{}, false, nil
 	}

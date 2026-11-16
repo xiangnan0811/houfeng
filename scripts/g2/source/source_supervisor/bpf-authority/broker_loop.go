@@ -24,9 +24,41 @@ type brokerLoopHandlers struct {
 }
 
 type brokerControlConnection struct {
-	pending    bool
-	out        []byte
-	settlement ownerProbeSettlementReceipt
+	pending         bool
+	out             []byte
+	settlement      ownerProbeSettlementReceipt
+	evidence        *settlementEvidenceGrant
+	evidenceRequest uint64
+	admitted        [2]*settlementEvidenceGrant
+}
+
+func (c *brokerControlConnection) associateEvidence(e *settlementEvidenceGrant) {
+	for i, existing := range c.admitted {
+		if existing == e {
+			return
+		}
+		if existing == nil {
+			c.admitted[i] = e
+			return
+		}
+	}
+	e.gap |= settlementGapCapacity
+}
+
+// controlHUP records one observed boundary for the grants admitted through
+// this connection, including a settlement started on another connection.
+func (b *authorityBroker) controlHUP(c *brokerControlConnection, pending *pendingBrokerSettlement) {
+	if b.diagnostic == nil {
+		return
+	}
+	now := evidenceNow()
+	for _, e := range c.admitted {
+		b.diagnostic.terminal(e, 3, now, 0)
+	}
+	b.diagnostic.terminal(c.evidence, 3, now, 0)
+	if pending != nil {
+		b.diagnostic.terminal(pending.evidence, 3, now, 0)
+	}
 }
 
 func openBrokerControlListener(boot string) (int, error) {
@@ -65,6 +97,32 @@ func (b *authorityBroker) rejectReaderEvent() error {
 	return errGuardProtocol
 }
 
+func (b *authorityBroker) settlementEvidenceTransport() *settlementEvidenceTransport {
+	if b.diagnostic == nil {
+		return nil
+	}
+	return b.diagnostic.transport
+}
+
+func (b *authorityBroker) finalizeSettlementEvidence() {
+	if b.diagnostic == nil {
+		return
+	}
+	now := evidenceNow()
+	for i := range b.diagnostic.grants {
+		b.diagnostic.terminal(&b.diagnostic.grants[i], 5, now, 0)
+	}
+	if transport := b.settlementEvidenceTransport(); transport != nil {
+		transport.flush(b.diagnostic)
+	}
+}
+
+func (b *authorityBroker) closeSettlementEvidenceTransport() {
+	if transport := b.settlementEvidenceTransport(); transport != nil {
+		transport.close()
+	}
+}
+
 // serveBrokerPoll runs only after the authenticated bootstrap has established
 // the sealed authority, reader, audit stream, transcript, and listener. Socket
 // clients can issue successive requests on the same credentialled connection.
@@ -73,8 +131,10 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 		g2d1CaptureFailure("BROKER_SERVE_INPUT", errGuardProtocol)
 		return errGuardProtocol
 	}
+	defer b.closeSettlementEvidenceTransport()
 	connections := make(map[int]*brokerControlConnection)
 	defer func() {
+		b.finalizeSettlementEvidence()
 		if b.pendingSettlement != nil {
 			b.pendingSettlement.followup(b, 4)
 		}
@@ -94,10 +154,17 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 	pendingFD := -1
 	var abandonedCheckpoint *pendingCheckpointRequest
 	for {
+		evidenceTransport := b.settlementEvidenceTransport()
+		if evidenceTransport != nil {
+			evidenceTransport.service(b, b.diagnostic)
+		}
 		now, err := monoNowNS()
 		if err != nil || now >= authorityGuestDeadlineNS {
 			g2d1CaptureFailure("BROKER_DEADLINE", err)
 			return errGuardProtocol
+		}
+		if b.diagnostic != nil {
+			b.diagnostic.deadlines(now)
 		}
 		if b.selftestFD != nil && now >= b.selftestFD.deadline {
 			b.checkpoint.markFault()
@@ -174,6 +241,16 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 			if _, err = b.retireBrokerCreation(b.effects.pending); err != nil {
 				g2d1CaptureFailure("BROKER_RETIRE_CREATION", err)
 				return err
+			}
+		}
+		if b.diagnostic != nil {
+			for i := range b.diagnostic.grants {
+				e := &b.diagnostic.grants[i]
+				if e.grant != nil {
+					if p := b.principals[e.grant.owner]; p != nil && p.Terminal {
+						b.diagnostic.terminal(e, 4, evidenceNow(), 0)
+					}
+				}
 			}
 		}
 		deadAdmit := b.pendingAdmit != nil && b.pendingAdmit.principal.Terminal
@@ -256,6 +333,7 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 			} else if b.pendingCheckpoint != nil {
 				_, ack, done, err = b.advanceCheckpointRequest()
 			} else if b.pendingAdmit != nil {
+				b.pendingAdmit.connection = connection
 				_, ack, done, err = b.finishAdmitContainer()
 			} else if b.pendingSettlement != nil {
 				settlement = b.pendingSettlement
@@ -294,6 +372,9 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 				} else if connection != nil {
 					connection.pending, connection.out = false, ack
 					connection.settlement = ownerProbeSettlementReceipt{}
+					if settlement != nil {
+						connection.evidence, connection.evidenceRequest = settlement.evidence, settlement.requestID
+					}
 					if settlement != nil && settlement.diagnosticEvents&(1<<3) != 0 {
 						connection.settlement = settlement.diagnostic
 					}
@@ -345,6 +426,9 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 		if b.pendingExecOp != nil {
 			poll = append(poll, unix.PollFd{Fd: int32(b.pendingExecOp.eventFD), Events: unix.POLLIN})
 		}
+		if evidenceTransport != nil {
+			poll = evidenceTransport.poll(poll)
+		}
 		if _, err = unix.Poll(poll, 100); err != nil {
 			if errors.Is(err, unix.EINTR) {
 				continue
@@ -381,6 +465,13 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 			fd := int(item.Fd)
 			if connection := connections[fd]; connection != nil {
 				if item.Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+					if item.Revents&unix.POLLHUP != 0 {
+						var pending *pendingBrokerSettlement
+						if connection.pending && pendingFD == fd {
+							pending = b.pendingSettlement
+						}
+						b.controlHUP(connection, pending)
+					}
 					if b.pendingObservation != nil && b.pendingObservation.controlFD == fd && !b.pendingObservation.ackDelivered {
 						return errGuardProtocol
 					}
@@ -412,6 +503,10 @@ func (b *authorityBroker) serveBrokerPoll(listener int, handlers brokerLoopHandl
 						delete(connections, fd)
 						continue
 					}
+					if b.diagnostic != nil {
+						b.diagnostic.terminal(connection.evidence, 2, evidenceNow(), connection.evidenceRequest)
+					}
+					connection.evidence, connection.evidenceRequest = nil, 0
 					if b.pendingObservation != nil && b.pendingObservation.armed && b.pendingObservation.controlFD == fd {
 						b.pendingObservation.ackDelivered = true
 					}
@@ -1104,7 +1199,8 @@ func bootstrapBrokerAuthority(bootstrapFD int) (_ *authorityBroker, _ int, err e
 		g2d1Fail("BROKER_GUARD_OPEN", err)
 		return nil, -1, err
 	}
-	guard := guardDevice{fd: guardFD}
+	diagnostic := &ownerProbeEvidenceState{}
+	guard := guardDevice{fd: guardFD, diagnostic: diagnostic}
 	parent, err := guard.pinTask(1)
 	if err != nil || parent.TID != 1 || parent.TGID != 1 {
 		g2d1Fail("BROKER_PARENT_PIN", err)
@@ -1216,6 +1312,7 @@ func bootstrapBrokerAuthority(bootstrapFD int) (_ *authorityBroker, _ int, err e
 		_ = unix.Close(guardFD)
 		return nil, -1, err
 	}
+	diagnostic.moduleInstance = guardStBefore.ModuleInstance
 	readerBody := map[string]any{"id": jsonU64(2), "role": "BOOTSTRAP_AUDIT_READER", "task_cookie": jsonU64(readerTask.Cookie), "tgid": jsonU64(uint64(readerTask.TGID)), "tid": jsonU64(uint64(readerTask.TID)), "start_ns": jsonU64(readerTask.StartBoottimeNS), "parent_cookie": jsonU64(parent.Cookie), "exe_sha256": readerProcess.ExecutableSHA256, "script_sha256": nil, "argv_sha256": readerProcess.ArgvSHA256, "uid": jsonU64(uint64(readerProcess.UID)), "gid": jsonU64(uint64(readerProcess.GID)), "cgroup_sha256": readerProcess.CgroupSHA256, "registration": "bootstrap", "terminal": nil}
 	observerBody := map[string]any{"id": jsonU64(3), "role": "BOOTSTRAP_TERMINAL_OBSERVER", "task_cookie": jsonU64(obsTask.Cookie), "tgid": jsonU64(uint64(obsTask.TGID)), "tid": jsonU64(uint64(obsTask.TID)), "start_ns": jsonU64(obsTask.StartBoottimeNS), "parent_cookie": jsonU64(parent.Cookie), "exe_sha256": obsProcess.ExecutableSHA256, "script_sha256": nil, "argv_sha256": obsProcess.ArgvSHA256, "uid": jsonU64(uint64(obsProcess.UID)), "gid": jsonU64(uint64(obsProcess.GID)), "cgroup_sha256": obsProcess.CgroupSHA256, "registration": "bootstrap", "terminal": nil}
 	moduleInstanceBody := map[string]any{
@@ -1262,6 +1359,7 @@ func bootstrapBrokerAuthority(bootstrapFD int) (_ *authorityBroker, _ int, err e
 		return nil, -1, errGuardProtocol
 	}
 	b := &authorityBroker{manifest: manifest, bootID: boot, epoch: epoch, authority: authority, transcript: transcript, audit: audit, reader: reader, observerSocketFD: obsSocketFD, observerPIDFD: obsPIDFD, observerCookie: obsTask.Cookie, parentTask: parent, principals: make(map[uint64]*controlPrincipal), launches: make(map[uint64]*launchRegistration), daemons: make(map[uint64]*daemonRegistration), grants: make(map[uint64]*brokerGrant), nextPrincipal: 4, programLogScratch: make([]byte, 131072)}
+	b.diagnostic, diagnostic.broker = diagnostic, b
 	principal := &controlPrincipal{ID: 1, TaskCookie: selfTask.Cookie, StartNS: selfTask.StartBoottimeNS, Role: "BOOTSTRAP_BROKER", PIDFD: authority.brokerPIDFD, PID: uint32(os.Getpid()), UID: 0, GID: 0, NextRequest: 1}
 	if err = b.appendPrincipal(principal, self, parent.Cookie, "", "bootstrap"); err != nil {
 		g2d1Fail("TRANSCRIPT_AUDIT_JOIN", err)
@@ -1289,7 +1387,7 @@ func bootstrapBrokerAuthority(bootstrapFD int) (_ *authorityBroker, _ int, err e
 		g2d1Fail("TRANSCRIPT_AUDIT_JOIN", err)
 		return nil, -1, err
 	}
-	lifecycle := &checkpointLifecycle{objects: make(map[uint64]*deferredObject), cgroups: make(map[cgroupKey]*deferredCgroup), lineage: &daemonLineage{}, retiringTasks: make(map[uint64]bool)}
+	lifecycle := &checkpointLifecycle{objects: make(map[uint64]*deferredObject), cgroups: make(map[cgroupKey]*deferredCgroup), lineage: &daemonLineage{}, retiringTasks: make(map[uint64]bool), diagnostic: diagnostic}
 	b.checkpoint = &checkpointController{guard: guard, audit: audit, transcript: transcript, join: b.join, lifecycle: lifecycle, cursor: authority.guardCursor, auditBaselineSet: true, auditLost: initialStatus.lost}
 	b.reads = &brokerReadState{bootID: boot, epoch: epoch, runToken: authorityRunToken, guard: guard, transcript: transcript, checkpoint: b.checkpoint}
 	actor := auditControlActor{TaskCookie: parent.Cookie, TGID: 1, TID: 1, StartNS: parent.StartBoottimeNS, ExeSHA256: manifest.BrokerSHA256}

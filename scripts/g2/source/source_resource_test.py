@@ -1,7 +1,10 @@
 """Resource contract regression tests; all fixtures are private and require no VM."""
+import contextlib
 import copy
 import errno
 import hashlib
+import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -16,6 +19,7 @@ from unittest import mock
 import source_build
 import source_host as host
 import source_resources as resources
+import source_vm_failure_fixture
 import source_verify
 import source_vm
 
@@ -596,6 +600,147 @@ class ResourceTests(unittest.TestCase):
             forged = source_verify._case(host, None, 'realm-negative', 'bpf-authorization', build)
             self.assertEqual(forged['status'], 'FAIL')
 
+    def test_family_failure_retains_independently_read_evidence(self):
+        selection = {'selection_id': '1'}
+        self.build.update(_selection=selection, runner_inputs={'source_resources.py': 'a' * 64,
+                                                                'source_settlement_evidence.py': 'b' * 64})
+        root = self.root / 'runs' / 'selection-1' / 'realm-negative'
+        root.mkdir(mode=0o700, parents=True)
+        attempt_id = '00000000000000000001'
+        attempt = root / ('attempt-' + attempt_id)
+        attempt.mkdir(mode=0o700)
+        manifest = {'version': 1, 'run_token': host.TOKEN, 'build_selection': selection,
+                    'attempt': attempt_id, 'case': 'realm-negative', 'scenarios': ['bpf-authorization'],
+                    'members': [{'case': c, 'scenario': s, 'variant': v}
+                                for c, s, v in source_vm.BPF_AUTH_FAMILY_MEMBERS]}
+        raw = host.canonical(manifest)
+        (attempt / 'launch-manifest.json').write_bytes(raw)
+        manifest_sha = hashlib.sha256(raw).hexdigest()
+        original_run = source_vm._run_single_vm_case
+        captured = {}
+        def member(_host, _frozen, _env, directory, case, scenario, build, variant=None, manifest_sha256=None):
+            case_dir, receipt, evidence, argv, outcome = source_vm_failure_fixture.exercise(
+                self, 'family-error', case_dir=directory, scenario=scenario, variant=variant,
+                manifest_sha=manifest_sha256, run_single=original_run)
+            # Missing post-wait proof is PARTIAL; the authentic terminal and
+            # independently held captures remain intact.
+            receipt.pop('boot_observations', None)
+            receipt.pop('carrier_observations', None)
+            for name in ('seed.raw', 'cidata.raw'):
+                (case_dir / name).unlink()
+            receipt_path = case_dir / 'receipt.json'
+            receipt_path.write_bytes(host.canonical(receipt))
+            with receipt_path.open('rb') as stream:
+                os.fsync(stream.fileno())
+            captured.update(argv=argv, evidence=evidence, case_dir=case_dir)
+            return outcome
+        with mock.patch.object(host, 'RUN', self.root), \
+             mock.patch.object(source_vm, '_run_single_vm_case', side_effect=member):
+            self.assertFalse(source_vm._case(host, None, {}, attempt, 'realm-negative', 'bpf-authorization',
+                                             self.build, manifest_sha256=manifest_sha))
+        frozen = host.frozen_host()
+        base = self.root / 'failure-base'
+        with mock.patch.object(host, 'RUN', self.root), \
+             mock.patch.object(frozen, 'IMAGE', 'fixture'), \
+             mock.patch.object(frozen, 'UBUNTU_HASHES', {'fixture': host.digest(base)[0]}), \
+             mock.patch.object(frozen, 'load_json', return_value={'assets': {'ubuntu:fixture': str(base)}}), \
+             mock.patch.object(source_vm, 'expected_vm_argv', side_effect=captured['argv']):
+            result = source_verify._case(host, frozen, 'realm-negative', 'bpf-authorization', self.build)
+        self.assertEqual(result['status'], 'FAIL')
+        self.assertEqual(result['stop_reason'], 'resource_capacity')
+        self.assertEqual(len(result['members']), 1)
+        member_result = result['members'][0]
+        self.assertEqual(member_result['variant'], 'baseline')
+        self.assertEqual(member_result['settlement_evidence']['quality'], 'PARTIAL')
+        self.assertEqual(member_result['settlement_evidence']['reference_holder'], 'UNRESOLVED')
+        self.assertEqual(member_result['verification_limits'], ['CARRIERS', 'RESOURCES'])
+        self.assertEqual(host.strict_json((captured['case_dir'] / 'failed-result.json').read_bytes())
+                         ['settlement_evidence_v1'], captured['evidence'])
+        artifact_path = captured['case_dir'] / 'failed-result.json'
+        with artifact_path.open('r+b') as stream:
+            first = stream.read(1)
+            stream.seek(0)
+            stream.write(b' ' if first != b' ' else b'{')
+            stream.flush()
+            os.fsync(stream.fileno())
+        with mock.patch.object(host, 'RUN', self.root), \
+             mock.patch.object(frozen, 'IMAGE', 'fixture'), \
+             mock.patch.object(frozen, 'UBUNTU_HASHES', {'fixture': host.digest(base)[0]}), \
+             mock.patch.object(frozen, 'load_json', return_value={'assets': {'ubuntu:fixture': str(base)}}), \
+             mock.patch.object(source_vm, 'expected_vm_argv', side_effect=captured['argv']):
+            tampered = source_verify._case(host, frozen, 'realm-negative', 'bpf-authorization', self.build)
+        self.assertEqual(tampered['status'], 'FAIL')
+        self.assertEqual(tampered['members'][0]['settlement_evidence']['quality'], 'INVALID')
+
+    def test_ordinary_failure_preserves_evidence_and_limits(self):
+        selection = {'selection_id': '1'}
+        self.build.update(_selection=selection, runner_inputs={'source_resources.py': 'a' * 64,
+                                                                'source_settlement_evidence.py': 'b' * 64})
+        root = self.root / 'runs' / 'selection-1' / 'realm-negative'
+        root.mkdir(mode=0o700, parents=True)
+        attempt_id = '00000000000000000001'
+        attempt = root / ('attempt-' + attempt_id)
+        attempt.mkdir(mode=0o700)
+        manifest = {'version': 1, 'run_token': host.TOKEN, 'build_selection': selection,
+                    'attempt': attempt_id, 'case': 'realm-negative', 'scenarios': ['bpf-broker-kill'],
+                    'members': [{'case': 'realm-negative', 'scenario': 'bpf-broker-kill', 'variant': None}]}
+        raw = host.canonical(manifest)
+        (attempt / 'launch-manifest.json').write_bytes(raw)
+        case_dir, receipt, evidence, argv, _ = source_vm_failure_fixture.exercise(
+            self, 'carrier-error', case_dir=attempt / 'bpf-broker-kill',
+            manifest_sha=hashlib.sha256(raw).hexdigest())
+        receipt.pop('boot_observations', None)
+        receipt.pop('carrier_observations', None)
+        for name in ('seed.raw', 'cidata.raw'):
+            (case_dir / name).unlink()
+        receipt_path = case_dir / 'receipt.json'
+        receipt_path.write_bytes(host.canonical(receipt))
+        with receipt_path.open('rb') as stream:
+            os.fsync(stream.fileno())
+        frozen = host.frozen_host()
+        base = self.root / 'failure-base'
+        with mock.patch.object(host, 'RUN', self.root), \
+             mock.patch.object(frozen, 'IMAGE', 'fixture'), \
+             mock.patch.object(frozen, 'UBUNTU_HASHES', {'fixture': host.digest(base)[0]}), \
+             mock.patch.object(frozen, 'load_json', return_value={'assets': {'ubuntu:fixture': str(base)}}), \
+             mock.patch.object(source_vm, 'expected_vm_argv', side_effect=argv):
+            result = source_verify._case(host, frozen, 'realm-negative', 'bpf-broker-kill', self.build)
+        self.assertEqual(result['status'], 'FAIL')
+        self.assertEqual(result['settlement_evidence']['quality'], 'PARTIAL')
+        self.assertEqual(result['verification_limits'], ['CARRIERS'])
+        self.assertEqual(host.strict_json((case_dir / 'failed-result.json').read_bytes())['settlement_evidence_v1'], evidence)
+
+    def test_aggregation_retains_one_synthetic_pass_but_stays_not_ready(self):
+        """Aggregation only: this synthetic PASS is not BPF, QEMU or seed evidence."""
+        selection = {'selection_id': '1'}
+        build = {'_selection': selection}
+        summary = {'quality': 'COMPLETE', 'last_native_stage': 'RELEASE_RETURN',
+                   'blocking_points': [], 'delivery': 'UNKNOWN', 'timeliness': 'UNKNOWN',
+                   'reference_holder': 'UNRESOLVED'}
+        def case_result(_host, _frozen, case, scenario, _build):
+            if (case, scenario) == ('realm-negative', 'bpf-broker-kill'):
+                return {'case': case, 'scenario': scenario, 'status': 'PASS', 'settlement_evidence': summary}
+            return {'case': case, 'scenario': scenario, 'status': 'NOT_RUN'}
+        output = io.StringIO()
+        with mock.patch.object(host, 'RUN', self.root), \
+             mock.patch.object(source_build, '_selected', return_value=build), \
+             mock.patch.object(source_build, '_validate_current'), \
+             mock.patch.object(source_verify, '_case', side_effect=case_result), \
+             contextlib.redirect_stdout(output):
+            code = source_verify.verify(host, None)
+        result = json.loads(output.getvalue())
+        report = host.strict_json(Path(result['report']).read_bytes())
+        exact = [item for item in report['cases'] if
+                 (item['case'], item['scenario']) == ('realm-negative', 'bpf-broker-kill')]
+        self.assertEqual(code, 1)
+        self.assertEqual((report['status'], report['product_gate'], report['permanent_deletion_http']),
+                         ('NOT_READY', 'NOT_READY', 'CLOSED'))
+        self.assertEqual(len(exact), 1)
+        self.assertEqual(exact[0]['status'], 'PASS')
+        self.assertEqual(exact[0]['settlement_evidence'], summary)
+        self.assertEqual(result['passed'], 1)
+        self.assertGreater(result['not_run'], 0)
+
     def test_memory_and_kvm_gate_boundaries(self):
         guard = resources.SourceResourceGuard(host, self.case, budget_for_payload(GiB))
         null_fd = os.open('/dev/null', os.O_RDONLY | os.O_CLOEXEC)
@@ -750,6 +895,38 @@ if stubborn:
             if stubborn:
                 self.assertTrue(cleanup_reaped, 'test cleanup did not reap the still-owned child')
                 self.assertFalse(attempt['exit_observed'], 'test cleanup must not rewrite production evidence')
+
+    def test_complete_guest_failure_lifecycle_and_secondary_errors(self):
+        for mode in ('complete', 'write-error', 'write-enospc', 'write-partial', 'cleanup-error', 'carrier-error',
+                     'partial', 'bad-digest', 'bad-install', 'no-ready', 'wrong-identity', 'host-timeout'):
+            with self.subTest(mode=mode):
+                source_vm_failure_fixture.exercise(self, mode)
+
+    def test_complete_failure_durable_readback(self):
+        source_vm_failure_fixture.exercise(self, 'complete', readback=True)
+
+    def test_reboot_failure_durable_readback(self):
+        source_vm_failure_fixture.exercise(self, 'complete', case='source-recovery', scenario='vm-kill', readback=True)
+
+    def test_qmp_capture_is_held_read_write(self):
+        import fcntl
+        guard, _ = self.guard()
+        source_vm._prepare_vm_captures(self.case, guard)
+        protocol, _, serial, _, qmp, identity, stderr = guard.captures
+        try:
+            self.assertEqual(fcntl.fcntl(qmp, fcntl.F_GETFL) & os.O_ACCMODE, os.O_RDWR)
+            self.assertTrue(source_vm._same_file(qmp, self.case / 'qmp.log', identity))
+            os.write(qmp, b'QMP')
+            self.assertEqual(os.pread(qmp, 3, 0), b'QMP')
+            self.assertEqual(source_vm._read_held_capture(host, qmp, self.case / 'qmp.log', identity, 10), b'QMP')
+            os.rename(self.case / 'qmp.log', self.case / 'qmp-held.log')
+            (self.case / 'qmp.log').write_bytes(b'QMP')
+            with self.assertRaises(host.Failure):
+                source_vm._read_held_capture(host, qmp, self.case / 'qmp.log', identity, 10)
+        finally:
+            for fd in (protocol, serial, qmp, stderr):
+                os.close(fd)
+            del guard.captures
 
 if __name__ == '__main__':
     unittest.main()

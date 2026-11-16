@@ -13,12 +13,15 @@ import (
 
 // guardDevice is used only by the broker's original locked OS thread. In
 // particular, the kernel authenticates the calling task, not its thread group.
-type guardDevice struct{ fd int }
+type guardDevice struct {
+	fd         int
+	diagnostic *ownerProbeEvidenceState
+}
 
 var errGuardProtocol = errors.New("BPF_AUTH_UNAVAILABLE: invalid guard response")
 
 const (
-	guardVersion    = 4
+	guardVersion    = 5
 	guardRecordSize = 192
 	guardMaxRecords = 64
 	guardEventsSize = 12344
@@ -147,6 +150,17 @@ func (g guardDevice) status() (guardStatus, error) {
 		return guardStatus{}, err
 	}
 	return decodeGuardStatus(b)
+}
+
+func (g guardDevice) statusObserved(source uint64) (guardStatus, error) {
+	if g.diagnostic == nil {
+		return g.status()
+	}
+	before := evidenceNow()
+	status, err := g.status()
+	after := evidenceNow()
+	g.diagnostic.status(source, status, err, before, after)
+	return status, err
 }
 
 // The seal identity is populated atomically by SEAL. Release can instead
@@ -350,20 +364,45 @@ func (g guardDevice) readEvents(max uint32, after, ack uint64) (guardEventBatch,
 	guardPut64(b, 16, after)
 	guardPut64(b, 24, ack)
 	if err := g.call(8, b); err != nil {
+		if g.diagnostic != nil {
+			g.diagnostic.batchError = 1
+			if errors.Is(err, errGuardProtocol) {
+				g.diagnostic.batchError = 2
+			}
+		}
 		return out, err
+	}
+	return g.decodeEvents(b, max, after, ack)
+}
+
+// decodeEvents consumes the exact buffer returned by READ_EVENTS. Keeping the
+// decoder separate permits exercising partial decode without a guard device.
+func (g guardDevice) decodeEvents(b []byte, max uint32, after, ack uint64) (guardEventBatch, error) {
+	var out guardEventBatch
+	if len(b) != guardEventsSize || max == 0 || max > guardMaxRecords || ack > after {
+		return out, errGuardProtocol
 	}
 	out.First, out.Last, out.Sticky = guardU64(b, 32), guardU64(b, 40), guardU32(b, 52)
 	count := guardU32(b, 48)
 	if guardU32(b, 8) != max || guardU32(b, 12) != 0 || guardU64(b, 16) != after || guardU64(b, 24) != ack || count > max || count > guardMaxRecords || !guardZero(b[56+int(count)*guardRecordSize:]) {
+		if g.diagnostic != nil {
+			g.diagnostic.batchError = 2
+		}
 		return guardEventBatch{}, errGuardProtocol
 	}
 	if count == 0 {
 		if out.First != 0 || out.Last != 0 {
+			if g.diagnostic != nil {
+				g.diagnostic.batchError = 2
+			}
 			return guardEventBatch{}, errGuardProtocol
 		}
 		return out, nil
 	}
 	if after == math.MaxUint64 || out.First != after+1 || out.Last < out.First || out.Last-out.First != uint64(count-1) {
+		if g.diagnostic != nil {
+			g.diagnostic.batchError = 2
+		}
 		return guardEventBatch{}, errGuardProtocol
 	}
 	out.Records = make([]guardRecord, 0, count)
@@ -371,7 +410,13 @@ func (g guardDevice) readEvents(max uint32, after, ack uint64) (guardEventBatch,
 		start := 56 + int(i)*guardRecordSize
 		v, err := decodeGuardRecord(b[start:start+guardRecordSize], out.First+uint64(i))
 		if err != nil {
+			if g.diagnostic != nil {
+				g.diagnostic.batchError = 2
+			}
 			return guardEventBatch{}, err
+		}
+		if g.diagnostic != nil {
+			g.diagnostic.decoded(&v)
 		}
 		out.Records = append(out.Records, v)
 	}
@@ -390,7 +435,7 @@ func decodeGuardRecord(r []byte, expectedSequence uint64) (guardRecord, error) {
 	if _, err := v.objectSnapshot(); err != nil {
 		return guardRecord{}, err
 	}
-	if v.Sequence != expectedSequence || v.Kind < 1 || v.Kind > 16 || v.Flags & ^uint32(7) != 0 || (v.Kind < 8 && !guardZero(v.Detail[:])) || (v.Kind != 8 && v.Flags&1 != 0) || (v.Kind == 7 && v.AuditSerial != 0) {
+	if v.Sequence != expectedSequence || v.Kind < 1 || v.Kind > 16 || v.Flags & ^uint32(7) != 0 || !validLifecycleDetail(v.Kind, v.Detail[:]) || (v.Kind != 8 && v.Flags&1 != 0) || (v.Kind == 7 && v.AuditSerial != 0) {
 		return guardRecord{}, errGuardProtocol
 	}
 	if v.Kind == 8 {
@@ -420,6 +465,13 @@ func decodeGuardRecord(r []byte, expectedSequence uint64) (guardRecord, error) {
 		return guardRecord{}, errGuardProtocol
 	}
 	return v, nil
+}
+
+func validLifecycleDetail(kind uint32, detail []byte) bool {
+	if kind == 2 || kind == 4 || kind == 5 || kind == 6 {
+		return guardU64(detail, 0) != 0 && guardZero(detail[8:])
+	}
+	return kind >= 8 || guardZero(detail)
 }
 
 func (g guardDevice) watchDaemon(cookie uint64) (uint64, error) {

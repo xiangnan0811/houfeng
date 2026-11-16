@@ -1,4 +1,6 @@
 """Offline installation of fixed guest programs and Docker, before genesis."""
+import array
+import base64
 import errno
 import hashlib
 import math
@@ -6,6 +8,7 @@ import os
 import pwd
 import grp
 import re
+import secrets
 import resource
 import select
 import shutil
@@ -20,6 +23,7 @@ import time
 
 import guest as carrier
 import network_verify
+import source_settlement_evidence
 from contract import MIGRATION_BINDING, MIGRATION_CGROUP, RUN_TOKEN, scenarios
 from guest_storage import ENV, command
 from journal import JournalError, boot_id, canonical, process_start, strict_json
@@ -29,10 +33,11 @@ SEED = '/mnt/g2-seed'
 RUN = '/run/g2'
 OWNER_PROBE_SOURCE = '/run/g2/postgres-owner-probe'
 OWNER_PROBE_TARGET = '/var/lib/postgresql/data'
+OWNER_SETTLEMENT_SOCKET = '/run/g2/owner-probe-settlement-evidence/broker.sock'
 PROGRAMS = ('c80-initializer', 'c80-launcher', 'c80-predecessor', 'c81-migrator',
             'domain-initializer', 'houfeng-record-platform-admin', 'dns-probe', 'c80-comparison-negative', 'c80-backup-negative',
             'g2-bpf-authority')
-SUPERVISOR = ('source_guest.py', 'source_protocol.py', 'contract.py', 'census.py', 'journal.py', 'maintenance.py', 'smoke.py', 'phase.py', 'permit.py',
+SUPERVISOR = ('source_guest.py', 'source_protocol.py', 'source_settlement_evidence.py', 'contract.py', 'census.py', 'journal.py', 'maintenance.py', 'smoke.py', 'phase.py', 'permit.py',
               'ipc.py', 'audit.py', 'lifecycle.py', 'guest_storage.py', 'guest_bootstrap.py', 'guest_postgres.py',
               'pg_bootstrap.py', 'systemd_realm.py', 'run_stop_observer.py', 'volume_verify.py', 'origins.py', 'invoke.py', 'heartbeat.py',
               'genesis.py', 'ceremony.py', 'cutpoints.py', 'network_verify.py', 'restart.py', 'dns.py',
@@ -1827,14 +1832,162 @@ def install(expected):
             'migration_cgroup': migration_cgroup, 'migration_binding': migration_binding}
 
 
-def _owner_probe(daemon, authority, flag, source, *, observe_owner_start):
+class _OwnerSettlementEvidenceChannel:
+    """Optional broker diagnostics; failure never grants or extends authority."""
+    def __init__(self, authority, purpose):
+        self.purpose = purpose
+        self.nonce = secrets.token_hex(16)
+        self.peer = authority._peer
+        self.boot = authority.boot_id.replace('-', '')
+        self.epoch = authority.epoch
+        self.principal = authority.principal_id
+        self.hard_deadline = authority._deadline
+        self.sock = None
+        self.armed = False
+        self.invalid = False
+        self.container_id = None
+        self.guest = {'operation_start_ns': 0, 'operation_deadline_ns': 0,
+                      'authority_deadline_ns': 0, 'ack_received_ns': 0}
+        try:
+            deadline = min(time.monotonic() + .250, self.hard_deadline)
+            if deadline <= time.monotonic():
+                return
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+            self.sock = sock
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+            sock.settimeout(max(0.000001, deadline - time.monotonic()))
+            sock.connect(OWNER_SETTLEMENT_SOCKET)
+            peer = struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
+            if peer != self.peer:
+                self.invalid = True
+                return
+            hello = canonical({'version': 1, 'purpose': purpose, 'nonce': self.nonce, 'principal_id': self.principal})
+            if len(hello) > 160 or sock.send(hello) != len(hello):
+                self.invalid = True
+                return
+            sock.settimeout(max(0.000001, deadline - time.monotonic()))
+            data = self._recv(129)
+            if not data:
+                return
+            reply = strict_json(data)
+            if (len(data) > 128 or type(reply) is not dict or
+                    reply != {'version': 1, 'status': 'ARMED', 'nonce': self.nonce} or
+                    type(reply['version']) is not int or canonical(reply) != data):
+                self.invalid = True
+                return
+            self.armed = True
+            sock.setblocking(False)
+        except (ValueError, TypeError, AttributeError, JournalError):
+            self.invalid = True
+        except OSError:
+            pass
+
+    def _recv(self, size):
+        data, ancillary, flags, _ = self.sock.recvmsg(size, socket.CMSG_SPACE(struct.calcsize('3i')) + socket.CMSG_SPACE(256))
+        if not data and not ancillary and not flags:
+            return b''
+        credentials, rights = [], False
+        for level, kind, payload in ancillary:
+            if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                descriptors = array.array('i')
+                descriptors.frombytes(payload[:len(payload) - len(payload) % descriptors.itemsize])
+                for fd in descriptors:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                rights = True
+            elif level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS and len(payload) == struct.calcsize('3i'):
+                credentials.append(struct.unpack('3i', payload))
+            else:
+                rights = True
+        if rights or flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC) or credentials != [self.peer]:
+            self.invalid = True
+            raise ValueError('invalid diagnostic frame')
+        return data
+
+    def bind(self, container_id, started, deadline):
+        self.container_id = container_id
+        self.guest['operation_start_ns'] = int(started * 1000000000)
+        self.guest['operation_deadline_ns'] = int(deadline * 1000000000)
+        if type(self.hard_deadline) is float and math.isfinite(self.hard_deadline) and self.hard_deadline > 0:
+            self.guest['authority_deadline_ns'] = int(self.hard_deadline * 1000000000)
+        if not self.armed or self.invalid:
+            return
+        body = canonical({'version': 1, 'purpose': self.purpose, 'container_id': container_id,
+                          'nonce': self.nonce, 'operation_start_ns': self.guest['operation_start_ns'],
+                          'operation_deadline_ns': self.guest['operation_deadline_ns'],
+                          'authority_deadline_ns': self.guest['authority_deadline_ns'], 'principal_id': self.principal})
+        try:
+            if len(body) > 512 or self.sock.send(body) != len(body):
+                self.invalid = True
+        except OSError:
+            self.invalid = True
+
+    def collect(self):
+        packets = []
+        if self.armed and not self.invalid:
+            try:
+                now = time.monotonic()
+                cutoff = min(now + .250, self.hard_deadline) if type(self.hard_deadline) is float and math.isfinite(self.hard_deadline) and self.hard_deadline > now else now
+                while len(packets) < 4:
+                    timeout = max(0, cutoff - time.monotonic())
+                    if not select.select([self.sock], [], [], timeout)[0]:
+                        break
+                    raw = self._recv(4097)
+                    if not raw:
+                        break
+                    if len(packets) == 3:
+                        self.invalid = True
+                        break
+                    snapshot = source_settlement_evidence.decode_snapshot(raw)
+                    if (snapshot['boot_id'] != self.boot or snapshot['epoch'] != self.epoch or
+                            snapshot['owner_id'] != self.principal or
+                            snapshot['container_id'] not in ('0' * 64, self.container_id)):
+                        self.invalid = True
+                        break
+                    packets.append(base64.b64encode(raw).decode('ascii'))
+                    if snapshot['phase'] == 3:
+                        cutoff = time.monotonic()
+            except (OSError, ValueError, TypeError):
+                self.invalid = True
+        collection = 'INVALID' if self.invalid else 'UNAVAILABLE' if not self.armed else 'EMPTY' if not packets else 'PARTIAL'
+        value = {'purpose': self.purpose, 'nonce': self.nonce, 'collection': collection,
+                 'guest': dict(self.guest), 'snapshots': [] if self.invalid else packets,
+                 'reference_holder': 'UNRESOLVED'}
+        if packets and not self.invalid:
+            try:
+                phases = [source_settlement_evidence.decode_snapshot(base64.b64decode(p)) for p in packets]
+                if phases[0]['phase'] == 1 and phases[-1]['phase'] == 3 and all(not p['gap_flags'] & 128 and p['coverage'][28] == 0 for p in phases):
+                    value['collection'] = 'COMPLETE'
+                source_settlement_evidence.validate_evidence({'version': 1, 'probes': [value]})
+            except (ValueError, TypeError):
+                value.update(collection='INVALID', snapshots=[])
+        return value
+
+    def close(self):
+        if self.sock is not None:
+            self.sock.close()
+
+
+def _owner_probe(daemon, authority, flag, source, *, observe_owner_start, settlement_evidence=None, evidence_channel=None):
     # Attach before start: the pinned log driver does not retain logs.
     from guest_postgres import _UnixHTTP
     import json
     import struct
 
-    deadline = time.monotonic() + 60
+    operation_start = time.monotonic()
+    deadline = operation_start + 60
     owner_operation_deadline = deadline
+    if evidence_channel is not None:
+        try:
+            evidence_channel.guest['operation_start_ns'] = int(operation_start * 1000000000)
+            evidence_channel.guest['operation_deadline_ns'] = int(deadline * 1000000000)
+            hard_deadline = evidence_channel.hard_deadline
+            if type(hard_deadline) is float and math.isfinite(hard_deadline) and hard_deadline > 0:
+                evidence_channel.guest['authority_deadline_ns'] = int(hard_deadline * 1000000000)
+        except BaseException:
+            pass
     config = {'Image': PG_ID, 'Entrypoint': ['/usr/bin/id'], 'Cmd': [flag, 'postgres'],
               'AttachStdout': True, 'AttachStderr': True, 'Tty': False,
               'HostConfig': {'NetworkMode': 'none', 'ReadonlyRootfs': True, 'Privileged': False,
@@ -1919,6 +2072,11 @@ def _owner_probe(daemon, authority, flag, source, *, observe_owner_start):
                 mounts[0].get('Name') not in (None, '')):
             raise JournalError('PostgreSQL owner probe bind differs')
         source.check()
+        if evidence_channel is not None:
+            try:
+                evidence_channel.bind(container_id, operation_start, owner_operation_deadline)
+            except BaseException:
+                pass
         authority.admit_container(config, container_id, 'postgres-uid' if flag == '-u' else 'postgres-gid')
         admitted = True
         attach = _UnixHTTP(daemon, min(20, deadline - time.monotonic()))
@@ -2000,6 +2158,8 @@ def _owner_probe(daemon, authority, flag, source, *, observe_owner_start):
         try:
             if authority.settle_container(container_id, 'completed', deadline) != 'retired':
                 raise JournalError('PostgreSQL owner BPF settlement remains pending')
+            if evidence_channel is not None:
+                evidence_channel.guest['ack_received_ns'] = time.monotonic_ns()
         except BaseException as exc:
             settlement_exception = exc
             raise
@@ -2069,19 +2229,53 @@ def _owner_probe(daemon, authority, flag, source, *, observe_owner_start):
                             settlement_diagnostic.close()
                         except BaseException:
                             pass
+                if evidence_channel is not None:
+                    try:
+                        try:
+                            evidence = evidence_channel.collect()
+                            source_settlement_evidence.validate_evidence({'version': 1, 'probes': [evidence]})
+                        except BaseException:
+                            evidence = {'purpose': evidence_channel.purpose, 'nonce': evidence_channel.nonce,
+                                        'collection': 'INVALID', 'guest': dict(evidence_channel.guest),
+                                        'snapshots': [], 'reference_holder': 'UNRESOLVED'}
+                            source_settlement_evidence.validate_evidence({'version': 1, 'probes': [evidence]})
+                        if settlement_evidence is not None:
+                            settlement_evidence[:] = [item for item in settlement_evidence if item['purpose'] != evidence['purpose']]
+                            settlement_evidence.append(evidence)
+                        if settlement_exception is not None and sys.exc_info()[1] is settlement_exception:
+                            settlement_exception._g2_settlement_evidence_v1 = evidence
+                    except BaseException:
+                        pass
+                    finally:
+                        try:
+                            evidence_channel.close()
+                        except BaseException:
+                            pass
 
 
-def _owner_probe_pair(daemon, authority, *, observe_owner_start):
+def _owner_probe_pair(daemon, authority, *, observe_owner_start, settlement_evidence=None):
     source = _OwnerProbeSource()
     try:
-        owners = [_owner_probe(daemon, authority, flag, source, observe_owner_start=observe_owner_start) for flag in ('-u', '-g')]
+        owners = []
+        for flag in ('-u', '-g'):
+            channel = None
+            if settlement_evidence is not None:
+                try:
+                    channel = _OwnerSettlementEvidenceChannel(authority, 'postgres-uid' if flag == '-u' else 'postgres-gid')
+                except BaseException:
+                    pass
+            if settlement_evidence is None:
+                owners.append(_owner_probe(daemon, authority, flag, source, observe_owner_start=observe_owner_start))
+            else:
+                owners.append(_owner_probe(daemon, authority, flag, source, observe_owner_start=observe_owner_start,
+                                           settlement_evidence=settlement_evidence, evidence_channel=channel))
         source.remove()
         return owners
     finally:
         source.close()
 
 
-def install_docker(expected, authority, *, observe_owner_start):
+def install_docker(expected, authority, *, observe_owner_start, settlement_evidence=None):
     # The inherited preflight checks the package pins and their entire local
     # dependency closure before dpkg is allowed to mutate the guest.
     if authority is None:
@@ -2171,7 +2365,11 @@ def install_docker(expected, authority, *, observe_owner_start):
                 set(config.get('Env') or []) != {'LD_LIBRARY_PATH=/opt/g2/browser:/opt/g2/runtime/lib',
                                                  'HOME=/tmp', 'LANG=C', 'LC_ALL=C', 'PATH=/nonexistent'}):
             raise JournalError('loaded browser image metadata differs')
-        owner = _owner_probe_pair(daemon, authority, observe_owner_start=observe_owner_start)
+        if settlement_evidence is None:
+            owner = _owner_probe_pair(daemon, authority, observe_owner_start=observe_owner_start)
+        else:
+            owner = _owner_probe_pair(daemon, authority, observe_owner_start=observe_owner_start,
+                                      settlement_evidence=settlement_evidence)
         if proc.poll() is not None or process_start(proc.pid) != start:
             raise JournalError('guest Docker daemon changed')
         return proc, pidfd, {'pid': proc.pid, 'starttime': start, 'socket_dev': info.st_dev,

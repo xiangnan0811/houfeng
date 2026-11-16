@@ -2430,7 +2430,7 @@ def validate_result(host, case, scenario, result, record, build, *, reboot_resul
     else:
         _positive(host, scenario, result, record)
 
-def _boot_inputs(host, frozen, state, build):
+def _boot_inputs(host, frozen, state, build, *, failure_stages=None):
     inputs = build.get('boot_inputs')
     paths = source_vm._boot_paths(host, build)
     boot_fds = state.get('boot_fds')
@@ -2454,6 +2454,8 @@ def _boot_inputs(host, frozen, state, build):
     stages = ['before_launch', 'after_wait']
     if state['case'] == 'source-recovery' and state['scenario'] == 'vm-kill':
         stages.extend(('before_reboot', 'after_reboot_wait'))
+    if failure_stages is not None:
+        stages = failure_stages
     observations = state.get('boot_observations')
     host.require(type(observations) is list and len(observations) == len(stages) and
                  all(type(item) is dict and set(item) == {'stage', 'boot_fds'} and
@@ -2464,8 +2466,87 @@ def _boot_inputs(host, frozen, state, build):
                  'held boot boundary observations differ')
 
 
-def _carrier_files(host, frozen, directory, state, build):
-    _boot_inputs(host, frozen, state, build)
+def _seed_carrier_identity(host, image):
+    host.require(type(image) is dict and set(image) == {'dev', 'ino', 'size', 'sha256', 'uuid', 'label', 'features'} and
+                 type(image['dev']) is int and image['dev'] >= 0 and type(image['ino']) is int and image['ino'] > 0 and
+                 type(image['size']) is int and 2 * 1024 ** 3 <= image['size'] <= 8 * 1024 ** 3 and
+                 image['size'] % (256 * 1024 ** 2) == 0 and image['label'] == 'G2SEED' and
+                 type(image['sha256']) is str and HEX.fullmatch(image['sha256']) is not None and
+                 type(image['uuid']) is str and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', image['uuid']) is not None and
+                 type(image['features']) is list and image['features'] == sorted(source_vm.SEED_FEATURES),
+                 'seed image identity invalid')
+
+
+def _cidata_carrier_identity(host, raw_image, block):
+    host.require(type(raw_image) is dict and set(raw_image) ==
+                 {'path', 'dev', 'ino', 'size', 'uid', 'mode', 'sha256'} and
+                 raw_image['path'] == 'cidata.raw' and
+                 type(raw_image['dev']) is int and raw_image['dev'] >= 0 and
+                 type(raw_image['ino']) is int and raw_image['ino'] > 0 and
+                 type(raw_image['size']) is int and raw_image['size'] == 1024 * 16 * 63 * 512 and
+                 type(raw_image['uid']) is int and raw_image['uid'] == os.geteuid() and
+                 type(raw_image['mode']) is int and raw_image['mode'] == 0o400 and
+                 type(raw_image['sha256']) is str and HEX.fullmatch(raw_image['sha256']) is not None and
+                 type(block) is dict and set(block) == {'size', 'sha256'} and
+                 type(block['size']) is int and block == {key: raw_image[key] for key in ('size', 'sha256')},
+                 'CIDATA frozen raw image identity missing')
+
+
+def _carrier_observations(host, state, stages, *, partial=False):
+    observations = state.get('carrier_observations')
+    if observations is None and partial:
+        return False
+    host.require(type(observations) is list and
+                 (len(observations) <= len(stages) if partial else len(observations) == len(stages)),
+                 'held carrier boundary observations missing')
+    if partial and not observations:
+        return False
+    image, cidata, raw_image, block = (state.get(key) for key in
+                                        ('seed_image', 'cidata', 'cidata_image', 'cidata_block'))
+    _seed_carrier_identity(host, image)
+    _cidata_carrier_identity(host, raw_image, block)
+    host.require(type(cidata) is dict, 'CIDATA contents missing')
+    seed_identity = {'dev': image['dev'], 'ino': image['ino'], 'size': image['size'],
+                     'uid': os.geteuid(), 'mode': 0o400}
+    raw_identity = {key: raw_image[key] for key in ('dev', 'ino', 'size', 'uid', 'mode')}
+    for observation, stage in zip(observations, stages):
+        host.require(type(observation) is dict and set(observation) ==
+                     {'stage', 'seed_held', 'seed_named', 'seed_sha256', 'cidata_identity', 'cidata',
+                      'cidata_held', 'cidata_named', 'cidata_sha256'} and
+                     observation['stage'] == stage and observation['seed_held'] == seed_identity and
+                     observation['seed_named'] == seed_identity and observation['seed_sha256'] == image['sha256'] and
+                     observation['cidata_identity'] == state['cidata_identity'] and observation['cidata'] == cidata and
+                     observation['cidata_held'] == raw_identity and observation['cidata_named'] == raw_identity and
+                     observation['cidata_sha256'] == raw_image['sha256'],
+                     'seed or CIDATA changed across a QEMU lifetime boundary')
+    return len(observations) == len(stages)
+
+
+def _failure_raw_carriers(host, directory, state):
+    for name, key in (('seed.raw', 'seed_image'), ('cidata.raw', 'cidata_image')):
+        path = directory / name
+        if not os.path.lexists(path):
+            continue
+        identity = state.get(key)
+        host.require(type(identity) is dict, 'retained carrier identity missing')
+        if name == 'seed.raw':
+            _seed_carrier_identity(host, identity)
+        else:
+            _cidata_carrier_identity(host, identity, state.get('cidata_block'))
+        host.check_path(path, False)
+        info = os.stat(path, follow_symlinks=False)
+        host.require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and
+                     (info.st_dev, info.st_ino, info.st_size, info.st_uid, stat.S_IMODE(info.st_mode)) ==
+                     (identity['dev'], identity['ino'], identity['size'], os.geteuid(), 0o400) and
+                     host.digest(path)[0] == identity['sha256'], 'retained carrier identity or bytes changed')
+        after = os.stat(path, follow_symlinks=False)
+        fields = lambda item: (item.st_dev, item.st_ino, item.st_size, item.st_uid, item.st_mode,
+                               item.st_nlink, item.st_mtime_ns, item.st_ctime_ns)
+        host.require(fields(after) == fields(info), 'retained carrier changed during readback')
+
+
+def _carrier_files(host, frozen, directory, state, build, *, failure_stages=None):
+    _boot_inputs(host, frozen, state, build, failure_stages=failure_stages)
     payload, cidata, image, launch = (state.get(key) for key in ('seed', 'cidata', 'seed_image', 'host_launch'))
     variant = state.get('bpf_variant')
     host.require(type(payload) is dict and type(cidata) is dict and type(image) is dict and type(launch) is dict and
@@ -2500,39 +2581,15 @@ def _carrier_files(host, frozen, directory, state, build):
                  'carrier ownership or complete CIDATA digest differs')
     host.require(source_vm._cidata_identity(directory / 'cidata', cidata) == state.get('cidata_identity'),
                  'CIDATA directory or file identity changed')
-    observations = state.get('carrier_observations')
+    
     stages = ['before_launch', 'after_wait']
     if state['case'] == 'source-recovery' and state['scenario'] == 'vm-kill':
         stages.extend(('before_reboot', 'after_reboot_wait'))
-    expected_identity = {'dev': image['dev'], 'ino': image['ino'], 'size': image['size'],
-                         'uid': os.geteuid(), 'mode': 0o400}
-    host.require(type(observations) is list and len(observations) == len(stages),
-                 'held carrier boundary observations missing')
-    block, raw_image = state.get('cidata_block'), state.get('cidata_image')
-    host.require(type(raw_image) is dict and set(raw_image) ==
-                 {'path', 'dev', 'ino', 'size', 'uid', 'mode', 'sha256'} and
-                 raw_image['path'] == 'cidata.raw' and
-                 type(raw_image['dev']) is int and raw_image['dev'] >= 0 and
-                 type(raw_image['ino']) is int and raw_image['ino'] > 0 and
-                 type(raw_image['size']) is int and raw_image['size'] == 1024 * 16 * 63 * 512 and
-                 type(raw_image['uid']) is int and raw_image['uid'] == os.geteuid() and
-                 type(raw_image['mode']) is int and raw_image['mode'] == 0o400 and
-                 type(raw_image['sha256']) is str and HEX.fullmatch(raw_image['sha256']) is not None and
-                 type(block) is dict and set(block) == {'size', 'sha256'} and
-                 type(block['size']) is int and
-                 block == {key: raw_image[key] for key in ('size', 'sha256')},
-                 'CIDATA frozen raw image identity missing')
+    if failure_stages is not None:
+        stages = failure_stages
+    _carrier_observations(host, state, stages)
+    raw_image = state['cidata_image']
     raw_identity = {key: raw_image[key] for key in ('dev', 'ino', 'size', 'uid', 'mode')}
-    for observation, stage in zip(observations, stages):
-        host.require(type(observation) is dict and set(observation) ==
-                     {'stage', 'seed_held', 'seed_named', 'seed_sha256', 'cidata_identity', 'cidata',
-                      'cidata_held', 'cidata_named', 'cidata_sha256'} and
-                     observation['stage'] == stage and observation['seed_held'] == expected_identity and
-                     observation['seed_named'] == expected_identity and observation['seed_sha256'] == image['sha256'] and
-                     observation['cidata_identity'] == state['cidata_identity'] and observation['cidata'] == cidata and
-                     observation['cidata_held'] == raw_identity and observation['cidata_named'] == raw_identity and
-                     observation['cidata_sha256'] == raw_image['sha256'],
-                     'seed or CIDATA changed across a QEMU lifetime boundary')
     path = directory / 'cidata.raw'
     host.check_path(path, False)
     info = os.stat(path, follow_symlinks=False)
@@ -2590,11 +2647,13 @@ def _carrier_files(host, frozen, directory, state, build):
                  'CIDATA seed descriptor differs from the host launch and payload')
 
 
-def _qmp(host, path, attempt, directory):
-    host.check_path(path, False)
+def _qmp(host, path, attempt, directory, *, captured=None):
+    if captured is None:
+        host.check_path(path, False)
+        captured = path.read_bytes()
     commands, requests, responses = [], {}, {}
     greeting = 0
-    for line in path.read_bytes().splitlines():
+    for line in captured.splitlines():
         if line.startswith(b'> '):
             item = host.strict_json(line[2:])
             host.require(type(item) is dict and set(item) == {'execute', 'id'} and
@@ -2788,15 +2847,37 @@ def _verify_single_vm_dir(host, frozen, directory, case, scenario, build, varian
     source_retirement.assert_available(host, directory)
     receipt = directory / 'receipt.json'
     if not os.path.lexists(receipt):
+        if any(os.path.lexists(directory / name) for name in ('failed-result.json', 'reboot-failed-result.json')):
+            import source_settlement_evidence
+            summary = source_settlement_evidence.summarize_evidence(None)
+            summary['quality'] = 'INVALID'
+            return {'case': case, 'scenario': scenario, 'variant': variant, 'status': 'FAIL',
+                    'settlement_evidence': summary, 'verification_limits': []}
         status = 'FAIL' if 'source_resources.py' in build['runner_inputs'] and directory.exists() else 'NOT_RUN'
         return {'case': case, 'scenario': scenario, 'variant': variant, 'status': status}
+    def historical_failure():
+        import source_settlement_evidence
+        summary = source_settlement_evidence.summarize_evidence(None)
+        if any(os.path.lexists(directory / name) for name in ('failed-result.json', 'reboot-failed-result.json')):
+            summary['quality'] = 'INVALID'
+        return {'case': case, 'scenario': scenario, 'variant': variant, 'status': 'FAIL',
+                'settlement_evidence': summary, 'verification_limits': []}
     if 'source_resources.py' not in build['runner_inputs']:
         host.check_path(receipt, False)
+        state = host.strict_json(receipt.read_bytes())
+        if type(state) is dict and state.get('status') == 'FAIL':
+            return historical_failure()
         return _verify_single_vm_state(host, frozen, directory, case, scenario, build,
-                                       host.strict_json(receipt.read_bytes()), variant, expected_manifest_sha)
-    return _verify_durable_receipt(host, directory, lambda state:
-                                   _verify_single_vm_state(host, frozen, directory, case, scenario, build, state,
-                                                           variant, expected_manifest_sha))
+                                       state, variant, expected_manifest_sha)
+    def verify_receipt(state):
+        if state.get('status') == 'FAIL':
+            if 'source_settlement_evidence.py' in build['runner_inputs']:
+                return _verify_single_vm_failure_state(host, frozen, directory, case, scenario, build, state,
+                                                       variant, expected_manifest_sha)
+            return historical_failure()
+        return _verify_single_vm_state(host, frozen, directory, case, scenario, build, state,
+                                       variant, expected_manifest_sha)
+    return _verify_durable_receipt(host, directory, verify_receipt)
 
 
 def _verify_durable_receipt(host, directory, validate):
@@ -2910,9 +2991,204 @@ def _read_reboot_result(host, directory, state, parser):
     return decoded
 
 
+def _verify_single_vm_failure_state(host, frozen, directory, case, scenario, build, state, variant=None, expected_manifest_sha=None):
+    import source_settlement_evidence
+    result = {'case': case, 'scenario': scenario, 'variant': variant, 'status': 'FAIL',
+              'settlement_evidence': source_settlement_evidence.summarize_evidence(None), 'verification_limits': []}
+    attempts = [state.get('attempt', {}), state.get('reboot_attempt', {})]
+    present = [attempt for attempt in attempts if type(attempt) is dict and 'failed_result' in attempt]
+    if not present:
+        if any(os.path.lexists(directory / name) for name in ('failed-result.json', 'reboot-failed-result.json')):
+            result['settlement_evidence']['quality'] = 'INVALID'
+        return result
+    try:
+        host.require(len(present) == 1 and type(state.get('version')) is int and state['version'] == 2 and
+                     state.get('status') == 'FAIL' and state.get('run_token') == RUN_TOKEN and
+                     state.get('case') == case and state.get('scenario') == scenario and
+                     state.get('bpf_variant') == variant and state.get('build_selection') == build['_selection'] and
+                     state.get('browser_selection') == build['browser_selection'] and
+                     (expected_manifest_sha is None or state.get('launch_manifest_sha256') == expected_manifest_sha),
+                     'failed receipt binding differs')
+        attempt = present[0]
+        reboot = attempt is attempts[1]
+        host.require(not reboot or (case, scenario) == ('source-recovery', 'vm-kill'),
+                     'unexpected reboot failure artifact')
+        prefix = 'reboot-' if reboot else ''
+        artifact = attempt['failed_result']
+        host.require(type(artifact) is dict and set(artifact) == {'version', 'path', 'sha256', 'bytes'} and
+                     type(artifact['version']) is int and artifact['version'] == 1 and
+                     artifact['path'] == prefix + 'failed-result.json' and type(artifact['bytes']) is int and
+                     0 <= artifact['bytes'] <= source_vm.MAX_RESULT_BYTES and
+                     type(artifact['sha256']) is str and HEX.fullmatch(artifact['sha256']),
+                     'failed artifact descriptor differs')
+        host.require(attempt.get('ready_while_alive') is True and
+                     attempt.get('argv') == source_vm.expected_vm_argv(host, directory, state['boot_fds'],
+                         reboot=reboot, variant=None if reboot else variant, case_sha256=state['seed']['case.json']),
+                     'failed VM launch differs')
+        source_vm._verify_payload(host, directory / 'payload', state['seed'])
+        source_vm._verify_cidata(host, directory / 'cidata', state['cidata'])
+        expected_inputs = {name: digest for name, digest in build['seed_inputs'].items()
+                           if name not in ('user-data', 'network-config')}
+        host.require(set(state['seed']) == set(expected_inputs) | {'case.json', 'SHA256SUMS'} and
+                     all(state['seed'][name] == digest for name, digest in expected_inputs.items()) and
+                     set(state['cidata']) == {'meta-data', 'user-data', 'network-config', 'seed-descriptor.json'} and
+                     all(state['cidata'][name] == build['seed_inputs'][name] for name in ('user-data', 'network-config')),
+                     'failed seed or CIDATA does not match selected build')
+        host.require(state['host_launch']['build_selection'] == build['_selection'] and
+                     state['host_launch_sha256'] == hashlib.sha256(host.canonical(state['host_launch'])).hexdigest(),
+                     'failed host launch differs')
+        launch, image = state['host_launch'], state['seed_image']
+        template = {name: state['cidata'][name] for name in ('meta-data', 'network-config', 'user-data')}
+        expected_case = source_vm._case_bytes(host, build, case, scenario, variant)
+        host.require((directory / 'payload' / 'case.json').read_bytes() == expected_case and
+                     state['seed']['case.json'] == hashlib.sha256(expected_case).hexdigest() and
+                     launch.get('payload_case_sha256') == state['seed']['case.json'] and
+                     launch.get('seed_inputs_sha256') == hashlib.sha256(host.canonical(build['seed_inputs'])).hexdigest() and
+                     launch.get('qemu_sha256') == build['qemu_binaries']['qemu-system-x86_64'] and
+                     launch.get('argv_sha256') == hashlib.sha256(host.canonical(
+                         source_vm.expected_vm_argv(host, directory, state['boot_fds'], variant=variant,
+                                                    case_sha256=state['seed']['case.json']))).hexdigest() and
+                     launch.get('boot_inputs') == build['boot_inputs'] and launch.get('seed_image') == image and
+                     launch.get('cidata_template_sha256') == hashlib.sha256(host.canonical(template)).hexdigest() and
+                     state.get('cidata_sha256') == hashlib.sha256(host.canonical(state['cidata'])).hexdigest() and
+                     source_vm._cidata_identity(directory / 'cidata', state['cidata']) == state.get('cidata_identity'),
+                     'failed case, build or CIDATA binding differs')
+        descriptor = {'version': 1, 'run_token': RUN_TOKEN, 'case': case, 'scenario': scenario,
+                      'payload_case_sha256': state['seed']['case.json'],
+                      'payload_manifest_sha256': state['seed']['SHA256SUMS'],
+                      'seed_uuid': image['uuid'], 'seed_size': image['size'],
+                      'host_launch_sha256': state['host_launch_sha256'],
+                      'host_argv_sha256': launch['argv_sha256'], 'qemu_sha256': launch['qemu_sha256']}
+        host.require((directory / 'cidata' / 'seed-descriptor.json').read_bytes() == host.canonical(descriptor),
+                     'failed CIDATA seed descriptor differs')
+        def read_file(name, limit, digest, expected_size, identity=None):
+            path = directory / name
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            try:
+                before, named = os.fstat(fd), os.stat(path, follow_symlinks=False)
+                def metadata(info):
+                    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+                            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                host.require(stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid() and
+                             before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600 and
+                             type(expected_size) is int and before.st_size == expected_size and
+                             0 <= before.st_size <= limit and metadata(before) == metadata(named),
+                             'unsafe failed evidence')
+                if identity is not None:
+                    host.require(identity == [before.st_dev, before.st_ino, before.st_uid, stat.S_IMODE(before.st_mode)],
+                                 'failed capture identity differs')
+                data = bytearray()
+                while len(data) < before.st_size:
+                    block = os.read(fd, min(1048576, before.st_size - len(data)))
+                    host.require(bool(block), 'short failed evidence')
+                    data.extend(block)
+                host.require(metadata(os.fstat(fd)) == metadata(before) and
+                             metadata(os.stat(path, follow_symlinks=False)) == metadata(before) and
+                             hashlib.sha256(data).hexdigest() == digest, 'failed evidence changed')
+                return bytes(data)
+            finally:
+                os.close(fd)
+        protocol = read_file(prefix + 'protocol.log', source_vm.MAX_PROTOCOL, attempt['protocol_sha256'],
+                             attempt['protocol_bytes'], attempt['protocol_identity'])
+        read_file(prefix + 'serial.log', source_vm.MAX_PROTOCOL, attempt['serial_sha256'],
+                  attempt['serial_bytes'], attempt['serial_identity'])
+        qmp_bytes = read_file(prefix + 'qmp.log', source_vm.MAX_PROTOCOL, attempt['qmp_sha256'],
+                              attempt['qmp_bytes'], attempt['qmp_identity'])
+        data = read_file(artifact['path'], source_vm.MAX_RESULT_BYTES, artifact['sha256'], artifact['bytes'])
+        terminal = source_vm._parser(host, frozen, case, scenario, state['seed'], build, state['cidata'])(protocol, True)['result']
+        host.require(terminal.get('completed') is False and host.canonical(terminal) == data,
+                     'failed terminal and artifact differ')
+        import source_bpf_verify
+        source_bpf_verify.require_v5_timestamps(host, terminal)
+        result['settlement_evidence'] = source_settlement_evidence.summarize_evidence(terminal.get('settlement_evidence_v1'))
+        checks = state.get('failure_checks', {'exit': 'UNKNOWN', 'carriers': 'UNKNOWN', 'resources': 'UNKNOWN'})
+        host.require(type(checks) is dict and set(checks) == {'exit', 'carriers', 'resources'} and
+                     all(v in ('PASS', 'FAIL', 'UNKNOWN') for v in checks.values()), 'failure checks invalid')
+        if checks['exit'] != 'PASS' or attempt.get('pidfd_held') is not True or attempt.get('exit_observed') is not True:
+            result['verification_limits'].append('EXIT')
+        if reboot:
+            original = state.get('attempt')
+            host.require(type(original) is dict, 'original VM attempt invalid')
+            if (original.get('pidfd_held') is not True or original.get('exit_observed') is not True or
+                    original.get('kill_signal') != 'SIGKILL via held pidfd' or original.get('returncode') != -9):
+                if 'EXIT' not in result['verification_limits']:
+                    result['verification_limits'].append('EXIT')
+        stages = ['before_launch', 'after_wait']
+        if reboot:
+            stages.extend(('before_reboot', 'after_reboot_wait'))
+        boot_observations = state.get('boot_observations')
+        boot_complete = False
+        if boot_observations is not None:
+            host.require(type(boot_observations) is list and all(type(item) is dict for item in boot_observations),
+                         'failed boot observations invalid')
+            observed_stages = [item.get('stage') for item in boot_observations]
+            host.require(observed_stages == stages[:len(observed_stages)], 'failed boot observation order differs')
+            if observed_stages:
+                _boot_inputs(host, frozen, state, build, failure_stages=observed_stages)
+            boot_complete = len(observed_stages) == len(stages)
+        carrier_complete = _carrier_observations(host, state, stages, partial=True)
+        _failure_raw_carriers(host, directory, state)
+        raw_complete = all(os.path.lexists(directory / name) for name in ('seed.raw', 'cidata.raw'))
+        base_complete = False
+        base_inputs = build.get('boot_inputs', {})
+        if ('base_before' in state or 'base_sha256' in state['host_launch'] or
+                type(base_inputs) is dict and 'base_sha256' in base_inputs):
+            base = Path(frozen.load_json(host.RUN / 'prepare.json')['assets']['ubuntu:' + frozen.IMAGE])
+            pin = frozen.UBUNTU_HASHES[frozen.IMAGE]
+            host.require(all(obj[key] == pin for obj, key in ((state, 'base_before'), (state, 'base_after'),
+                         (state['host_launch'], 'base_sha256'), (base_inputs, 'base_sha256'))
+                         if key in obj), 'failure boot base differs')
+            if os.path.lexists(base):
+                host.check_path(base, False)
+                host.require(host.digest(base)[0] == pin, 'failure boot base changed')
+                base_complete = 'base_before' in state and 'base_sha256' in state['host_launch']
+        if checks['carriers'] != 'PASS' or not (boot_complete and carrier_complete and raw_complete and base_complete):
+            result['verification_limits'].append('CARRIERS')
+        usage, budget = state.get('resource_usage'), state.get('resource_budget')
+        host.require(('resource_usage' not in state or type(usage) is dict) and
+                     ('resource_budget' not in state or type(budget) is dict), 'failure resource record malformed')
+        if type(budget) is dict:
+            import source_resources
+            expected_budget = source_resources.make_budget(host, build,
+                source_vm._case_bytes(host, build, case, scenario, variant))
+            host.require(budget == expected_budget, 'failure resource budget differs')
+        if type(usage) is dict:
+            keys = {'version', 'baseline_allocated_bytes', 'peak_allocated_bytes', 'final_allocated_bytes',
+                    'minimum_disk_available_bytes', 'sample_count', 'peak_growth_bytes', 'abort'}
+            host.require(set(usage) == keys and type(usage['version']) is int and usage['version'] == 1 and
+                         all(type(usage[k]) is int and 0 <= usage[k] <= (1 << 63) - 1
+                             for k in keys - {'version', 'abort'}) and
+                         usage['peak_allocated_bytes'] >= usage['baseline_allocated_bytes'] and
+                         usage['peak_growth_bytes'] == usage['peak_allocated_bytes'] - usage['baseline_allocated_bytes'] and
+                         usage['final_allocated_bytes'] <= usage['peak_allocated_bytes'] and
+                         usage['abort'] == state.get('resource_abort'), 'failure resource usage differs')
+            if usage['abort'] is not None:
+                import source_resources
+                host.require(type(usage['abort']) is dict and set(usage['abort']) == {'reason', 'phase'} and
+                             usage['abort']['reason'] in source_resources._REASONS and
+                             usage['abort']['phase'] in source_resources._PHASES, 'failure resource abort differs')
+            else:
+                host.require(usage['peak_growth_bytes'] <= 4294967296 and
+                             usage['minimum_disk_available_bytes'] >= 1073741824, 'failure resource limit exceeded')
+        if checks['resources'] != 'PASS' or type(usage) is not dict or type(budget) is not dict:
+            result['verification_limits'].append('RESOURCES')
+        if attempt.get('qmp_initial') is None:
+            result['verification_limits'].append('QMP')
+        else:
+            _qmp(host, directory / (prefix + 'qmp.log'), attempt, directory, captured=qmp_bytes)
+        if result['verification_limits'] and result['settlement_evidence']['quality'] == 'COMPLETE':
+            result['settlement_evidence']['quality'] = 'PARTIAL'
+    except (OSError, ValueError, KeyError, TypeError, RecursionError, host.Failure):
+        result['settlement_evidence']['quality'] = 'INVALID'
+        result['verification_limits'] = []
+    return result
+
+
 def _verify_single_vm_state(host, frozen, directory, case, scenario, build, state, variant=None, expected_manifest_sha=None):
     reboot_result = None
     host.require(type(state) is dict and 'reboot_result' not in state, 'receipt contains reboot result')
+    host.require(all('failed_result' not in state.get(key, {}) for key in ('attempt', 'reboot_attempt')),
+                 'successful receipt contains failed result')
     current = 'source_resources.py' in build['runner_inputs']
     host.require(type(state) is dict and type(state.get('version')) is int and
                  state.get('version') == (2 if current else 1) and state.get('run_token') == RUN_TOKEN and
@@ -2979,7 +3255,10 @@ def _verify_single_vm_state(host, frozen, directory, case, scenario, build, stat
             host.require((boot_info.st_dev, boot_info.st_ino) == (disks['boot']['dev'], disks['boot']['ino']),
                          'reboot boot overlay was replaced')
         validate_result(host, case, scenario, result, state, build, reboot_result=reboot_result)
-    return {'case': case, 'scenario': scenario, 'variant': variant, 'status': 'PASS', 'qmp_commands': commands}
+    import source_settlement_evidence
+    summary = source_settlement_evidence.summarize_evidence(result.get('settlement_evidence_v1'))
+    return {'case': case, 'scenario': scenario, 'variant': variant, 'status': 'PASS', 'qmp_commands': commands,
+            'settlement_evidence': summary}
 
 
 def _case(host, frozen, case, scenario, build):
@@ -3058,7 +3337,7 @@ def _case(host, frozen, case, scenario, build):
                 host.require(family['stop_reason'] in (None, 'resource_capacity', 'storage_tool_failure') and
                              type(family['retained_allocated_bytes']) is int and family['retained_allocated_bytes'] >= 0,
                              'family resource summary invalid')
-            commands, retained, failed, not_run = [], 0, False, False
+            commands, retained, failed, not_run, failure_members = [], 0, False, False, []
             for entry, (exp_case, exp_scenario, exp_variant) in zip(family['members'], source_vm.BPF_AUTH_FAMILY_MEMBERS):
                 keys = {'variant', 'case', 'scenario', 'directory', 'receipt_sha256', 'status'}
                 if current:
@@ -3092,6 +3371,8 @@ def _case(host, frozen, case, scenario, build):
                                  host.digest(receipt)[0] == entry['receipt_sha256'], 'family member receipt_sha256 differs')
                 if entry['status'] == 'FAIL':
                     failed = True
+                    failure_members.append(_verify_single_vm_dir(host, frozen, member_dir, exp_case, exp_scenario, build,
+                                           variant=exp_variant, expected_manifest_sha=manifest_sha))
                     continue
                 m_res = _verify_single_vm_dir(host, frozen, member_dir, exp_case, exp_scenario, build,
                                               variant=exp_variant, expected_manifest_sha=manifest_sha)
@@ -3103,17 +3384,14 @@ def _case(host, frozen, case, scenario, build):
                              (family['stop_reason'] is None or (failed and executed[-1]['status'] == 'FAIL')),
                              'family accounting or stop differs')
                 if failed or not_run:
-                    return {'case': case, 'scenario': scenario, 'status': 'FAIL',
+                    return {'case': case, 'scenario': scenario, 'status': 'FAIL', 'members': failure_members,
                             'stop_reason': family['stop_reason'], 'reason': 'family member failed or was not run'}
             return {'case': case, 'scenario': scenario, 'status': 'PASS', 'qmp_commands': commands}
         directory = attempt_dir / scenario
         source_retirement.assert_available(host, directory)
-        if not os.path.lexists(directory / 'receipt.json'):
-            status = 'FAIL' if 'source_resources.py' in build['runner_inputs'] and directory.exists() else 'NOT_RUN'
-            return {'case': case, 'scenario': scenario, 'status': status}
         res = _verify_single_vm_dir(host, frozen, directory, case, scenario, build,
                                     variant=None, expected_manifest_sha=manifest_sha)
-        return {'case': case, 'scenario': scenario, 'status': res['status'], 'qmp_commands': res.get('qmp_commands', [])}
+        return {**res, 'case': case, 'scenario': scenario, 'qmp_commands': res.get('qmp_commands', [])}
     except (OSError, ValueError, KeyError, TypeError, RecursionError, host.Failure) as exc:
         return {'case': case, 'scenario': scenario, 'status': 'FAIL', 'error_type': type(exc).__name__,
                 'reason': str(exc)[:256]}

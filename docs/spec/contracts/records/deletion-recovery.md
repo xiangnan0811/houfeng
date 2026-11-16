@@ -342,6 +342,151 @@ event5 的 followup 只关联原 OBJECT_REMOVAL 样本实际选中的 cookie、i
 
 `grant_close` 是同 creator 的 retained close_ref 事实，不能由存储的 closeResult 推定；ADDFD 结果不能证明 requester 已关闭描述符。已观察到 matching guard 记录不等于 tracker 已接受：ACCEPTED 还须同 incarnation 的授权与 removal sequence、tracker 状态、lifecycle 授权和移除状态及 cleanup 记录一致，相关证据缺失、截断或矛盾时不能标为 ACCEPTED。UNKNOWN、TRUNCATED、缺包或未观察到记录均不证明事件或引用不存在，也不证明根因、整个 settlement 已完成或 HTTP 失败的因果。q 仅为该次诊断保留已有对象和 grant 的内部关联，不新增 native 对象或 FD 责任；原授权、责任顺序和退休合同保持。
 
+**有界 owner settlement evidence（N）。** 新观察与上述 type7/preflight V6 独立；旧十六字节包、
+2048-byte 预算、原 authority/cleanup 控制流和全部业务期限保持。仅跟踪同一已认证 BOOT_OWNER
+的 `postgres-uid`、`postgres-gid`，各一个 grant。引用持有者固定 `UNRESOLVED`；不为诊断增加
+native 引用、probe、STATUS ioctl、工作队列 flush、权限或 ring 容量。
+
+live guard ABI 为 V5：record 192 bytes、detail 40 bytes、ring 4096、batch 64 均保持。
+成功入 ring 的 kind 2/4/5/6 在 detail 前八字节存非零 little-endian monotonic ns，其余字节为零；
+kind2/4 为 ID-removal return、kind5 为 offline entry、kind6 为 release return 的入队时间，均不等于最终内存 free。
+Go decode/projection 和 guest/host verifier 同步使用 `detail={"observed_mono_ns":u64}`；其他 kind
+原合同不变。新 live reader 拒绝 V4 header；历史 JSON 的 null detail 仍可只读解析，但不能满足
+本轮 V5 evidence gate，也不回写历史 transcript/hash。
+
+broker 在创建 eligible grant 时建立固定投影：两个 grant、总计 384 个 object、八个 early guard
+槽；使用原 incarnation/cookie lookup 关联，不能每 record 分配、编码 JSON、扫描历史 transcript
+或按 kernel ID/raw pointer 单独拼接。decoded、transcript append、tracker 和 lifecycle 实际接受
+分别计水位；partial batch decode 的已成功项保留，失败只记录最后确知 cursor 与 ioctl/decode
+类别。guard 首次构造前安装同一可选 diagnostic state pointer，使所有 value-copy 保持同源。
+只缓存既有 STATUS 调用的 success 与 latest attempt，各自保存原调用前后 monotonic 区间和来源；
+EAGAIN 不借旧 success 冒充本次结果，缺时钟只使时间 unknown。
+
+每 grant 最多三份不可变 4096-byte snapshot：ENROLLED=1、WAIT=2、FINAL=3；purpose=1 UID/2 GID。
+WAIT 来自原一秒 sample，快速退休可缺；FINAL 取实际可得 deadline、ACK_SENT、CONTROL_HUP、
+PRINCIPAL_DEATH、BROKER_EXIT 中最早边界，同时间按此顺序。无 deadline metadata 不造 deadline；
+requested cutoff 与实际 capture 时间分开，FINAL 冻结后不吸收后续事实，guest ACK receipt 另记。
+所有整数显式 little-endian 编码，不以 raw struct memcpy 充当 wire；u64 不接受 bool/负值/溢出。
+
+|字节区间|固定字段与顺序|
+|---|---|
+|0–15|magic=`G2SEV1\0\0` 八字节；8:u16 version=1；10:u8 phase；11:u8 purpose；12:u32 gap flags|
+|16–135|依次十五个 u64：generation,grant_id,owner_id,creator_transaction,object_cookie,kernel_id,publication_sequence,root_cookie,cgroup_id,enrollment,operation_start_ns,operation_deadline_ns,authority_deadline_ns,requested_cutoff_ns,captured_ns|
+|136–215|boot UUID 16 bytes、epoch 16、nonce 16、CID 32；UUID 为 RFC4122 文本去 hyphen 后的 hex 字节序，CID 为 64hex 解码|
+|216–255|216:u32 class(0 unbound/1 program/2 map)；220:u32 program/map type；224/232:u64 first/last guard sequence；240:u64 module_instance；248:u32 terminal reason(0 not-final/1 deadline/2 ACK_SENT/3 CONTROL_HUP/4 PRINCIPAL_DEATH/5 BROKER_EXIT)；252–255 zero|
+|256–2815|32 个 80-byte fact 槽：九个 u64 first_seq,last_seq,first_native_ns,last_native_ns,first_broker_ns,last_broker_ns,count,value0,value1，随后 u32 state、u32 flags|
+|2816–3327|八个 64-byte relation 槽，各八个 u64 grant,creator,cookie,kernel_id,publication_sequence,root_cookie,cgroup_id,enrollment；槽0为目标，槽1为目标 cgroup，其余为 early relations|
+|3328–3839|64 个 u64 coverage，逐项见下表|
+|3840–4095|reserved zero|
+
+fact state：0 NOT_OBSERVED、1 PRESENT、2 UNSUPPORTED、3 UNBOUND、4 GAP；flags bit0 duplicate、
+bit1 contradiction、bit2 saturation、bit3 POST_CUTOFF，其余拒绝。未知时间/sequence 为零；非零
+first≤last，count 饱和置 gap，不回卷。跨 cutoff 的 first/last/count 不能重建中间项；native 与
+broker 的真实时间分别判 POST_CUTOFF，同一 ring sequence 的 native 时间不得漂移。ENROLLED
+尚无目标/metadata 的零值可单向变 known；WAIT pin 后 FINAL 不得更换 incarnation。
+
+|fact 槽|value0 / value1（未说明的第二项为0）|
+|---|---|
+|0 grant issued；1 cgroup enrollment|grant_id；enrollment|
+|2 offline entry；3 release return|原 guard sequence|
+|4 SETTLE receive；7 ACK committed；8 ACK sent|原 request_id|
+|5 wait sample；6 predicate sample|actual wait point；known mask / pending mask|
+|9 control HUP；10 principal death；11 broker exit；12 authority downgrade；13 registration|terminal reason；terminal reason；terminal reason；authority phase；principal_id|
+|14/15|reserved zero|
+|16 native publication；17 tracker publication；24 matching native removal decoded；25 matching removal transcript append；28 cleanup step2；29 removalSeq set|对应原事实的 guard/cleanup sequence；29使用 tracker.removalSeq|
+|18 creator response；19 held-FD validation；20 removal authorization|1 SEND或2 ADDFD_SEND / 正errno(成功0)；0 / 正errno；authorized(0/1)|
+|21 close attempt；22 close result；23 close_ref append|0 / 正errno；正errno / 0；cleanup sequence；不把close的-1转u64|
+|26 tracker decision；27 lifecycle decision；30 rejection/duplicate；31 target pinned|0 NOT_EVALUATED或1 ACCEPTED或2 REJECTED / reason；同前；reason / guard sequence；cookie / publication sequence|
+
+reason 固定为0 NONE、1 UNPUBLISHED、2 UNAUTHORIZED、3 COOKIE、4 ID、5 CLASS、6 SEQUENCE、
+7 AUTHORITY、8 ALREADY_REMOVED、9 OTHER。未实际调用 tracker/lifecycle 留 NOT_EVALUATED。
+actual wait point 1–13 依序为 EFFECT_OPERATION、ALIAS_EXECUTION、OBJECT_CLEANUP_STARTED、
+CGROUP_TARGET_UNOBSERVED、CGROUP_RETIRE_EAGAIN、CGROUP_TARGET_RELEASE、INVOCATION、
+EXEC_ADMISSION、TRANSACTION_RETIREMENT、OBJECT_REMOVAL、ATTACHMENT_RELEASE、
+OWNER_PROBE_RESULT、AUDIT_JOIN。每次实际 advance 清空 known/pending，bit(i-1) 仅在原控制流
+实际评估 point i 时置 known，实际阻塞才置 pending；未到达的后续点 unknown。point5 必须来自
+原 retireCgroup 的真实 EAGAIN，不增加探测补全掩码。非 object wait/快速退休选同 grant 最早
+publication sequence 的 CGROUP_DEVICE program；仍不能安全关联时 UNBOUND/GAP。
+
+|coverage index|含义|
+|---|---|
+|0/1；2/3；4/5；6/7|start/end cached-success存在(0/1)；success sequence；broker ack；observer ack|
+|8/9；10/11；12/13；14/15|start/end lost；aggregate missed；sticky；原 phase|
+|16/17/18/19/20|checkpoint ring-read-through；transcript-through；tracker-through；lifecycle-through；sampled success watermark|
+|21/22/23/24/25/26/27/28/29/30|prefix flags；known mask；pending mask；gap flags；capacity=384；used；unbound count；export error(0 none/1 unavailable/2 backpressure/3 invalid peer/4 protocol/5 closed)；ABI=5；last wait 0–13|
+|31/32；33/34；35/36|start/end latest-attempt code(0 unavailable/1 OK/2 EAGAIN/3 error)；start-attempt before/after ns；end-attempt before/after ns|
+|37/38；39/40；41/42；43/44|start-success before/after ns；end-success before/after ns；start/end success source；start/end attempt source|
+|45/46/47/48–63|batch error(0 none/1 ioctl/2 decode)；decoded-through；reserved zero；reserved zero|
+
+status source=0 unknown/1 pollAuditWatermark/2 pre-response/3 post-response/4 cgroup-enroll/5 registry。
+gap bit0 CAPACITY、1 UNBOUND、2 CONTRADICTION、3 SATURATED、4 LOSS_OR_MISS、5 STATUS_UNAVAILABLE、
+6 TAIL_UNCERTIFIED、7 EXPORT。prefix bit0 为既有 cached-success instrumented prefix(pending_pairs=0)、
+bit1 已读至该 sequence、bit2 已 append、bit3 已实际评估相关 tracker/lifecycle。四位齐、原样本
+lost/missed/sticky=0、authority未降级且 gap&0x3f=0 时，只称截至样本 sequence 的 prefix complete。
+TAIL_UNCERTIFIED/EXPORT 不抹去该 prefix；FINAL 尾部始终不认证，未读到不证明无事件或无引用。
+
+新独立通道为 broker-owned root:root 0700 tmpfs 目录
+`/run/g2/owner-probe-settlement-evidence/` 中0600 `broker.sock`，SOCK_SEQPACKET、NONBLOCK、
+CLOEXEC、SO_PASSCRED、backlog2。最多UID/GID各一连接、每loop最多两次accept及每连接一条输入，
+每grant固定3×4096 outbound队列；冲突或初始化/清理失败只令诊断 unavailable，清理仅限 held/named
+inode仍一致的本轮对象。guest验证原authority peer，broker核SCM_CREDENTIALS及同live BOOT_OWNER
+的pidfd/start incarnation；truncation、rights、重复/第三条输入、错身份均使诊断INVALID。
+
+listener 只在首次成功的新 `source` REGISTER_LAUNCH 提交边界尝试初始化：runtime-root 初始化已返回成功，
+BOOT_OWNER/principal、launch 重放状态和 descriptor 所有权均已保存之后，在返回 ACK 之前创建。
+不得在 initramfs 根目录阶段提前创建，也不因重放或初始化失败重试；可选通道失败不改变注册、ACK 或 authority 结果。
+每轮 service/poll 使用同一 transport 快照，后来安装的 listener 从下一轮参与；退出时先通过当前 transport
+冻结/flush 终态，再执行既有 followup/cleanup，最后关闭当前已安装的 transport，并保持 inode-bound 清理。
+
+pair 在每probe原60秒入口之前完成一次至多250ms且受原authority hard deadline限制的注册：
+HELLO canonical JSON≤160 bytes，精确 `version=1,purpose,nonce,principal_id`，purpose为
+`postgres-uid`/`postgres-gid`、nonce为fresh16bytes的32hex、principal_id为原u64身份；reply≤128 bytes，
+精确 `version=1,status="ARMED",nonce`。失败不重试，不阻挡原probe。CID核对后ADMIT前只发一次
+BIND≤512 bytes，精确 `version=1,purpose,container_id,nonce,operation_start_ns,operation_deadline_ns,authority_deadline_ns,principal_id`；
+时间来自原monotonic deadline向下取整ns，未知为0，不用于授权。BIND跨socket可晚于grant，
+投影仍自grant创建保留事实，metadata仅补关联，不倒改ENROLLED。
+
+authority关闭不关闭此诊断socket；probe finally至多读三份snapshot再探测一次拒绝第四份，
+原settlement超时后collection只有一次 min(now+250ms,原有效hard deadline) cutoff，缺/过期则只做
+有界非阻塞收取。HUP/EOF不等于FINAL；所有收到的rights先关闭再判无效。caller-owned最多两项list
+以purpose/nonce保留UID成功与GID不同阶段失败；仅同一escaping settlement exception可合并属性，
+替代异常不继承旧值，收集/关闭/合并失败不取代业务异常。成功install后立即复制到RESULT。
+
+RESULT可选 `settlement_evidence_v1={"version":1,"probes":[...]}` canonical≤49152bytes、至多两项。
+每probe精确 `purpose,nonce,collection,guest,snapshots,reference_holder`，guest精确
+`operation_start_ns,operation_deadline_ns,authority_deadline_ns,ack_received_ns`（非负u64，未知0）；
+snapshots最多三个canonical base64，每项恰4096bytes、单项envelope≤8192bytes；holder固定UNRESOLVED。
+collection优先 INVALID(坏帧/凭据/身份/重复，清空snapshot)、UNAVAILABLE(未ARMED)、EMPTY(已ARMED无快照)、
+PARTIAL(有合法快照但缺ENROLLED/FINAL或导出缺口)、COMPLETE(ENROLLED+FINAL且传输无错，WAIT可缺)。
+COMPLETE仅是传输完整，不是覆盖或scenario成功。legacy结果缺字段为UNAVAILABLE，present-invalid不fallback。
+
+纯标准库 root guest file `source_settlement_evidence.py` 提供 `decode_snapshot(raw:bytes)->dict`、
+`validate_evidence(value)->dict`、`summarize_evidence(value)->dict`；非法raise ValueError，不修补。
+summary输出quality(COMPLETE/PARTIAL/INVALID/UNAVAILABLE)、last_native_stage(UNKNOWN/NONE/OFFLINE_ENTRY/RELEASE_RETURN/ID_REMOVAL_RETURN)、
+blocking_points(上述13标签)、delivery(UNKNOWN/NOT_ADMITTED/ADMITTED/REJECTED/ACCEPTED)、
+timeliness(UNKNOWN/BEFORE_DEADLINE/AFTER_DEADLINE)、reference_holder=UNRESOLVED。matching native成功
+decode才支持原生事实；未append为NOT_ADMITTED、已append未evaluated为ADMITTED，后续分别按实际
+拒绝/接受与cleanup/removalSeq一致性判读；没decode则UNKNOWN。timeliness只以kind2/4原生时间
+对原deadline判定，broker晚读取不等于native晚释放，跨cutoff混合计数保持UNKNOWN。
+
+完整normal INSTALL/READY/DATA/END及原identity/digest通过但completed=false的失败，先在_vm内
+保全held protocol/serial/QMP与完整terminal，再由execute_vm做after_wait/carrier检查，最后发布FAIL
+receipt。QMP也由_new_capture以O_RDWR持有至flush/fsync/hash/held-named检查完成，resource captures
+包含qmp_identity。排他0600 canonical `failed-result.json`（reboot为`reboot-failed-result.json`）≤64MiB，
+fsync文件/目录；attempt.failed_result精确 `version=1,path,sha256,bytes`，记录三份capture摘要/长度和
+qmp_identity。artifact纳入原resource guard，不进入1MiB receipt payload，不改变32/64/128MiB总预算。
+partial/noEND/坏digest/unknown timeout不生成完整artifact，写盘错误仅记bounded secondary error。
+
+current resource receipt仍version2；仅FAIL允许failed_result，PASS明确拒绝。failure_checks精确
+exit/carriers/resources，各PASS/FAIL/UNKNOWN，未执行为UNKNOWN；独立verifier不信任该声明。
+`_verify_single_vm_failure_state` 在既有stable durable receipt回调内核原seed/cidata/manifest、run/case/
+scenario/build/browser绑定、PIDFD-held退出、三个capture与artifact安全有界held/named读取、完整原parser
+的completed=false及artifact canonical字节/hash/长度全等，按原预算重算resource_usage。缺post-wait/
+carrier/resource证明降PARTIAL，矛盾/tamper为INVALID，不调用success-only verifier补PASS。普通case、
+family FAIL member和reboot均保留bounded evidence/verification_limits；历史FAIL无artifact为UNAVAILABLE。
+此readback不改变scenario/aggregate PASS条件，新selection只跑一次exact时其余NOT_RUN仍使总报告NOT_READY。
+
+
 唯一原 request 状态拒绝点在 deadline 和 65536-byte 大小检查通过后，仅对启用 owner-start 观察的同一 CID、精确 POST start、精确整数 HTTP500，解析本次已经读取的 Docker body：原 strict JSON 必须为唯一 `message` 字符串键，按固定大小写敏感标记优先级投影 DEVICE_QUERY → PROGRAM_FETCH → DEVICE_LIST → DEVICE_ATTACH → PROGRAM_LOAD → CGROUP_CONFIG → CGROUP_APPLY → PROC_READY → INIT_SYNC → PROCESS_START → TASK_CREATE，合法无标记为 OTHER，解析或闭合形状失败为 INVALID。只给原 rejected 异常附固定类别，helper 或属性赋值失败不替换它；不输出原 message、片段、位置、路径、CID、动态尾部或 hash。preflight 仅在同一逃逸异常的规范化 owner 为 RESPONSE_STATUS/精确整数500时采用标签；close 替代异常不沿 context 借用原标签，cleanup 的其它响应不覆盖它。HTTP400 的 Info 观察与非空 start_error 互斥；其它请求、状态、早先拒绝和传输失败不调用分类。类别是同次认证 daemon 响应的词法标记，可能来自引用或日志，不证明执行 provenance、首个/最深错误、syscall/native errno、requester 消费或 DELETE/HTTP 因果。原 V4 history、私有 V2 阶段包、九字段 owner、六元 collect、HTTP/清理顺序和期限保持。
 
 只有原 start 异常仍以同一对象逃逸，且原清理、owner 采集及诊断关闭已完成，并取得 HTTP400 的 PGDATA actual `RBIND_RO_RPRIVATE` / expected `RBIND_RRO_RPRIVATE`、difference `VALUE` witness，才通过原 daemon socket/peer 身份校验发起一次固定 `GET /v1.44/info`。观察使用保存的原 60 秒操作 deadline 与至多一秒窗口，不能借 failed cleanup 的延时；connect 后才启动 daemon Timer，以本次连接对象 abort。取消 Timer、关闭 response 和连接分别尝试，不 join、不 drain、不重试，观察或收束错误不替换业务异常。Info 的版本查询可能产生额外 guest 子进程且 daemon 侧命令无 context；client timeout 不证明这些工作已取消，整台 owned VM 的实际 wait/pidfd/exit 仍沿原收束门禁独立核验。

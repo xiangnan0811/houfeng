@@ -492,7 +492,11 @@ def _record_body(host, kind, body):
         else:
             host.require(snapshot is None, 'BPF non-publication guard has snapshot')
         if guard['kind'] <= 7:
-            host.require(guard['detail'] is None and not (guard['flags'] & 1) and
+            detail = guard['detail']
+            timestamped = (guard['kind'] in (2, 4, 5, 6) and
+                           _shape(detail, ('observed_mono_ns',)) and
+                           _integer(detail['observed_mono_ns'], 1, _U64))
+            host.require((detail is None or timestamped) and not (guard['flags'] & 1) and
                          (guard['kind'] != 7 or guard['audit_serial'] == 0), 'BPF guard event detail invalid')
         elif guard['kind'] == 8:
             detail = guard['detail']
@@ -5105,6 +5109,22 @@ def verify_broker_kill(host, result, record, build):
                  [(a.get('command'), a.get('result')) for a in report['attempts']] == [('MAP_CREATE', -1), ('PROG_LOAD', -1)],
                  'BPF post-death report differs from the watched probe')
 
+def require_v5_timestamps(host, value):
+    if type(value) is dict:
+        if value.get('kind') == 'guard' and type(value.get('body')) is dict:
+            guard = value['body'].get('record')
+            if type(guard) is dict and guard.get('kind') in (2, 4, 5, 6):
+                detail = guard.get('detail')
+                host.require(_shape(detail, ('observed_mono_ns',)) and
+                             _integer(detail['observed_mono_ns'], 1, _U64),
+                             'current BPF lifecycle timestamp missing')
+        for child in value.values():
+            require_v5_timestamps(host, child)
+    elif type(value) is list:
+        for child in value:
+            require_v5_timestamps(host, child)
+
+
 def verify(host, result, record, build, *, reboot_result=None):
     """Check the original boot and, for vm-kill, the distinct reboot chain."""
     try:
@@ -5112,6 +5132,10 @@ def verify(host, result, record, build, *, reboot_result=None):
                      result.get('case') == record.get('case') and result.get('scenario') == record.get('scenario'),
                      'BPF result and receipt identity differs')
         host.require(len(_canonical(result)) <= _MAX_RESULT_BYTES, 'BPF containing result exceeds limit')
+        if 'source_settlement_evidence.py' in build.get('runner_inputs', {}):
+            require_v5_timestamps(host, result)
+            if reboot_result is not None:
+                require_v5_timestamps(host, reboot_result)
         case, scenario = record['case'], record['scenario']
         host.require(type(reboot_result) is dict if (case, scenario) == ('source-recovery', 'vm-kill')
                      else reboot_result is None, 'BPF reboot result is invalid for case')

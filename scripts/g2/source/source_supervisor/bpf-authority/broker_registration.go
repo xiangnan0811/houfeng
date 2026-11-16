@@ -47,6 +47,7 @@ type authorityBroker struct {
 	join                                   *auditJoin
 	resolver                               *brokerAuditResolver
 	checkpoint                             *checkpointController
+	diagnostic                             *ownerProbeEvidenceState
 	reader                                 *auditReaderClient
 	observerSocketFD                       int
 	observerPIDFD                          int
@@ -198,19 +199,10 @@ func (b *authorityBroker) registerLaunch(fd int, raw []byte, request map[string]
 		}
 	}()
 	stage = "LAUNCH_REPLAY"
-	if old := b.launches[launcherTask.Cookie]; old != nil {
-		if !bytes.Equal(old.request, raw) || len(old.retainedFDs) != len(rights) || !livePIDFD(old.launcherPIDFD) || !livePIDFD(old.childPIDFD) {
-			return nil, false, errControlFrame
-		}
-		for i := range rights {
-			if !sameHeldDescription(old.retainedFDs[i], rights[i]) {
-				return nil, false, errControlFrame
-			}
-		}
-		return old.ack, false, nil
-	}
-	if kind == "source" && b.bootOwner != 0 || kind == "reboot" && b.recoveryPending != 0 {
-		return nil, false, errControlFrame
+	if replay, found, replayErr := b.lookupLaunchRegistration(launcherTask.Cookie, kind, raw, rights); replayErr != nil {
+		return nil, false, replayErr
+	} else if found {
+		return replay, false, nil
 	}
 	stage = "LAUNCH_PIDFD"
 	launcherPIDFD, err := unix.PidfdOpen(int(cred.Pid), 0)
@@ -328,18 +320,50 @@ func (b *authorityBroker) registerLaunch(fd int, raw []byte, request map[string]
 				return nil, false, e
 			}
 		}
+	}
+	_ = parent
+	keepLauncher, keepLauncherFD, keepChild = true, true, true
+	return b.commitLaunchRegistration(fd, kind, id, p, launcherTask.Cookie, launcherPIDFD, rights, raw, ack)
+}
+
+// lookupLaunchRegistration keeps replay and the one-source check ahead of the
+// commit boundary, so neither path can attempt to reopen diagnostics.
+func (b *authorityBroker) lookupLaunchRegistration(cookie uint64, kind string, raw []byte, rights []int) ([]byte, bool, error) {
+	if old := b.launches[cookie]; old != nil {
+		if !bytes.Equal(old.request, raw) || len(old.retainedFDs) != len(rights) || !livePIDFD(old.launcherPIDFD) || !livePIDFD(old.childPIDFD) {
+			return nil, false, errControlFrame
+		}
+		for i := range rights {
+			if !sameHeldDescription(old.retainedFDs[i], rights[i]) {
+				return nil, false, errControlFrame
+			}
+		}
+		return old.ack, true, nil
+	}
+	if kind == "source" && b.bootOwner != 0 || kind == "reboot" && b.recoveryPending != 0 {
+		return nil, false, errControlFrame
+	}
+	return nil, false, nil
+}
+
+// commitLaunchRegistration runs only after authentication, root initialization,
+// transcript and ACK construction have succeeded. The optional diagnostic
+// listener must be installed after the source owner and replay state exist.
+func (b *authorityBroker) commitLaunchRegistration(fd int, kind string, id uint64, p *controlPrincipal, launcherCookie uint64, launcherPIDFD int, rights []int, raw, ack []byte) ([]byte, bool, error) {
+	if kind == "source" {
 		b.bootOwner = id
 	} else {
 		b.recoveryPending = id
 	}
 	retained := append([]int(nil), rights...)
 	b.principals[id] = p
-	b.launches[launcherTask.Cookie] = &launchRegistration{launcherCookie: launcherTask.Cookie, launcherPIDFD: launcherPIDFD, childPIDFD: rights[0], retainedFDs: retained, request: append([]byte(nil), raw...), ack: append([]byte(nil), ack...)}
-	_ = parent
+	b.launches[launcherCookie] = &launchRegistration{launcherCookie: launcherCookie, launcherPIDFD: launcherPIDFD, childPIDFD: rights[0], retainedFDs: retained, request: append([]byte(nil), raw...), ack: append([]byte(nil), ack...)}
 	if g2d1.registerFD == fd {
 		g2d1.registered = true
 	}
-	keepLauncher, keepLauncherFD, keepChild = true, true, true
+	if kind == "source" && b.diagnostic != nil {
+		b.diagnostic.transport, _ = openSettlementEvidenceTransport()
+	}
 	return ack, true, nil
 }
 

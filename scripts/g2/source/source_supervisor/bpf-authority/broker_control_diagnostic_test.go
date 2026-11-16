@@ -1202,7 +1202,11 @@ func TestBrokerOfflineDeleteLifecycle(t *testing.T) {
 			task: guardTask{TGID: pid, TID: pid, StartBoottimeNS: 1}}
 	}
 	observe := func(f *fixture, kind uint32, seq, root, node uint64) error {
-		return f.b.observeEffectCgroup(guardRecord{Kind: kind, Sequence: seq, RootCookie: root, CgroupID: node})
+		record := guardRecord{Kind: kind, Sequence: seq, RootCookie: root, CgroupID: node}
+		if kind == 5 || kind == 6 {
+			guardPut64(record.Detail[:], 0, seq)
+		}
+		return f.b.observeEffectCgroup(record)
 	}
 	// Only the authorization call is required to leave this graph unchanged;
 	// observeEffectCgroup has its own existing partial-update semantics on error.

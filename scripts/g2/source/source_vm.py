@@ -645,6 +645,27 @@ def _same_file(fd, path, identity):
         named.st_dev, named.st_ino, named.st_uid, stat.S_IMODE(named.st_mode))
 
 
+def _read_held_capture(host, fd, path, identity, limit):
+    def metadata(info):
+        return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode, info.st_nlink,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    before = os.fstat(fd)
+    host.require(_same_file(fd, path, identity) and stat.S_ISREG(before.st_mode) and
+                 before.st_uid == os.geteuid() and before.st_nlink == 1 and
+                 stat.S_IMODE(before.st_mode) == 0o600 and 0 <= before.st_size <= limit and
+                 metadata(before) == metadata(os.lstat(path)), 'unsafe held capture')
+    parts = []
+    offset = 0
+    while offset < before.st_size:
+        block = os.pread(fd, min(1048576, before.st_size - offset), offset)
+        host.require(bool(block), 'short held capture')
+        parts.append(block)
+        offset += len(block)
+    host.require(metadata(os.fstat(fd)) == metadata(before) and metadata(os.lstat(path)) == metadata(before),
+                 'held capture changed while reading')
+    return b''.join(parts)
+
+
 def _new_capture(path):
     fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     info = os.fstat(fd)
@@ -661,10 +682,11 @@ def _prepare_vm_captures(case_dir, resource_guard, reboot=False):
         opened.append(protocol_fd)
         serial_fd, serial_identity = _new_capture(case_dir / (prefix + 'serial.log'))
         opened.append(serial_fd)
-        for name in ('qmp.log', 'qemu.stderr'):
-            fd = os.open(case_dir / (prefix + name), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-            opened.append(fd)
-        resource_guard.captures = (protocol_fd, protocol_identity, serial_fd, serial_identity, opened[2], opened[3])
+        qmp_fd, qmp_identity = _new_capture(case_dir / (prefix + 'qmp.log'))
+        opened.append(qmp_fd)
+        stderr_fd = os.open(case_dir / (prefix + 'qemu.stderr'), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        opened.append(stderr_fd)
+        resource_guard.captures = (protocol_fd, protocol_identity, serial_fd, serial_identity, qmp_fd, qmp_identity, stderr_fd)
     except BaseException:
         for fd in opened:
             os.close(fd)
@@ -677,13 +699,15 @@ def _vm(host, frozen, env, case_dir, case, scenario, hashes, build, attempt, cid
     prefix = 'reboot-' if reboot else ''
     protocol_path, serial_path = case_dir / (prefix + 'protocol.log'), case_dir / (prefix + 'serial.log')
     qmp_path, stderr_path = case_dir / (prefix + 'qmp.log'), case_dir / (prefix + 'qemu.stderr')
-    protocol_fd, protocol_identity, serial_fd, serial_identity, qmp_fd, stderr_fd = resource_guard.captures
+    protocol_fd, protocol_identity, serial_fd, serial_identity, qmp_fd, qmp_identity, stderr_fd = resource_guard.captures
     del resource_guard.captures
     attempt['protocol_identity'] = list(protocol_identity)
     attempt['serial_identity'] = list(serial_identity)
+    attempt['qmp_identity'] = list(qmp_identity)
     qlog = os.fdopen(qmp_fd, 'wb', closefd=False)
     proc = pidfd = qmp = collector = None
     failure = None
+    complete_failure = False
     try:
         frozen.preflight_pidfd()
         _check_boot_fds(host, build, boot_fds)
@@ -768,7 +792,11 @@ def _vm(host, frozen, env, case_dir, case, scenario, hashes, build, attempt, cid
                     ready = True
                 if prefix_state['end'] is not None:
                     terminal = parser(data, True)['result']
-                    host.require(terminal.get('completed') is not False, 'guest reported terminal failure')
+                    if terminal.get('completed') is False:
+                        host.require(ready and proc.poll() is None, 'failed terminal was not observed while ready and live')
+                        attempt['ready_while_alive'] = True
+                        complete_failure = True
+                        raise host.Failure('guest reported terminal failure')
                     if (case == 'realm-negative' and scenario in ('observer-capability', 'bpf-authorization', 'bpf-broker-kill') and
                             terminal.get('completed') is True):
                         break
@@ -798,6 +826,7 @@ def _vm(host, frozen, env, case_dir, case, scenario, hashes, build, attempt, cid
             nonlocal failure
             try:
                 action()
+                return True
             except BaseException as exc:
                 if isinstance(exc, OSError) and exc.errno == errno.ENOSPC and resource_guard.abort is None:
                     resource_guard.abort = {'reason': 'enospc', 'phase': resource_guard.phase}
@@ -807,6 +836,7 @@ def _vm(host, frozen, env, case_dir, case, scenario, hashes, build, attempt, cid
                     errors = attempt.setdefault('secondary_errors', [])
                     if len(errors) < 8:
                         errors.append(('%s: %s' % (type(exc).__name__, exc))[:256])
+                return False
         if proc is not None:
             cleanup(lambda: frozen.held_shutdown(proc, pidfd, qmp, attempt))
             if qmp is not None:
@@ -823,22 +853,50 @@ def _vm(host, frozen, env, case_dir, case, scenario, hashes, build, attempt, cid
                     cleanup(stream.close)
         if pidfd is not None:
             cleanup(lambda: os.close(pidfd))
-        cleanup(qlog.flush)
-        cleanup(qlog.close)
-        cleanup(lambda: os.fsync(qmp_fd))
-        cleanup(lambda: os.close(qmp_fd))
+        qmp_flushed = cleanup(qlog.flush)
+        qmp_closed = cleanup(qlog.close)
+        qmp_synced = cleanup(lambda: os.fsync(qmp_fd))
+        # Keep QMP held until the output identity and hash have been checked.
         cleanup(lambda: os.close(stderr_fd))
     try:
+        if complete_failure:
+            try:
+                host.require(qmp_flushed and qmp_closed and qmp_synced, 'failed QMP capture was not durable')
+                os.fsync(protocol_fd)
+                os.fsync(serial_fd)
+                protocol = _read_held_capture(host, protocol_fd, protocol_path, protocol_identity, MAX_PROTOCOL)
+                serial = _read_held_capture(host, serial_fd, serial_path, serial_identity, MAX_PROTOCOL)
+                qmp_bytes = _read_held_capture(host, qmp_fd, qmp_path, qmp_identity, MAX_PROTOCOL)
+                terminal = parser(protocol, True)['result']
+                host.require(terminal.get('completed') is False, 'failed terminal changed')
+                encoded = host.canonical(terminal)
+                host.require(len(encoded) <= MAX_RESULT_BYTES, 'failed terminal exceeds limit')
+                attempt.update(protocol_sha256=hashlib.sha256(protocol).hexdigest(), protocol_bytes=len(protocol),
+                               serial_sha256=hashlib.sha256(serial).hexdigest(), serial_bytes=len(serial),
+                               qmp_sha256=hashlib.sha256(qmp_bytes).hexdigest(), qmp_bytes=len(qmp_bytes))
+                name = prefix + 'failed-result.json'
+                source_build._write(case_dir / name, encoded)
+                _sync_dir(case_dir)
+                attempt['failed_result'] = {'version': 1, 'path': name, 'sha256': hashlib.sha256(encoded).hexdigest(),
+                                            'bytes': len(encoded)}
+            except BaseException as exc:
+                if isinstance(exc, OSError) and exc.errno == errno.ENOSPC and resource_guard.abort is None:
+                    resource_guard.abort = {'reason': 'enospc', 'phase': resource_guard.phase}
+                errors = attempt.setdefault('secondary_errors', [])
+                if len(errors) < 8:
+                    errors.append(('failure capture: %s: %s' % (type(exc).__name__, exc))[:256])
         if failure is not None:
             raise failure
         host.require(attempt.get('exit_observed') is True, 'owned guest exit is uncertain')
         host.require(_same_file(protocol_fd, protocol_path, protocol_identity) and
-                     _same_file(serial_fd, serial_path, serial_identity), 'closed guest output identity differs')
+                     _same_file(serial_fd, serial_path, serial_identity) and
+                     _same_file(qmp_fd, qmp_path, qmp_identity), 'closed guest output identity differs')
         protocol = os.pread(protocol_fd, os.fstat(protocol_fd).st_size, 0)
         serial = os.pread(serial_fd, os.fstat(serial_fd).st_size, 0)
         attempt.update(protocol_sha256=hashlib.sha256(protocol).hexdigest(), protocol_bytes=len(protocol),
                        serial_sha256=hashlib.sha256(serial).hexdigest(), serial_bytes=len(serial),
-                       qmp_sha256=host.digest(qmp_path)[0])
+                       qmp_sha256=hashlib.sha256(os.pread(qmp_fd, os.fstat(qmp_fd).st_size, 0)).hexdigest(),
+                       qmp_bytes=os.fstat(qmp_fd).st_size)
         expected_exit = -signal.SIGKILL if case == 'source-recovery' and scenario == 'vm-kill' and not reboot else 0
         host.require(attempt.get('returncode') == expected_exit, 'guest exited with unexpected status')
         if early_mode:
@@ -847,7 +905,7 @@ def _vm(host, frozen, env, case_dir, case, scenario, hashes, build, attempt, cid
         return parser(protocol, True)
     finally:
         active = sys.exc_info()[1]
-        for fd in (protocol_fd, serial_fd):
+        for fd in (protocol_fd, serial_fd, qmp_fd):
             try:
                 os.close(fd)
             except OSError as exc:
@@ -1094,11 +1152,14 @@ def _run_single_vm_case(host, frozen, env, case_dir, case, scenario, build, vari
                                  cidata, boot_fds, guard, variant=variant)
             except BaseException as exc:
                 failure = exc
+            checks = {'exit': 'PASS' if attempt.get('exit_observed') is True and attempt.get('pidfd_held') is True else 'UNKNOWN',
+                      'carriers': 'UNKNOWN', 'resources': 'UNKNOWN'}
             if attempt.get('exit_observed') is True:
-                for action in (lambda: guard.after_wait(reboot),
-                               lambda: check_carriers('after_reboot_wait' if reboot else 'after_wait')):
+                for key, action in (('resources', lambda: guard.after_wait(reboot)),
+                                    ('carriers', lambda: check_carriers('after_reboot_wait' if reboot else 'after_wait'))):
                     try:
                         action()
+                        checks[key] = 'PASS'
                     except BaseException as exc:
                         if failure is None:
                             failure = exc
@@ -1110,6 +1171,9 @@ def _run_single_vm_case(host, frozen, env, case_dir, case, scenario, build, vari
                             errors = record.setdefault('secondary_errors', [])
                             if len(errors) < 8:
                                 errors.append(('%s: %s' % (type(exc).__name__, exc))[:256])
+                        checks[key] = 'FAIL'
+            if failure is not None:
+                record['failure_checks'] = checks
             if failure is not None:
                 raise failure
             return result
@@ -1192,6 +1256,10 @@ def _run_single_vm_case(host, frozen, env, case_dir, case, scenario, build, vari
         record.update(status='FAIL', error_type=type(exc).__name__, error=str(exc)[:512],
                       failure_kind='resource' if isinstance(exc, source_resources.SourceResourceError) or
                       (enospc is not None and (exc is enospc or isinstance(exc, source_build.StorageToolFailure))) else 'source')
+        record.setdefault('failure_checks', {
+            'exit': 'PASS' if record.get('attempt', {}).get('pidfd_held') is True and
+                              record.get('attempt', {}).get('exit_observed') is True else 'UNKNOWN',
+            'carriers': 'UNKNOWN', 'resources': 'UNKNOWN'})
         if guard is not None:
             record['resource_usage'] = guard.snapshot()
         if resource is not None:
@@ -1224,7 +1292,7 @@ def _run_single_vm_case(host, frozen, env, case_dir, case, scenario, build, vari
         return False, 'resource_capacity' if resource is not None else ('storage_tool_failure' if storage is not None else None)
     finally:
         if guard is not None and hasattr(guard, 'captures'):
-            for fd in (guard.captures[0], guard.captures[2], guard.captures[4], guard.captures[5]):
+            for fd in (guard.captures[0], guard.captures[2], guard.captures[4], guard.captures[6]):
                 try:
                     os.close(fd)
                 except OSError:

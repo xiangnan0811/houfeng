@@ -25,10 +25,27 @@ type pendingBrokerSettlement struct {
 	sampleBaseNS                                uint64
 	sampleArmed                                 bool
 	lastWait                                    byte
+	knownPredicates, pendingPredicates          uint64
+	evidence                                    *settlementEvidenceGrant
+	evidenceState                               *ownerProbeEvidenceState
 	followupObject                              *objectIncarnation
 	followupGrant                               *brokerGrant
 	followupCookie, followupID, followupCreator uint64
 	followupClass                               string
+}
+
+func (q *pendingBrokerSettlement) evaluated(point byte, pending bool) {
+	if q == nil || point < 1 || point > 13 {
+		return
+	}
+	mask := uint64(1) << (point - 1)
+	q.knownPredicates |= mask
+	if pending {
+		q.pendingPredicates |= mask
+	}
+	if q.evidence != nil && !q.evidence.final {
+		q.evidence.known, q.evidence.pending = q.knownPredicates, q.pendingPredicates
+	}
 }
 
 func (q *pendingBrokerSettlement) observe(event, point byte, detail ownerProbeRemovalDiagnostic) {
@@ -54,16 +71,25 @@ func (q *pendingBrokerSettlement) sampleReady(now uint64, point byte) bool {
 
 func (q *pendingBrokerSettlement) sample(now uint64, point byte) {
 	if q != nil {
+		q.evaluated(point, true)
 		q.lastWait = point
+		if q.evidence != nil && !q.evidence.final {
+			q.evidence.lastWait = uint64(point)
+		}
 	}
 	if q.sampleReady(now, point) {
+		q.captureWait(now, point, nil)
 		q.observe(2, point, ownerProbeRemovalDiagnostic{})
 	}
 }
 
 func (q *pendingBrokerSettlement) sampleRemoval(now uint64, b *authorityBroker, cookie uint64, object *objectIncarnation) {
 	if q != nil {
+		q.evaluated(10, true)
 		q.lastWait = 10
+		if q.evidence != nil && !q.evidence.final {
+			q.evidence.lastWait = 10
+		}
 	}
 	if q.sampleReady(now, 10) {
 		if b != nil && q.grant != nil && object != nil && cookie != 0 && object.cookie == cookie && b.effects != nil && b.effects.objects != nil && b.grants[q.grant.id] == q.grant && b.effects.objects.byCookie[cookie] == object {
@@ -72,6 +98,7 @@ func (q *pendingBrokerSettlement) sampleRemoval(now uint64, b *authorityBroker, 
 				q.followupObject, q.followupCookie, q.followupID, q.followupCreator, q.followupClass = object, cookie, object.id, object.ownerTransaction, object.class
 			}
 		}
+		q.captureWait(now, 10, q.followupObject)
 		q.observe(2, 10, b.ownerProbeRemovalSnapshot(q.grant, cookie, object))
 	}
 }
@@ -92,6 +119,10 @@ func (b *authorityBroker) emitGrantPhase(g *brokerGrant) error {
 // the eventual ACK is delayed until actual cleanup is observed, except the
 // first recovery request, which starts settlement before stopping a live VM.
 func (b *authorityBroker) startBrokerSettlement(p *controlPrincipal, request map[string]any, raw []byte) error {
+	var receivedNS uint64
+	if b != nil && b.diagnostic != nil {
+		receivedNS = evidenceNow()
+	}
 	if b == nil || p == nil || b.effects == nil || b.checkpoint == nil || b.checkpoint.invalid || b.pendingSettlement != nil || b.pendingCheckpoint != nil || b.pendingAdmit != nil || b.pendingExecOp != nil || !allowedOperation(p.Role, "SETTLE") || p.Terminal || p.Transferred || !livePIDFD(p.PIDFD) {
 		return errControlFrame
 	}
@@ -154,6 +185,12 @@ func (b *authorityBroker) startBrokerSettlement(p *controlPrincipal, request map
 	g.settlementRequests++
 	q := &pendingBrokerSettlement{principal: p, grant: g, requestID: id, raw: append([]byte(nil), raw...), firstRecovery: firstRecovery}
 	b.pendingSettlement = q
+	if b.diagnostic != nil {
+		q.evidenceState, q.evidence = b.diagnostic, b.diagnostic.grantFor(g)
+		if q.evidence != nil {
+			q.evidence.fact(4, 0, 0, receivedNS, id, 0)
+		}
+	}
 	if b.settlementDiagnosticEligible(q) {
 		purpose := byte(1)
 		if g.purpose == "postgres-gid" {
@@ -166,16 +203,32 @@ func (b *authorityBroker) startBrokerSettlement(p *controlPrincipal, request map
 }
 
 func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, bool, error) {
+	return b.advanceBrokerSettlementUsing(nil, nil, nil)
+}
+
+// The optional callbacks exercise the real short-circuit path without a guard
+// module in focused tests. Production always uses the original clock and ioctl.
+func (b *authorityBroker) advanceBrokerSettlementUsing(clock func() (uint64, error), retire func(uint64) (guardRetirement, error), cleanup func(*brokerGrant, uint64) error) (*controlPrincipal, []byte, bool, error) {
 	if b == nil || b.pendingSettlement == nil || b.effects == nil || b.checkpoint == nil {
 		return nil, nil, false, errGuardProtocol
 	}
 	q := b.pendingSettlement
 	q.lastWait = 0
+	q.knownPredicates, q.pendingPredicates = 0, 0
+	if q.evidence != nil && !q.evidence.final {
+		q.evidence.known, q.evidence.pending = 0, 0
+	}
 	p, g := q.principal, q.grant
 	if b.checkpoint.invalid || p.Terminal || p.Transferred || !livePIDFD(p.PIDFD) {
 		return p, nil, false, errGuardProtocol
 	}
-	now, err := monoNowNS()
+	var now uint64
+	var err error
+	if clock == nil {
+		now, err = monoNowNS()
+	} else {
+		now, err = clock()
+	}
 	if err != nil || now >= authorityGuestDeadlineNS {
 		b.checkpoint.markFault()
 		return p, nil, false, errGuardProtocol
@@ -187,12 +240,14 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 		q.sample(now, 1)
 		return p, nil, false, nil
 	}
+	q.evaluated(1, false)
 	for _, alias := range b.effects.aliases {
 		if alias != nil && alias.grantID == g.id && !alias.closed && (alias.transaction == nil || !alias.transaction.executionReleased) {
 			q.sample(now, 2)
 			return p, nil, false, nil
 		}
 	}
+	q.evaluated(2, false)
 	if err = b.closeGrantAliases(g); err != nil {
 		b.checkpoint.markFault()
 		return p, nil, false, err
@@ -218,13 +273,19 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 		}
 	}
 	if nextCookie != 0 {
-		if err = b.beginGrantObjectCleanup(g, nextCookie); err != nil {
+		if cleanup == nil {
+			err = b.beginGrantObjectCleanup(g, nextCookie)
+		} else {
+			err = cleanup(g, nextCookie)
+		}
+		if err != nil {
 			b.checkpoint.markFault()
 			return p, nil, false, err
 		}
 		q.sample(now, 3)
 		return p, nil, false, nil
 	}
+	q.evaluated(3, false)
 	if group := b.effects.cgroups[g.id]; group != nil && !group.Retired {
 		if b.effects.registry == nil {
 			b.checkpoint.markFault()
@@ -232,15 +293,24 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 		}
 		target := b.effects.registry.targets[cgroupKey{group.RootCookie, group.KernfsID}]
 		if target == nil {
+			q.evaluated(6, false)
 			if group.OfflineSeq == 0 || group.ReleaseSeq == 0 {
 				q.sample(now, 4)
 				return p, nil, false, nil
 			}
-			observed, retireErr := b.authority.guard.retireCgroup(group.Enrollment)
+			q.evaluated(4, false)
+			var observed guardRetirement
+			var retireErr error
+			if retire == nil {
+				observed, retireErr = b.authority.guard.retireCgroup(group.Enrollment)
+			} else {
+				observed, retireErr = retire(group.Enrollment)
+			}
 			if errors.Is(retireErr, unix.EAGAIN) {
 				q.sample(now, 5)
 				return p, nil, false, nil
 			}
+			q.evaluated(5, false)
 			if retireErr != nil || observed.State != 2 || observed.Sequence != group.ReleaseSeq {
 				b.checkpoint.markFault()
 				return p, nil, false, errGuardProtocol
@@ -251,6 +321,7 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 			}
 			group.HeldFD, group.Retired = -1, true
 		} else {
+			q.evaluated(4, false)
 			if target.phase == 2 {
 				if err = b.beginEffectCgroupSettlement(group, g); err != nil {
 					b.checkpoint.markFault()
@@ -261,11 +332,15 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 				q.sample(now, 6)
 				return p, nil, false, nil
 			}
+			q.evaluated(6, false)
 			if err = b.settleEffectCgroup(group, g); err != nil {
 				b.checkpoint.markFault()
 				return p, nil, false, err
 			}
 		}
+	} else {
+		q.evaluated(4, false)
+		q.evaluated(6, false)
 	}
 	for _, inv := range b.runtimeInvocations {
 		if inv.grantID == g.id && (inv.state != "settled" && inv.state != "failed" || livePIDFD(inv.pidfd) || b.runtimeBinds[inv.taskCookie] != nil) {
@@ -273,16 +348,19 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 			return p, nil, false, nil
 		}
 	}
+	q.evaluated(7, false)
 	if g.exec != nil && !g.exec.settled {
 		q.sample(now, 8)
 		return p, nil, false, nil
 	}
+	q.evaluated(8, false)
 	for _, tx := range b.effects.transactions {
 		if tx.grantID == g.id && tx.state != "retired" {
 			q.sample(now, 9)
 			return p, nil, false, nil
 		}
 	}
+	q.evaluated(9, false)
 	for cookie, owner := range b.effects.objectGrant {
 		if owner == g.id {
 			object := b.effects.objects.byCookie[cookie]
@@ -292,12 +370,14 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 			}
 		}
 	}
+	q.evaluated(10, false)
 	for _, a := range b.effects.attachments {
 		if a.grantID == g.id && a.state != "released" {
 			q.sample(now, 11)
 			return p, nil, false, nil
 		}
 	}
+	q.evaluated(11, false)
 	if g.probe != nil && !g.probeCompleted {
 		if g.outcome != "completed" {
 			g.probe.close()
@@ -333,6 +413,7 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 			}
 		}
 	}
+	q.evaluated(12, false)
 	if strings.HasPrefix(g.purpose, "postgres-init-") && !g.initCompleted {
 		svc := strings.TrimPrefix(g.purpose, "postgres-init-")
 		rec := b.serviceSecrets[svc]
@@ -387,6 +468,7 @@ func (b *authorityBroker) advanceBrokerSettlement() (*controlPrincipal, []byte, 
 		q.sample(now, 13)
 		return p, nil, false, nil
 	}
+	q.evaluated(13, false)
 	if g.createBound {
 		if g.bundleDirFD < 0 || g.bundleConfigFD < 0 || g.bundleDirFD == g.bundleConfigFD {
 			return p, nil, false, errGuardProtocol
@@ -419,6 +501,9 @@ func (b *authorityBroker) finishBrokerSettlement(q *pendingBrokerSettlement, sta
 		b.checkpoint.markFault()
 		return q.principal, nil, false, err
 	}
+	if q.evidence != nil {
+		q.evidence.fact(7, 0, 0, evidenceNow(), q.requestID, 0)
+	}
 	if state == "retired" && b.pendingSettlement == q && q.grant.phase == "retired" && b.settlementDiagnosticEligible(q) &&
 		q.diagnostic.cid == q.grant.containerID && (q.grant.purpose == "postgres-uid" && q.diagnostic.purpose == 1 || q.grant.purpose == "postgres-gid" && q.diagnostic.purpose == 2) {
 		q.observe(3, 0, ownerProbeRemovalDiagnostic{})
@@ -426,4 +511,18 @@ func (b *authorityBroker) finishBrokerSettlement(q *pendingBrokerSettlement, sta
 	}
 	b.pendingSettlement = nil
 	return q.principal, ack, true, nil
+}
+
+func (q *pendingBrokerSettlement) captureWait(now uint64, point byte, object *objectIncarnation) {
+	if q == nil || q.evidence == nil || q.evidenceState == nil || q.evidence.final {
+		return
+	}
+	e := q.evidence
+	if object != nil {
+		e.pin(q.evidenceState.objectFor(object))
+	}
+	e.lastWait = uint64(point)
+	e.fact(5, 0, 0, now, uint64(point), 0)
+	e.fact(6, 0, 0, now, q.knownPredicates, q.pendingPredicates)
+	e.capture(q.evidenceState, 2, 0, 0)
 }

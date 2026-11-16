@@ -10,7 +10,7 @@
 #include <stddef.h>
 #endif
 
-#define G2_GUARD_VERSION 4U
+#define G2_GUARD_VERSION 5U
 #define G2_GUARD_IOC_TYPE 0xB7
 #define G2_GUARD_EVENT_SLOTS 64U
 #define G2_GUARD_RING_CAPACITY 4096U

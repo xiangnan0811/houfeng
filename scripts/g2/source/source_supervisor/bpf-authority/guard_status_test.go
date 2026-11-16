@@ -11,7 +11,7 @@ import (
 // These are the native STATUS wire offsets, not a serialization of guardStatus.
 func statusWireFixture(state, phase uint32, sealed bool) []byte {
 	b := make([]byte, 240)
-	binary.LittleEndian.PutUint32(b[0:4], 4)
+	binary.LittleEndian.PutUint32(b[0:4], 5)
 	binary.LittleEndian.PutUint32(b[24:28], state)
 	binary.LittleEndian.PutUint32(b[32:36], phase)
 	binary.LittleEndian.PutUint64(b[40:48], 19)

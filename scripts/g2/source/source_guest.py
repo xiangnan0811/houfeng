@@ -17,6 +17,7 @@ import time
 
 import app_rollback
 import source_protocol
+import source_settlement_evidence
 import audit
 import bpf_authority
 import callback_lifecycle
@@ -2156,6 +2157,7 @@ def run():
                            (case['scenario'] == 'bpf-broker-kill' or
                             variant in ('guard-overflow', 'guard-miss', 'guard-pairing')))
     stage = 'guest-preflight'
+    settlement_evidence = []
     try:
         hardware = guest_storage.verify_guest()
         carrier.RESULT['isolation']['hardware'] = hardware
@@ -2163,7 +2165,15 @@ def run():
         volumes = guest_storage.prepare_volumes(blank)
         roots = census.RootSet.create()
         daemon, daemon_pidfd, daemon_info = guest_bootstrap.install_docker(
-            expected, authority, observe_owner_start=case['case'] == 'realm-negative' and case['scenario'] == 'bpf-broker-kill')
+            expected, authority, observe_owner_start=case['case'] == 'realm-negative' and case['scenario'] == 'bpf-broker-kill',
+            settlement_evidence=settlement_evidence)
+        try:
+            if settlement_evidence:
+                value = {'version': 1, 'probes': list(settlement_evidence)}
+                source_settlement_evidence.validate_evidence(value)
+                carrier.RESULT['settlement_evidence_v1'] = value
+        except BaseException:
+            pass
         stage = 'pregenesis-systemd'
         if case['case'] == 'realm-negative' and case['scenario'] == 'observer-capability':
             with tempfile.TemporaryDirectory(dir='/run', prefix='g2-systemd-smoke-') as scratch:
@@ -2446,6 +2456,19 @@ def run():
         carrier.RESULT['root_journal'] = _export(journal_owner, authority, deadline)
         carrier.RESULT['completed'] = True
     except BaseException as exc:
+        try:
+            probes = list(settlement_evidence)
+            source_settlement_evidence.validate_evidence({'version': 1, 'probes': probes})
+            extra = getattr(exc, '_g2_settlement_evidence_v1', None)
+            if extra is not None:
+                source_settlement_evidence.validate_evidence({'version': 1, 'probes': [extra]})
+                probes = [probe for probe in probes if probe['purpose'] != extra['purpose']] + [extra]
+            if probes:
+                value = {'version': 1, 'probes': probes}
+                source_settlement_evidence.validate_evidence(value)
+                carrier.RESULT['settlement_evidence_v1'] = value
+        except BaseException:
+            pass
         carrier.RESULT['completed'] = False
         carrier.RESULT['failure'] = {'stage': stage, 'error_type': type(exc).__name__}
         if stage == 'guest-preflight':

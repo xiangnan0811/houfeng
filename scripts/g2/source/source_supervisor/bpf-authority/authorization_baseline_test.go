@@ -351,7 +351,9 @@ func TestAuthorizationBaselineProofs(t *testing.T) {
 		}
 		object.removalSeq = 0
 		b.resolver = &brokerAuditResolver{}
-		if b.observeRuntimeGuard(guardRecord{Kind: 2, Sequence: 21, ObjectCookie: 13, KernelID: 17}) == nil {
+		removal := guardRecord{Kind: 2, Sequence: 21, ObjectCookie: 13, KernelID: 17}
+		guardPut64(removal.Detail[:], 0, 1)
+		if b.observeRuntimeGuard(removal) == nil {
 			t.Fatal("accepted premature kernel removal")
 		}
 		if cleanup.removalSequence != 0 || object.removalSeq != 0 {
@@ -369,7 +371,7 @@ func TestAuthorizationBaselineProofs(t *testing.T) {
 		b.effects.transactions[8].state = "retired"
 		b.effects.objects.transcript = tr
 		item.removalAllowed, item.deferredRemovalOnNextRelease = true, false
-		if err = b.observeRuntimeGuard(guardRecord{Kind: 2, Sequence: 21, ObjectCookie: 13, KernelID: 17}); err != nil {
+		if err = b.observeRuntimeGuard(removal); err != nil {
 			t.Fatalf("failed to finalize permitted removal: %v", err)
 		}
 		if cleanup.removalSequence != 21 || object.removalSeq != 21 || !item.removed || grant.phase != "active" {

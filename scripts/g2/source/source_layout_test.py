@@ -108,10 +108,19 @@ class LayoutTest(unittest.TestCase):
             with self.assertRaises(host.Failure):
                 host.validate_source_layout()
 
+    def test_current_guard_abi_header_must_be_v5(self):
+        header = self.source / 'source_supervisor/bpf-authority/native/abi.h'
+        header.parent.mkdir(parents=True)
+        header.write_bytes(b'#define G2_GUARD_VERSION 5U\n')
+        source_build._require_settlement_guard_abi(host)
+        header.write_bytes(b'#define G2_GUARD_VERSION 4U\n')
+        with self.assertRaises(host.Failure):
+            source_build._require_settlement_guard_abi(host)
+
     def test_seed_and_native_sources_use_source_tree(self):
         # Both roots have identically named but different inputs.
         for name in source_build.GUEST_FILES:
-            relative = Path(name) if name in ('source_guest.py', 'source_protocol.py') else Path('source_supervisor') / name
+            relative = Path(name) if name in source_build.ROOT_GUEST_FILES else Path('source_supervisor') / name
             for root, content in ((self.source, b'maintained'), (self.run, b'historical')):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)

@@ -1172,11 +1172,12 @@ class RetirementTests(unittest.TestCase):
                     self.assertEqual(mount_ids, [self.fixture_mount['id']])
                     result = self.real_lsof(target)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stderr, b'')
+                    self.assertFalse(result.stderr, 'unexpected lsof stderr: %r' % result.stderr)
                     self.assertIn(('p%d\n' % child).encode(), result.stdout)
                     self.assertIn(b'\nn' + os.fsencode(target) + b'\n', result.stdout)
                 closed = self.real_lsof(target)
-                self.assertEqual((closed.returncode, closed.stdout, closed.stderr), (1, b'', b''))
+                self.assertFalse(closed.stderr, 'unexpected lsof stderr: %r' % closed.stderr)
+                self.assertEqual((closed.returncode, closed.stdout), (1, b''))
                 if name == 'hardlink':
                     alias.unlink()
 

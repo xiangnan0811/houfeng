@@ -8,11 +8,13 @@ import subprocess
 import tempfile
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'source_supervisor'))
 from journal import JournalError
 
 import source_host as host
+import source_bpf_verify
 import source_protocol
 import source_verify
 import source_vm
@@ -234,6 +236,118 @@ class SourceProtocolTest(unittest.TestCase):
             self.assertEqual(value['result'], {'version': 1, 'run_token': host.TOKEN, 'case_sha256': 'a' * 64,
                               'seal_stage': 'seal-guard-loaded', 'init_handoff': False,
                               'terminal_observation': {'padding': 'x' * (5 * 1024 * 1024)}})
+
+    def test_current_lifecycle_timestamp_gate(self):
+        for kind in (2, 4, 5, 6):
+            value = {'kind': 'guard', 'body': {'record': {'kind': kind, 'detail': None}}}
+            with self.assertRaises(host.Failure):
+                source_bpf_verify.require_v5_timestamps(host, value)
+            value['body']['record']['detail'] = {'observed_mono_ns': 1}
+            source_bpf_verify.require_v5_timestamps(host, value)
+        source_bpf_verify.require_v5_timestamps(host, {'records': []})
+
+    def _failure_readback_fixture(self, directory, scenario, reboot=False):
+        class Guard:
+            def check_prepare(self, pending_bytes=0):
+                return None
+        seed_dir = directory / 'seed'
+        seed_dir.mkdir(mode=0o700)
+        for name, data in {'source_guest.py': b'guest', 'user-data': b'user', 'network-config': b'network'}.items():
+            (seed_dir / name).write_bytes(data)
+        build = {'_attempt_dir': str(directory), '_selection': {}, 'browser_selection': {},
+                 'seed_inputs': {path.name: host.digest(path)[0] for path in seed_dir.iterdir()},
+                 'qemu_binaries': {'qemu-system-x86_64': 'a' * 64}, 'boot_inputs': {},
+                 'bpf_authority': {'bootstrap_manifest': {}}, 'supervisor_manifest_sha256': 'd' * 64}
+        hashes = source_vm._seed_payload(host, build, directory, 'source-recovery', scenario, resource_guard=Guard())
+        image = {'uuid': '11111111-1111-1111-1111-111111111111', 'size': 12}
+        meta = ('instance-id: g2-%s-source-recovery-%s\nlocal-hostname: g2-source\n' %
+                (host.TOKEN, scenario)).encode('ascii')
+        template = {'meta-data': hashlib.sha256(meta).hexdigest(),
+                    'network-config': build['seed_inputs']['network-config'], 'user-data': build['seed_inputs']['user-data']}
+        launch = {'build_selection': {}, 'payload_case_sha256': hashes['case.json'],
+                  'seed_inputs_sha256': hashlib.sha256(host.canonical(build['seed_inputs'])).hexdigest(),
+                  'qemu_sha256': build['qemu_binaries']['qemu-system-x86_64'], 'boot_inputs': {}, 'seed_image': image,
+                  'argv_sha256': hashlib.sha256(host.canonical(['fixture'])).hexdigest(),
+                  'cidata_template_sha256': hashlib.sha256(host.canonical(template)).hexdigest()}
+        cidata = source_vm._cidata(host, build, directory, 'source-recovery', scenario, image, hashes, launch, Guard())
+        install = {'version': 1, 'guest_sha256': hashes['source_guest.py'],
+                   'supervisor_manifest_sha256': build['supervisor_manifest_sha256'],
+                   'seed_manifest_sha256': hashes['SHA256SUMS'], 'payload_case_sha256': hashes['case.json'],
+                   'seed_descriptor_sha256': cidata['seed-descriptor.json']}
+        envelope = dict(self.envelope, case=scenario, installation=install)
+        terminal = {'version': 1, 'run_token': host.TOKEN, 'case': 'source-recovery',
+                    'scenario': scenario, 'completed': False}
+        prefix = 'reboot-' if reboot else ''
+        with (directory / (prefix + 'protocol.log')).open('wb') as stream:
+            stream.write(self.install_frame(envelope) + ('G2LAB-READY ' + host.TOKEN + '\n').encode())
+            source_protocol.emit(Capture(terminal, stream))
+        for name in ('serial.log', 'qmp.log'):
+            (directory / (prefix + name)).write_bytes(b'')
+        artifact = directory / (prefix + 'failed-result.json')
+        artifact.write_bytes(host.canonical(terminal))
+        for name in ('protocol.log', 'serial.log', 'qmp.log', 'failed-result.json'):
+            (directory / (prefix + name)).chmod(0o600)
+        attempt = {'ready_while_alive': True, 'pidfd_held': True, 'exit_observed': True, 'argv': ['fixture'],
+                   'failed_result': {'version': 1, 'path': artifact.name,
+                                     'sha256': host.digest(artifact)[0], 'bytes': artifact.stat().st_size}}
+        for name in ('protocol', 'serial', 'qmp'):
+            path = directory / (prefix + name + '.log')
+            info = path.stat()
+            attempt[name + '_identity'] = [info.st_dev, info.st_ino, info.st_uid, 0o600]
+            attempt[name + '_sha256'], attempt[name + '_bytes'] = host.digest(path)
+        state = {'version': 2, 'status': 'FAIL', 'run_token': host.TOKEN, 'case': 'source-recovery',
+                 'scenario': scenario, 'bpf_variant': None, 'build_selection': {}, 'browser_selection': {},
+                 'boot_fds': {}, 'seed': hashes, 'seed_image': image, 'cidata': cidata,
+                 'cidata_identity': source_vm._cidata_identity(directory / 'cidata', cidata),
+                 'cidata_sha256': hashlib.sha256(host.canonical(cidata)).hexdigest(), 'host_launch': launch,
+                 'host_launch_sha256': hashlib.sha256(host.canonical(launch)).hexdigest(),
+                 'attempt': {} if reboot else attempt,
+                 'failure_checks': {'exit': 'PASS', 'carriers': 'UNKNOWN', 'resources': 'UNKNOWN'}}
+        if reboot:
+            state['reboot_attempt'] = attempt
+        return state, build, artifact, terminal, attempt
+
+    def test_failure_artifact_is_bound_to_original_complete_protocol(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            state, build, artifact, terminal, _ = self._failure_readback_fixture(directory, 'matrix')
+            with mock.patch.object(source_vm, 'expected_vm_argv', return_value=['fixture']):
+                result = source_verify._verify_single_vm_failure_state(host, self.frozen, directory,
+                    'source-recovery', 'matrix', build, state)
+                self.assertEqual(result['verification_limits'], ['CARRIERS', 'RESOURCES', 'QMP'])
+                self.assertEqual(result['settlement_evidence']['quality'], 'UNAVAILABLE')
+                artifact.write_bytes(host.canonical(dict(terminal, completed=True)))
+                result = source_verify._verify_single_vm_failure_state(host, self.frozen, directory,
+                    'source-recovery', 'matrix', build, state)
+                self.assertEqual(result['settlement_evidence']['quality'], 'INVALID')
+
+    def test_failure_readback_rejects_tampered_carriers_and_qmp(self):
+        for relative in ('payload/case.json', 'cidata/seed-descriptor.json', 'qmp.log'):
+            with self.subTest(path=relative), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                state, build, _, _, _ = self._failure_readback_fixture(directory, 'matrix')
+                path = directory / relative
+                path.chmod(0o600)
+                path.write_bytes(path.read_bytes() + b' ')
+                if relative != 'qmp.log':
+                    path.chmod(0o400)
+                with mock.patch.object(source_vm, 'expected_vm_argv', return_value=['fixture']):
+                    result = source_verify._verify_single_vm_failure_state(host, self.frozen, directory,
+                        'source-recovery', 'matrix', build, state)
+                self.assertEqual(result['settlement_evidence']['quality'], 'INVALID')
+
+    def test_reboot_failure_has_separate_artifact_and_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            state, build, _, _, attempt = self._failure_readback_fixture(directory, 'vm-kill', reboot=True)
+            with mock.patch.object(source_vm, 'expected_vm_argv', return_value=['fixture']):
+                result = source_verify._verify_single_vm_failure_state(host, self.frozen, directory,
+                    'source-recovery', 'vm-kill', build, state)
+                self.assertEqual(result['verification_limits'], ['EXIT', 'CARRIERS', 'RESOURCES', 'QMP'])
+                attempt['failed_result']['path'] = 'failed-result.json'
+                result = source_verify._verify_single_vm_failure_state(host, self.frozen, directory,
+                    'source-recovery', 'vm-kill', build, state)
+                self.assertEqual(result['settlement_evidence']['quality'], 'INVALID')
 
 
 if __name__ == '__main__':

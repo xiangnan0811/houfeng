@@ -64,7 +64,7 @@ else:
 			t.Fatal(err)
 		}
 		want := make([]byte, 48)
-		binary.LittleEndian.PutUint32(want[0:4], 4)
+		binary.LittleEndian.PutUint32(want[0:4], 5)
 		binary.LittleEndian.PutUint64(want[8:16], 0x102)
 		binary.LittleEndian.PutUint64(want[16:24], 0x304)
 		binary.LittleEndian.PutUint64(want[24:32], 0x506)

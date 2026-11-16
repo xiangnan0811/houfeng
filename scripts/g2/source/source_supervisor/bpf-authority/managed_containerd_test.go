@@ -3,12 +3,17 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -158,6 +163,47 @@ func TestManagedContainerdPreflight(t *testing.T) {
 }
 
 func TestManagedContainerdBinding(t *testing.T) {
+	if os.Getenv("G2_MANAGED_BINDING_TEST_CHILD") != "1" {
+		ownerRootPrerequisites(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestManagedContainerdBinding$", "-test.timeout=25s")
+		cmd.Env = append(os.Environ(), "G2_MANAGED_BINDING_TEST_CHILD=1")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNS, Pdeathsig: syscall.SIGKILL}
+		output, err := cmd.CombinedOutput()
+		if err != nil || ctx.Err() != nil {
+			t.Fatalf("isolated binding fixture: %v, context=%v\n%s", err, ctx.Err(), output)
+		}
+		return
+	}
+	ownerRootPrerequisites(t)
+	parentNamespace, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/mnt", os.Getppid()))
+	if err != nil || parentNamespace == "" {
+		t.Fatalf("read parent mount namespace: %v", err)
+	}
+	childNamespace, err := os.Readlink("/proc/self/ns/mnt")
+	if err != nil || childNamespace == "" || childNamespace == parentNamespace {
+		t.Fatalf("child mount namespace is not private: parent=%q child=%q err=%v", parentNamespace, childNamespace, err)
+	}
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		t.Fatalf("isolate mount propagation: %v", err)
+	}
+	if err := unix.Mount("tmpfs", "/usr/bin", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "size=1048576,mode=0755,uid=0,gid=0"); err != nil {
+		t.Fatalf("mount private executable fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := unix.Unmount("/usr/bin", 0); err != nil {
+			t.Errorf("unmount private executable fixture: %v", err)
+		}
+	})
+	var directory unix.Stat_t
+	var filesystem unix.Statfs_t
+	if err := unix.Lstat("/usr/bin", &directory); err != nil || directory.Mode&unix.S_IFMT != unix.S_IFDIR || directory.Mode&07777 != 0755 || directory.Uid != 0 || directory.Gid != 0 {
+		t.Fatalf("private executable directory metadata: %v", err)
+	}
+	if err := unix.Statfs("/usr/bin", &filesystem); err != nil || filesystem.Type != unix.TMPFS_MAGIC || filesystem.Flags&(unix.MS_NOSUID|unix.MS_NODEV) != unix.MS_NOSUID|unix.MS_NODEV || filesystem.Bsize <= 0 || filesystem.Blocks == 0 || filesystem.Blocks > 1048576/uint64(filesystem.Bsize) {
+		t.Fatalf("private executable filesystem preflight: %v", err)
+	}
 	managedFixtureDir(t)
 	data := []byte("authority-fixture")
 	digest := managedFixtureFile(t, "/opt/g2/g2-bpf-authority", data)

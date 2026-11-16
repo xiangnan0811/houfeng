@@ -10,6 +10,8 @@ import stat
 import socket
 import struct
 import sys
+import tempfile
+from types import SimpleNamespace
 import threading
 import time
 import unittest
@@ -554,7 +556,7 @@ class ProbeTransport:
                     cid = ('%064x' % transport.current)
                     transport.ids[cid] = config
                     transport.events.append(('create', transport.current))
-                    self.response = FakeResponse({'Id': cid}, 201)
+                    self.response = FakeResponse({'Id': cid}, 500 if transport.fail == 'create-%d' % transport.current else 201)
                     return
                 cid, _, suffix = op.partition('/')
                 if '?' in cid:
@@ -571,7 +573,7 @@ class ProbeTransport:
                     self.response = FakeResponse(item)
                 elif suffix == 'start':
                     transport.events.append(('start', number))
-                    self.response = FakeResponse(None, 204)
+                    self.response = FakeResponse(None, 500 if transport.fail == 'start-%d' % number else 204)
                 elif suffix.startswith('wait'):
                     transport.events.append(('wait', number))
                     if transport.fail == 'wait-expired':
@@ -605,7 +607,7 @@ class ProbeTransport:
         number = int(cid, 16)
         self.events.append(('settle-' + outcome, number))
         self.settlement_deadlines.append((outcome, number, deadline))
-        if outcome == 'completed' and self.fail == 'settle-exception':
+        if outcome == 'completed' and self.fail in ('settle-exception', 'settle-exception-%d' % number):
             raise JournalError('settlement failed')
         if outcome == 'completed' and self.fail == 'settle-pending':
             return 'pending'
@@ -613,7 +615,7 @@ class ProbeTransport:
 
 
 class OwnerProbeLifecycleTests(SourceFixture):
-    def run_pair(self, fail=None):
+    def run_pair(self, fail=None, evidence=None):
         transport = ProbeTransport(fail)
         cls = bootstrap._OwnerProbeSource
         original_check = cls.check
@@ -640,16 +642,31 @@ class OwnerProbeLifecycleTests(SourceFixture):
                 with mock.patch.object(bootstrap.os, 'rmdir', side_effect=OSError(errno.EIO, 'rmdir')):
                     return original_remove(source)
             return original_remove(source)
+        class Evidence:
+            def __init__(inner, authority, purpose):
+                inner.purpose = purpose
+                inner.nonce = ('01' if purpose == 'postgres-uid' else '02') * 16
+                inner.hard_deadline = 2000.0
+                inner.guest = {'operation_start_ns': 0, 'operation_deadline_ns': 0,
+                               'authority_deadline_ns': 0, 'ack_received_ns': 0}
+            def bind(inner, cid, start, deadline):
+                pass
+            def collect(inner):
+                return {'purpose': inner.purpose, 'nonce': inner.nonce, 'collection': 'EMPTY',
+                        'guest': dict(inner.guest), 'snapshots': [], 'reference_holder': 'UNRESOLVED'}
+            def close(inner):
+                pass
         with mock.patch.object(bootstrap, '_OwnerProbeSource', side_effect=make_source), \
              mock.patch.object(cls, 'check', check), mock.patch.object(cls, 'remove', remove), \
              mock.patch.object(bootstrap.time, 'monotonic', side_effect=lambda: transport.now), \
-             mock.patch.object(guest_postgres, '_UnixHTTP', side_effect=transport.connection):
+             mock.patch.object(guest_postgres, '_UnixHTTP', side_effect=transport.connection), \
+             mock.patch.object(bootstrap, '_OwnerSettlementEvidenceChannel', Evidence):
             if fail is None:
-                result = bootstrap._owner_probe_pair({}, transport, observe_owner_start=False)
+                result = bootstrap._owner_probe_pair({}, transport, observe_owner_start=False, settlement_evidence=evidence)
                 self.assertEqual(result, [999, 999])
             else:
                 with self.assertRaises((JournalError, OSError)):
-                    bootstrap._owner_probe_pair({}, transport, observe_owner_start=False)
+                    bootstrap._owner_probe_pair({}, transport, observe_owner_start=False, settlement_evidence=evidence)
         self.assertEqual(len(transport.sources), 1)
         self.assertIsNone(transport.sources[0]._leaf)
         with self.assertRaises(OSError) as closed:
@@ -665,6 +682,71 @@ class OwnerProbeLifecycleTests(SourceFixture):
         self.assertLess(transport.events.index(('delete', 1)), transport.events.index(('settle-completed', 1)))
         self.assertLess(transport.events.index(('delete', 2)), transport.events.index(('settle-completed', 2)))
         self.assertLess(transport.events.index(('settle-completed', 2)), transport.events.index(('remove', 0)))
+
+    def test_uid_evidence_survives_gid_failures(self):
+        for failure in ('create-2', 'admit-2', 'start-2', 'settle-exception-2'):
+            with self.subTest(failure=failure):
+                evidence = []
+                self.run_pair(failure, evidence=evidence)
+                self.assertEqual([item['purpose'] for item in evidence], ['postgres-uid', 'postgres-gid'])
+                self.assertTrue(all(item['collection'] == 'EMPTY' for item in evidence))
+                remove_owned(SOURCE)
+
+    def test_bind_can_be_processed_after_admit_without_an_ack(self):
+        transport = ProbeTransport()
+        source = self.source()
+        transport.sources = [source]
+        transport.source_fd = source._leaf
+        transport.constructing = False
+        broker, guest = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+        self.addCleanup(broker.close)
+        self.addCleanup(guest.close)
+        broker.settimeout(1)
+        guest.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        guest.setblocking(False)
+        channel = bootstrap._OwnerSettlementEvidenceChannel.__new__(bootstrap._OwnerSettlementEvidenceChannel)
+        channel.sock, channel.peer = guest, (os.getpid(), os.getuid(), os.getgid())
+        channel.purpose, channel.nonce = 'postgres-uid', '03' * 16
+        channel.boot, channel.epoch, channel.principal = '01' * 16, '02' * 16, 3
+        channel.container_id, channel.hard_deadline = None, 0.0
+        channel.armed, channel.invalid = True, False
+        channel.guest = {'operation_start_ns': 0, 'operation_deadline_ns': 0,
+                         'authority_deadline_ns': 0, 'ack_received_ns': 0}
+        admitted, original_admit = [], transport.admit_container
+        def admit(config, cid, purpose):
+            original_admit(config, cid, purpose)
+            admitted.append(json.loads(broker.recv(1024)))
+        transport.admit_container = admit
+        evidence = []
+        with mock.patch.object(guest_postgres, '_UnixHTTP', side_effect=transport.connection), \
+             mock.patch.object(bootstrap.time, 'monotonic', side_effect=lambda: transport.now):
+            result = bootstrap._owner_probe({}, transport, '-u', source, observe_owner_start=False,
+                                            settlement_evidence=evidence, evidence_channel=channel)
+        self.assertEqual(result, 999)
+        self.assertEqual(admitted[0]['container_id'], '%064x' % 1)
+        self.assertEqual(admitted[0]['nonce'], channel.nonce)
+        self.assertEqual(evidence[0]['collection'], 'EMPTY')
+        self.assertIn(('settle-completed', 1), transport.events)
+
+    def test_missing_listener_does_not_block_admission(self):
+        transport = ProbeTransport()
+        transport._peer = (os.getpid(), os.getuid(), os.getgid())
+        transport.boot_id = '01010101-0101-0101-0101-010101010101'
+        transport.epoch, transport.principal_id, transport._deadline = '02' * 16, 3, 2000.0
+        source = self.source()
+        transport.sources = [source]
+        transport.source_fd = source._leaf
+        transport.constructing = False
+        evidence = []
+        with mock.patch.object(bootstrap, '_OwnerProbeSource', return_value=source), \
+             mock.patch.object(bootstrap, 'OWNER_SETTLEMENT_SOCKET', '/run/g2/missing-settlement-listener'), \
+             mock.patch.object(guest_postgres, '_UnixHTTP', side_effect=transport.connection), \
+             mock.patch.object(bootstrap.time, 'monotonic', side_effect=lambda: transport.now):
+            self.assertEqual(bootstrap._owner_probe_pair({}, transport, observe_owner_start=False,
+                                                        settlement_evidence=evidence), [999, 999])
+        self.assertEqual([item['collection'] for item in evidence], ['UNAVAILABLE', 'UNAVAILABLE'])
+        self.assertEqual([event for event in transport.events if event[0] == 'admit'],
+                         [('admit', 'postgres-uid'), ('admit', 'postgres-gid')])
 
     def test_failure_retains_source_and_runs_original_cleanup(self):
         for failure in ('admit-1', 'admit-2', 'before-create', 'after-create', 'before-start', 'after-retired-2', 'wait', 'delete', 'settle-pending', 'settle-exception', 'inspect', 'remove'):
@@ -2223,7 +2305,7 @@ class OwnerProbeSettlementDiagnosticTests(SourceFixture):
         self.assertTrue(os.path.exists(moved))
 
     def exercise(self, outcome='timeout', fault=None, observed=True, role='BOOT_OWNER', detail=None,
-                 hard_deadline=None, mutate_deadline=False):
+                 hard_deadline=None, mutate_deadline=False, evidence_channel=None, evidence_list=None):
         class RoleFaultTransport(ProbeTransport):
             @property
             def role(inner):
@@ -2304,7 +2386,8 @@ class OwnerProbeSettlementDiagnosticTests(SourceFixture):
              mock.patch.object(bootstrap, '_OwnerProbeSettlementDiagnostic', Receiver), \
              mock.patch.object(source, 'check', side_effect=checked):
             try:
-                bootstrap._owner_probe({}, transport, '-u', source, observe_owner_start=observed)
+                bootstrap._owner_probe({}, transport, '-u', source, observe_owner_start=observed,
+                                       settlement_evidence=evidence_list, evidence_channel=evidence_channel)
             except BaseException as exc:
                 escaped = exc
         self.assertEqual(transport.settlement_deadlines, [('completed', 1, 1060)])
@@ -2315,6 +2398,61 @@ class OwnerProbeSettlementDiagnosticTests(SourceFixture):
         if escaped is not None and fault not in ('attach-close', 'source-after'):
             self.assertIs(escaped, failure if outcome == 'timeout' else escaped)
         return escaped, failure, replacement, events, armed
+
+    def test_new_evidence_stays_with_the_escaping_exception(self):
+        class Channel:
+            def __init__(self):
+                self.guest = {}
+            def bind(self, cid, start, deadline):
+                pass
+            def collect(self):
+                return {'purpose': 'postgres-uid', 'nonce': 'ab' * 16, 'collection': 'EMPTY',
+                        'guest': {'operation_start_ns': 0, 'operation_deadline_ns': 0,
+                                  'authority_deadline_ns': 0, 'ack_received_ns': 0},
+                        'snapshots': [], 'reference_holder': 'UNRESOLVED'}
+            def close(self):
+                pass
+        values = []
+        exc, failure, _, _, _ = self.exercise(evidence_channel=Channel(), evidence_list=values)
+        self.assertIs(exc, failure)
+        self.assertEqual(values, [failure._g2_settlement_evidence_v1])
+        remove_owned(SOURCE)
+        values = []
+        exc, failure, replacement, _, _ = self.exercise(fault='attach-close', evidence_channel=Channel(),
+                                                         evidence_list=values)
+        self.assertIs(exc, replacement)
+        self.assertFalse(hasattr(replacement, '_g2_settlement_evidence_v1'))
+        self.assertFalse(hasattr(failure, '_g2_settlement_evidence_v1'))
+        self.assertEqual(len(values), 1)
+
+    def test_timeout_collects_final_from_independent_seqpacket(self):
+        from source_settlement_evidence_test import snapshot
+        sender, receiver = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+        self.addCleanup(sender.close)
+        self.addCleanup(receiver.close)
+        receiver.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        receiver.setblocking(False)
+        channel = bootstrap._OwnerSettlementEvidenceChannel.__new__(bootstrap._OwnerSettlementEvidenceChannel)
+        channel.sock, channel.peer = receiver, (os.getpid(), os.getuid(), os.getgid())
+        channel.purpose, channel.nonce = 'postgres-uid', '03' * 16
+        channel.boot, channel.epoch, channel.principal = '01' * 16, '02' * 16, 3
+        channel.container_id, channel.hard_deadline = None, 0.0
+        channel.armed, channel.invalid = True, False
+        channel.guest = {'operation_start_ns': 0, 'operation_deadline_ns': 0,
+                         'authority_deadline_ns': 0, 'ack_received_ns': 0}
+        for phase in (1, 3):
+            raw = bytearray(snapshot(phase))
+            struct.pack_into('<3Q', raw, 16 + 10 * 8, 0, 0, 0)
+            if phase == 3:
+                struct.pack_into('<2Q', raw, 16 + 13 * 8, 1060 * 1000000000, 1060 * 1000000000 + 1)
+            sender.send(raw)
+        values = []
+        exc, failure, _, _, _ = self.exercise(evidence_channel=channel, evidence_list=values)
+        self.assertIs(exc, failure)
+        self.assertEqual(values[0]['collection'], 'COMPLETE')
+        self.assertEqual(values[0], failure._g2_settlement_evidence_v1)
+        self.assertEqual(values[0]['guest']['ack_received_ns'], 0)
+        self.assertEqual(len(values[0]['snapshots']), 2)
 
     def test_settlement_failure_same_exception_and_order(self):
         exc, failure, _, events, armed = self.exercise()
@@ -2708,3 +2846,150 @@ class OwnerProbeSettlementDiagnosticTests(SourceFixture):
         record = bootstrap._preflight_failure_diagnostic(exc)
         self.assertEqual(record['version'], 6)
         self.assertEqual(record['settlement']['followup'], exc._g2_owner_probe_settlement_diagnostic['followup'])
+
+
+class OwnerSettlementEvidenceChannelTests(unittest.TestCase):
+    def test_missing_armed_reply_respects_authority_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            self.addCleanup(os.close, directory_fd)
+            path = '/proc/self/fd/%d/broker.sock' % directory_fd
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+            self.addCleanup(listener.close)
+            listener.bind(path)
+            listener.listen(1)
+            release = threading.Event()
+            received = []
+            def broker():
+                conn, _ = listener.accept()
+                with conn:
+                    received.append(conn.recv(512))
+                    release.wait(1)
+            thread = threading.Thread(target=broker, daemon=True)
+            thread.start()
+            start = time.monotonic()
+            authority = SimpleNamespace(_peer=(os.getpid(), os.getuid(), os.getgid()),
+                boot_id='01010101-0101-0101-0101-010101010101', epoch='02' * 16,
+                principal_id=3, _deadline=start + .05)
+            try:
+                with mock.patch.object(bootstrap, 'OWNER_SETTLEMENT_SOCKET', path):
+                    channel = bootstrap._OwnerSettlementEvidenceChannel(authority, 'postgres-gid')
+                self.assertLess(time.monotonic() - start, .5)
+                self.assertEqual(channel.collect()['collection'], 'UNAVAILABLE')
+                channel.close()
+            finally:
+                release.set()
+                thread.join(timeout=1)
+            self.assertEqual(len(received), 1)
+            self.assertEqual(json.loads(received[0])['purpose'], 'postgres-gid')
+
+    def test_real_hello_and_bind(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            self.addCleanup(os.close, directory_fd)
+            path = '/proc/self/fd/%d/broker.sock' % directory_fd
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+            self.addCleanup(listener.close)
+            listener.bind(path)
+            listener.listen(1)
+            listener.settimeout(1)
+            received = []
+            def broker():
+                conn, _ = listener.accept()
+                with conn:
+                    hello = json.loads(conn.recv(512))
+                    received.append(hello)
+                    conn.send(bootstrap.canonical({'version': 1, 'status': 'ARMED', 'nonce': hello['nonce']}))
+                    received.append(json.loads(conn.recv(1024)))
+            thread = threading.Thread(target=broker, daemon=True)
+            thread.start()
+            authority = SimpleNamespace(_peer=(os.getpid(), os.getuid(), os.getgid()),
+                boot_id='01010101-0101-0101-0101-010101010101', epoch='02' * 16,
+                principal_id=3, _deadline=time.monotonic() + 5)
+            with mock.patch.object(bootstrap, 'OWNER_SETTLEMENT_SOCKET', path):
+                channel = bootstrap._OwnerSettlementEvidenceChannel(authority, 'postgres-uid')
+                self.assertTrue(channel.armed)
+                start = time.monotonic()
+                channel.bind('ab' * 32, start, start + 60)
+                channel.close()
+            thread.join(timeout=1)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(set(received[0]), {'version', 'purpose', 'nonce', 'principal_id'})
+            self.assertEqual(received[1]['nonce'], received[0]['nonce'])
+            self.assertEqual(received[1]['container_id'], 'ab' * 32)
+            self.assertEqual(received[1]['operation_deadline_ns'], int((start + 60) * 1000000000))
+
+    def channel(self):
+        sender, receiver = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+        self.addCleanup(sender.close)
+        self.addCleanup(receiver.close)
+        receiver.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        receiver.setblocking(False)
+        item = bootstrap._OwnerSettlementEvidenceChannel.__new__(bootstrap._OwnerSettlementEvidenceChannel)
+        item.sock, item.peer = receiver, (os.getpid(), os.getuid(), os.getgid())
+        item.purpose, item.nonce = 'postgres-uid', '03' * 16
+        item.boot, item.epoch, item.principal = '01' * 16, '02' * 16, 3
+        item.container_id, item.hard_deadline = '00' * 32, 0.0
+        item.armed, item.invalid = True, False
+        item.guest = {'operation_start_ns': 10, 'operation_deadline_ns': 100,
+                      'authority_deadline_ns': 1000, 'ack_received_ns': 0}
+        return sender, item
+
+    def test_seqpacket_rejects_rights_and_truncation(self):
+        import array
+        for rights in (True, False):
+            sender, channel = self.channel()
+            fd = os.open('/dev/null', os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                if rights:
+                    sender.sendmsg([b'x'], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [fd]))])
+                else:
+                    sender.send(b'x' * 5000)
+                self.assertEqual(channel.collect()['collection'], 'INVALID')
+            finally:
+                os.close(fd)
+
+    def test_fourth_packet_is_invalid(self):
+        from source_settlement_evidence_test import snapshot
+        sender, channel = self.channel()
+        for phase in (1, 2, 3, 3):
+            sender.send(snapshot(phase))
+        value = channel.collect()
+        self.assertEqual(value['collection'], 'INVALID')
+        self.assertEqual(value['snapshots'], [])
+
+    def test_final_without_wait_and_authority_socket_independent(self):
+        from source_settlement_evidence_test import snapshot
+        sender, channel = self.channel()
+        sender.send(snapshot(1))
+        sender.send(snapshot(3))
+        sender.close()
+        value = channel.collect()
+        self.assertEqual(value['collection'], 'COMPLETE')
+        self.assertEqual(len(value['snapshots']), 2)
+
+    def test_wrong_peer_is_invalid(self):
+        from source_settlement_evidence_test import snapshot
+        sender, channel = self.channel()
+        channel.peer = (os.getpid() + 1, os.getuid(), os.getgid())
+        sender.send(snapshot(1))
+        self.assertEqual(channel.collect()['collection'], 'INVALID')
+
+    def test_registration_precedes_each_probe_and_failure_does_not_block(self):
+        events = []
+        source = mock.Mock()
+        def register(authority, purpose):
+            events.append(('register', purpose))
+            if purpose == 'postgres-gid':
+                raise OSError('unavailable')
+            return object()
+        def probe(daemon, authority, flag, held_source, **kwargs):
+            events.append(('probe', flag, kwargs['evidence_channel'] is not None))
+            return 999
+        with mock.patch.object(bootstrap, '_OwnerProbeSource', return_value=source), \
+             mock.patch.object(bootstrap, '_OwnerSettlementEvidenceChannel', side_effect=register), \
+             mock.patch.object(bootstrap, '_owner_probe', side_effect=probe):
+            self.assertEqual(bootstrap._owner_probe_pair({}, object(), observe_owner_start=True,
+                                                        settlement_evidence=[]), [999, 999])
+        self.assertEqual(events, [('register', 'postgres-uid'), ('probe', '-u', True),
+                                  ('register', 'postgres-gid'), ('probe', '-g', False)])
