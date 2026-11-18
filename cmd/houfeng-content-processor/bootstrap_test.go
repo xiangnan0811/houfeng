@@ -626,6 +626,35 @@ func testProcessorConfig() contentProcessorConfig {
 	}
 }
 
+func TestProcessorRecordAdmissionRequiresCompleteWorkerIdentity(t *testing.T) {
+	valid := testProcessorConfig()
+	if gate, err := processorRecordAdmissionGate(valid); err != nil || gate == nil {
+		t.Fatalf("valid worker identity: gate=%v error=%v", gate, err)
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*contentProcessorConfig)
+	}{
+		{"empty", func(c *contentProcessorConfig) {
+			c.RecordDeploymentID, c.RecordInstanceID, c.RecordInstanceKind, c.RecordInstanceCapability = "", "", "", ""
+		}},
+		{"deployment", func(c *contentProcessorConfig) { c.RecordDeploymentID = "" }},
+		{"instance", func(c *contentProcessorConfig) { c.RecordInstanceID = "" }},
+		{"kind", func(c *contentProcessorConfig) { c.RecordInstanceKind = "" }},
+		{"api", func(c *contentProcessorConfig) { c.RecordInstanceKind = "api" }},
+		{"recovery", func(c *contentProcessorConfig) { c.RecordInstanceKind = "recovery" }},
+		{"capability", func(c *contentProcessorConfig) { c.RecordInstanceCapability = "" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := valid
+			test.change(&config)
+			if gate, err := processorRecordAdmissionGate(config); err == nil || gate != nil {
+				t.Fatalf("invalid identity admitted: gate=%v error=%v", gate, err)
+			}
+		})
+	}
+}
+
 func TestContentProcessorBootstrapCancellationStopsBeforeClaimAndWorker(t *testing.T) {
 	config := testProcessorConfig()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -872,6 +901,48 @@ func TestLoadContentProcessorConfigUsesSharedAttachmentBounds(t *testing.T) {
 		cfg.ClamAVDialTimeout != 4*time.Second || cfg.ClamAVOperationTimeout != 50*time.Second ||
 		cfg.ClamAVChunkSize != 16384 || cfg.ClamAVResponseLimit != 1024 {
 		t.Fatalf("shared scanner config = %#v", cfg)
+	}
+}
+
+func TestLoadContentProcessorConfigReadsDeploymentIDFile(t *testing.T) {
+	clearProcessorEnv(t)
+	path := filepath.Join(t.TempDir(), "deployment-id")
+	setProcessorEnv(t, map[string]string{
+		"HOUFENG_DATABASE_URL":                     "postgres://processor",
+		"HOUFENG_ATTACHMENT_BLOB_BACKEND":          "local",
+		"HOUFENG_ATTACHMENT_BLOB_ROOT":             "/var/lib/houfeng-test/attachments",
+		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT": "/var/lib/houfeng-test/processor-workdir",
+		"HOUFENG_RECORD_DEPLOYMENT_ID":             "different-environment-value",
+		"HOUFENG_RECORD_DEPLOYMENT_ID_FILE":        path,
+		"HOUFENG_RECORD_INSTANCE_ID":               "compose-processor",
+		"HOUFENG_RECORD_INSTANCE_KIND":             "worker",
+		"HOUFENG_RECORD_INSTANCE_CAPABILITY":       "records.runtime",
+	})
+
+	if _, err := loadContentProcessorConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_RECORD_DEPLOYMENT_ID_FILE") {
+		t.Fatalf("missing deployment ID file error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(" \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadContentProcessorConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_RECORD_DEPLOYMENT_ID_FILE") {
+		t.Fatalf("empty deployment ID file error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(processorTestDeployment+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadContentProcessorConfig()
+	if err != nil {
+		t.Fatalf("load deployment ID file: %v", err)
+	}
+	if cfg.RecordDeploymentID != processorTestDeployment {
+		t.Fatalf("deployment ID = %q, want published ID %q", cfg.RecordDeploymentID, processorTestDeployment)
+	}
+	if cfg.RecordInstanceID != "compose-processor" || cfg.RecordInstanceKind != "worker" || cfg.RecordInstanceCapability != "records.runtime" {
+		t.Fatalf("processor worker identity = %q/%q/%q", cfg.RecordInstanceID, cfg.RecordInstanceKind, cfg.RecordInstanceCapability)
+	}
+	if gate, err := processorRecordAdmissionGate(cfg); err != nil || gate == nil {
+		t.Fatalf("file-backed processor identity gate = %v, %v", gate, err)
 	}
 }
 
@@ -1176,6 +1247,8 @@ func clearProcessorEnv(t *testing.T) {
 		"HOUFENG_CLAMAV_NETWORK", "HOUFENG_CLAMAV_ADDRESS",
 		"HOUFENG_CLAMAV_DIAL_TIMEOUT", "HOUFENG_CLAMAV_OPERATION_TIMEOUT", "HOUFENG_CLAMAV_CHUNK_SIZE",
 		"HOUFENG_CLAMAV_RESPONSE_LIMIT",
+		"HOUFENG_RECORD_DEPLOYMENT_ID", "HOUFENG_RECORD_DEPLOYMENT_ID_FILE",
+		"HOUFENG_RECORD_INSTANCE_ID", "HOUFENG_RECORD_INSTANCE_KIND", "HOUFENG_RECORD_INSTANCE_CAPABILITY",
 	} {
 		t.Setenv(key, "")
 	}

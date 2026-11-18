@@ -520,7 +520,7 @@ func newC80EffectsDatabase(t *testing.T, ctx context.Context, binary string) c80
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := activateComposeAuthorityState(ctx, migrator, root, state); err != nil {
+	if err := activateComposeAuthorityState(ctx, migrator, root, state, platformmigrate.AppRoleSetV2{}); err != nil {
 		migrator.Close()
 		t.Fatalf("activate isolated C80 deployment: %v", err)
 	}

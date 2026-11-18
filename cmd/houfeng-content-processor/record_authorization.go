@@ -71,6 +71,9 @@ func newProcessorAttachmentRepository(ctx context.Context, config contentProcess
 	resolver := store.NewRecordSubjectReadResolver(subjects, tombstones)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, resolver, gate)
 	repository := store.NewPostgresAttachmentRepository(pool)
+	if err := repository.ConfigureProcessorAdmission(gate); err != nil {
+		return nil, nil, fmt.Errorf("configure processor admission: %w", err)
+	}
 	if err := repository.ConfigureRecordMutationAuthorization(store.NewPostgresCollaborationMembershipReader(), authorizations); err != nil {
 		return nil, nil, fmt.Errorf("configure processor mutation authorization: %w", err)
 	}
@@ -78,18 +81,10 @@ func newProcessorAttachmentRepository(ctx context.Context, config contentProcess
 	return repository, closeWitness, nil
 }
 
-func processorRecordAdmissionGate(config contentProcessorConfig) (store.AdmissionGate, error) {
-	set := 0
-	for _, value := range []string{config.RecordDeploymentID, config.RecordInstanceID, config.RecordInstanceKind, config.RecordInstanceCapability} {
-		if value != "" {
-			set++
-		}
-	}
-	if set == 0 {
-		return nil, nil
-	}
-	if set != 4 {
-		return nil, errors.New("processor record admission identity is incomplete")
+func processorRecordAdmissionGate(config contentProcessorConfig) (*store.DeploymentMembershipAdmissionGate, error) {
+	if config.RecordDeploymentID == "" || config.RecordInstanceID == "" ||
+		config.RecordInstanceKind != "worker" || config.RecordInstanceCapability == "" {
+		return nil, errors.New("processor record admission requires a complete worker identity")
 	}
 	return store.NewDeploymentMembershipAdmissionGate(store.DeploymentMembershipIdentity{
 		InstanceID:   config.RecordInstanceID,

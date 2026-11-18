@@ -204,6 +204,43 @@ func TestComposeAuthorityRuntimeRejectsStateDriftBeforeHeartbeat(t *testing.T) {
 	}
 }
 
+func TestComposeAuthorityStateComparisonIncludesV2Inventory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "authority")
+	if _, err := recordauthority.CreateComposeState(root); err != nil {
+		t.Fatal(err)
+	}
+	state, err := recordauthority.PrepareComposeMembershipV2(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := recordauthority.LoadComposeState(root)
+	if err != nil || !sameVerifiedComposeAuthorityState(state, current) {
+		t.Fatalf("canonical state mismatch: %v", err)
+	}
+	changedRotation := *current.MembershipRotation
+	changedRotation.NextIdentitySetEpoch++
+	current.MembershipRotation = &changedRotation
+	if sameVerifiedComposeAuthorityState(state, current) {
+		t.Fatal("state comparison accepted a changed rotation")
+	}
+	current, err = recordauthority.LoadComposeState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Memberships[1].QueueAdmitted = false
+	if sameVerifiedComposeAuthorityState(state, current) {
+		t.Fatal("state comparison accepted a changed member")
+	}
+	current, err = recordauthority.LoadComposeState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.MembershipVersion = 1
+	if sameVerifiedComposeAuthorityState(state, current) {
+		t.Fatal("state comparison accepted a changed membership version")
+	}
+}
+
 func TestComposeAuthorityRuntimeUsesFixedInternalTopology(t *testing.T) {
 	t.Parallel()
 

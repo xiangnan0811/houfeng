@@ -31,6 +31,7 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 		"houfeng-secrets-init",
 		"db",
 		"houfeng-db-init",
+		"houfeng-local-namespace-init",
 		"houfeng-record-authority",
 		"clamav",
 		"houfeng",
@@ -40,11 +41,12 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 		composeServiceBlock(t, compose, service)
 	}
 	if services := composeTopLevelServiceNames(compose); len(services) != len(expectedServices) {
-		t.Fatalf("production compose must define exactly the reviewed eight-service graph; got %v", services)
+		t.Fatalf("production compose must define exactly the reviewed nine-service graph; got %v", services)
 	}
 	for _, service := range []string{
 		"houfeng-storage-init",
 		"houfeng-db-init",
+		"houfeng-local-namespace-init",
 		"houfeng-record-authority",
 		"houfeng",
 		"houfeng-content-processor",
@@ -84,6 +86,69 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 	}
 }
 
+func TestProductionComposeInitializesLocalNamespaceBeforeWriters(t *testing.T) {
+	t.Parallel()
+	compose := readText(t, filepath.Join(repoRoot(t), "compose.yaml"))
+	storage := composeServiceBlock(t, compose, "houfeng-storage-init")
+	for _, required := range []string{
+		"install -d -o 10001 -g 10001 -m 0700 /state/local-namespace-init",
+		"install -d -o 10002 -g 10001 -m 0750 /state/secrets/local-namespace-init",
+		"deploy-prepare-storage --scope compose",
+		"./maintenance:/var/lib/houfeng-maintenance",
+	} {
+		if !strings.Contains(storage, required) {
+			t.Fatalf("storage preparation missing %q", required)
+		}
+	}
+	namespace := composeServiceBlock(t, compose, "houfeng-local-namespace-init")
+	for _, required := range []string{
+		requiredProjectImage,
+		`user: "10001:10001"`,
+		`entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]`,
+		`command: ["deploy-local-namespace", "--scope", "compose"]`,
+		`restart: "no"`, "read_only: true", "cap_drop:\n      - ALL", "security_opt:\n      - \"no-new-privileges:true\"",
+		"houfeng-storage-init:\n        condition: service_completed_successfully",
+		"houfeng-secrets-init:\n        condition: service_completed_successfully",
+		"houfeng-db-init:\n        condition: service_completed_successfully",
+		`HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"`,
+	} {
+		if !strings.Contains(namespace, required) {
+			t.Fatalf("namespace initializer missing %q", required)
+		}
+	}
+	wantMounts := []string{
+		"      - ./data/attachments:/var/lib/houfeng/attachments",
+		"      - ./data/local-namespace-init:/var/lib/houfeng/local-namespace-init",
+		"      - ./data/secrets/local-namespace-init:/run/secrets:ro",
+		"      - ./maintenance:/var/lib/houfeng-maintenance:ro",
+	}
+	volumes := strings.SplitN(namespace, "\n    volumes:\n", 2)
+	if len(volumes) != 2 {
+		t.Fatal("namespace initializer lacks volumes")
+	}
+	var mounts []string
+	for _, line := range strings.Split(volumes[1], "\n") {
+		if strings.HasPrefix(line, "      - ") {
+			mounts = append(mounts, line)
+		}
+	}
+	if strings.Join(mounts, "\n") != strings.Join(wantMounts, "\n") {
+		t.Fatalf("namespace mounts = %q", mounts)
+	}
+	for _, service := range []string{"houfeng", "houfeng-content-processor"} {
+		block := composeServiceBlock(t, compose, service)
+		if !strings.Contains(block, "houfeng-local-namespace-init:\n        condition: service_completed_successfully") {
+			t.Fatalf("%s does not wait for namespace initialization", service)
+		}
+		if strings.Contains(block, "local-namespace-init:/run/secrets") || strings.Contains(block, "houfeng_platform_admin_password") {
+			t.Fatalf("%s receives namespace administrator credentials", service)
+		}
+		if !strings.Contains(block, `HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"`) {
+			t.Fatalf("%s backend selection differs from initializer", service)
+		}
+	}
+}
+
 func composeTopLevelServiceNames(body string) []string {
 	var services []string
 	inServices := false
@@ -113,6 +178,7 @@ func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
 	databaseInit := composeServiceBlock(t, compose, "houfeng-db-init")
 	authority := composeServiceBlock(t, compose, "houfeng-record-authority")
 	center := composeServiceBlock(t, compose, "houfeng")
+	processor := composeServiceBlock(t, compose, "houfeng-content-processor")
 
 	for _, required := range []string{
 		"./data:/state",
@@ -126,6 +192,10 @@ func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
 	}
 	for _, required := range []string{
 		`user: "10002:10002"`,
+		"group_add:\n      - \"10001\"",
+		"read_only: true",
+		"cap_drop:\n      - ALL",
+		"security_opt:\n      - \"no-new-privileges:true\"",
 		"./data:/var/lib/houfeng",
 		`command: ["deploy-init", "--scope", "compose"]`,
 		"houfeng-storage-init:\n        condition: service_completed_successfully",
@@ -176,6 +246,14 @@ func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
 	for _, forbidden := range []string{"authority-key", "database-secret", "activation-ledger", "houfeng_records_authority"} {
 		if strings.Contains(center, forbidden) {
 			t.Fatalf("Center must not receive private authority material %q:\n%s", forbidden, center)
+		}
+	}
+	for _, required := range []string{
+		`HOUFENG_RECORD_DEPLOYMENT_ID_FILE: /run/houfeng/records-authority/deployment-id`,
+		"./data/center-config:/run/houfeng/records-authority:ro",
+	} {
+		if !strings.Contains(processor, required) {
+			t.Fatalf("processor must receive the public authority identity through %q:\n%s", required, processor)
 		}
 	}
 }

@@ -95,12 +95,21 @@ func seedV2ProcessedWorkspace(t *testing.T, ctx context.Context, fixture recordP
 		t.Fatalf("measure processor fixture: %v", err)
 	}
 	container, deploymentID := newContentProcessorLaunchFixture(t, ctx, fixture, processorBinary, local.root, workspaceRoot)
+	// The real processor requires its own admitted worker identity. Seed the
+	// worker row for the active signed contract; issuer acceptance is tested
+	// separately.
+	if _, err := fixture.db.Exec(ctx, `insert into public.deployment_membership
+		(instance_id,deployment_id,project_id,instance_kind,capability,deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at)
+		select 'compose-processor',deployment_id,project_id,'worker','records.runtime',active_domain_identity_epoch,minimum_fence_contract_version,false,true,clock_timestamp()+interval '1 hour'
+		from public.deployment_contract_state where project_id='default'`); err != nil {
+		t.Fatal(err)
+	}
 	databaseURL := contentProcessorCrashDatabaseURL(fixture.directRoleConfig(t, fixture.runtime, "v2-finish-processor"))
 	environment := contentProcessorCrashEnvironment(databaseURL, local.root, workspaceRoot)
 	environment = append(environment,
 		"HOUFENG_RECORD_BIRTH_LAUNCH_FILE=/run/houfeng/records-authority/birth-launch-processor.json",
 		"HOUFENG_RECORD_DEPLOYMENT_ID="+deploymentID,
-		"HOUFENG_RECORD_INSTANCE_ID=compose-center", "HOUFENG_RECORD_INSTANCE_KIND=api",
+		"HOUFENG_RECORD_INSTANCE_ID=compose-processor", "HOUFENG_RECORD_INSTANCE_KIND=worker",
 		"HOUFENG_RECORD_INSTANCE_CAPABILITY=records.runtime")
 	if output, err := runContentProcessorCrashHelper(container, environment, "recover", ""); err != nil {
 		t.Fatalf("run real processor: %v: %s", err, output)

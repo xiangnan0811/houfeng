@@ -31,9 +31,11 @@ func NewPostgresRecordDeletionRepository(
 
 ### 3. Contracts
 
+G2 当前路线与剩余接受条件见 [G2 计划](../../../design/g2-plan.md)。组件、fixture、CI 或单次场景证据各有范围，不能单独证明完整 native、生产或 G2 接受。
+
 以下 ledger/witness 服务与恢复条款继续约束既有 V1 路径；新 issuer 的备份披露合同单列于本节末尾，不将 V1 token 或历史 operation 重新解释为 V2 授权。
 
-当前 C81 候选已接入受限 core/recovery 命令及不依赖 root 的通知事实、V2 outbox drain 与 collaboration handoff；永久删除 HTTP 继续关闭。隔离 store recovery 测试使用独立 primary/witness 数据库、生产 verifier 和同一存活 maintenance fence；V1 record、preview 与 fenced operation 在真实 C81 迁移前植入，并绑定该 fixture 随后激活的 deployment。该 fixture 不证明离线隔离 APP writer 或真实 source 首次账本写入，not-committed canonical 历史也不替代 deploy absence ceremony。ranked record mutation 的 legacy reservation 与 deletion-fence 行锁通过现有 `record_mutation_rows_lock` 的精确 project/record/reservation 分支取得，继续要求 direct LOGIN、READ COMMITTED 与先持 comparison fence；命令不创建或修改行，也不恢复 runtime DML 权限，缺失行不授予 mutation 权限。通知 retained start/fact/completion/handoff、迟到报告和稳定 receipt 的具体边界见[协作通知合同](collaboration-notifications.md)。
+当前 C81 提供受限 core/recovery 命令及不依赖 root 的通知事实、V2 outbox drain 与 collaboration handoff；永久删除 HTTP 继续关闭。隔离 store recovery 测试使用独立 primary/witness 数据库、生产 verifier 和同一存活 maintenance fence；V1 record、preview 与 fenced operation 在真实 C81 迁移前植入，并绑定该 fixture 随后激活的 deployment。该 fixture 不证明离线隔离 APP writer 或真实 source 首次账本写入，not-committed canonical 历史也不替代 deploy absence ceremony。ranked record mutation 的 legacy reservation 与 deletion-fence 行锁通过现有 `record_mutation_rows_lock` 的精确 project/record/reservation 分支取得，继续要求 direct LOGIN、READ COMMITTED 与先持 comparison fence；命令不创建或修改行，也不恢复 runtime DML 权限，缺失行不授予 mutation 权限。通知 retained start/fact/completion/handoff、迟到报告和稳定 receipt 的具体边界见[协作通知合同](collaboration-notifications.md)。
 
 C81 保留 primary-subject validator 的同一 identity、函数体与两个 AFTER ROW、DEFERRABLE INITIALLY DEFERRED constraint triggers，只将执行权限切为 migrator-owned SECURITY DEFINER、固定 `search_path=pg_catalog`。subject→revision→root 仍在同一事务删除；内容 SELECT 与 validator EXEC 不授予 admin/worker。缺 primary 或删除 surviving revision 唯一 primary 仍在 COMMIT 拒绝，真实 receipt CHECK 失败须整体回滚 effects/audit/cursor。current catalog 逐项核函数 owner/security/config/ACL、trigger 事件/attachment/args/when/enabled/deferral 以及查询表 owner 和关闭 RLS；任何漂移拒绝准入与收敛，不能靠提前触发、禁用约束或扩大内容读权绕过。
 
@@ -262,7 +264,7 @@ Begin publication 之前即建立 pending 责任；发布或 ACK 不确定时，
 
 隔离 guest 的 BPF 效果前授权候选仍不可用于 source/C81 准入。固定原镜像缺少两个 allocation 函数符号及精确 `bpf_audit_prog` 名称，但实际存在 `bpf_audit_prog.part.0`；不能把精确名称缺失扩大为所有 split body 均缺失。已批准的替换绑定使用同一原镜像的 System.map、ELF、BTF、配置、headers 与 Module.symvers，生成相对实际 `idr_alloc_cyclic` 的固定调用点和布局；publication 使用返回的 signed ID，audit stamp 在实际 buffer 存活时读取。原输入生成器、CO-RE 字节与原 headers 下模块编译通过，只证明静态输入和编译关系，不证明 guest probe 注册、module seal 或效果前授权已通过。
 
-固定内核在 ID publication 之后才执行 `bpf_map_new_fd` 或 `bpf_prog_new_fd`；FD 创建失败时可在 syscall 返回前移除已发布对象。隔离 source 候选使用 guard ABI v4，保留 192-byte record 和 240-byte STATUS，在 publication 的原存活回调内复制 64-byte object snapshot；program 的最终类型、名称、tag、load time、creator UID、translated/verified instruction count 与 attach BTF，以及 map 的实际尺寸、flags、BTF object/type IDs 和 map_extra 均来自对象，不由请求或默认值补造。对象先按该 snapshot 建立 incarnation；存在 held FD 时另做真实 `OBJ_GET_INFO_BY_FD` 并交叉核对，不存在 FD 时保留真实 errno、publication/removal 与清理责任，不伪造 OBJ_INFO。固定双 map ID 复用只在 owned VM 的 selftest 中绑定真实首次 removal 与下一事务，在固定 allocator 调用点持原锁时保存并恢复 cursor，负返回也须恢复；两次真实 publication 的数值 ID 相同且 cookie 不同，不改写或补造 ID。binding、运行效果与完整重放仍须验收，不能仅凭 ABI 或编译证明。
+固定内核在 ID publication 之后才执行 `bpf_map_new_fd` 或 `bpf_prog_new_fd`；FD 创建失败时可在 syscall 返回前移除已发布对象。隔离 source 候选使用 guard ABI v5，保留 192-byte record 和 240-byte STATUS，在 publication 的原存活回调内复制 64-byte object snapshot；program 的最终类型、名称、tag、load time、creator UID、translated/verified instruction count 与 attach BTF，以及 map 的实际尺寸、flags、BTF object/type IDs 和 map_extra 均来自对象，不由请求或默认值补造。对象先按该 snapshot 建立 incarnation；存在 held FD 时另做真实 `OBJ_GET_INFO_BY_FD` 并交叉核对，不存在 FD 时保留真实 errno、publication/removal 与清理责任，不伪造 OBJ_INFO。固定双 map ID 复用只在 owned VM 的 selftest 中绑定真实首次 removal 与下一事务，在固定 allocator 调用点持原锁时保存并恢复 cursor，负返回也须恢复；两次真实 publication 的数值 ID 相同且 cookie 不同，不改写或补造 ID。binding、运行效果与完整重放仍须验收，不能仅凭 ABI 或编译证明。
 
 PID1 在 `finit_module` 前校验 sealed module 中唯一、只读的 `.g2_observer_binding`。当前生成合同的 `allocator_windows` 为必填：按原顺序核两个固定 allocator 指令窗、原 bytes/relocations，以及相对唯一 owner symbol 的 signed delta；IDR size/base/next 与 spinlock size 固定为 24/16/20/4。Go 消费端、生成器与 native 使用同一完整字段合同，继续要求模块 section 摘要、实际 running build-ID 与 BTF 身份。host 的纯元数据/实际 module section 检查不能代替 guest kernel 校验或完整校准。原 isolated PID1 可在启动失败时额外尝试写出一条最多 128-byte 的固定阶段诊断，只含真实观察到的 errno 或 CHECK/OTHER，不输出任意错误文本、输入、路径或凭据；诊断不改变原返回错误、退出或权限，底层 operation errno 与 composite check 的 protocol 返回分别表述。继承 stderr 的 size bound 不保证写入时长或交付。
 
@@ -334,7 +336,7 @@ owner probe create 的 notification 在原 identity/hold 和 capture 完成后�
 
 独立十六字节 type7/version1 数据报承载固定 purpose 和 event，不兼容旧 type6 包。前四个 event 保持原 point、七字节 removal detail 和保留位合同：START_PUBLISHED 在真实 pending 发布后尝试；PENDING_SAMPLE 仅在原存活及 guest deadline 检查通过的实际 nil-error pending return 处，以原 now 首次记起点，至少一秒后对首次到达的责任点采样一次；十三个闭合 point 保留原组合谓词及清理顺序。ACK_COMMITTED 仅在原 retired ACK 构造并进入 principal replay 后尝试；同一 queued ACK 的 connection 只复制 CID/purpose/有效与尝试位，不保留 q/grant/principal/raw/FD。ACK_SENT 仅在原 sendControl 本地成功后尝试；EAGAIN 保留该 ACK/receipt，错误、断开、移除、其它操作、start waiter、replay 或 teardown 不将 receipt 转交下一 ACK。每 event 至多一次 best-effort 尝试，不重试、不 fault、不改变原结果；本地发送成功不证明客户端认证或消费 ACK，retired 仍须原全部责任完成。
 
-settlement 值精确为 `purpose,collection,started,wait,ack_committed,ack_sent,removal,followup`；collection 仅 UNAVAILABLE/EMPTY/OBSERVED/INVALID，wait 为原十三责任标签或 null，事件观察为精确 bool。OBSERVED 至少一项观测，其他 collection 全为 false/null；允许前置包缺失，缺包不推导未准入、未提交或未发送。removal 仅在 OBSERVED 且 wait=OBJECT_REMOVAL 时可为完整七字段值，全零 detail 表示未采集而非空对象快照；followup 只能来自有效 event5，可独立于 event2 到达，此时 wait/removal 可为 null。接收复用 held/named custody、root 内核凭据及截断检查；最多五个不同 event，第六包、重复、错 purpose/形状/保留位、部分 detail、枚举或关系不符、身份漂移均 INVALID，所有已交付 SCM_RIGHTS FD 在数量和内容校验前关闭。有效 event5 后停止阻塞等待，再有界非阻塞排空已排队数据；INVALID 清除全部观察、removal 和 followup，不声称检测收集结束后到达的包。settlement 与非 null owner/Info/start_error 互斥；独立 collector 在完整原 parser 与候选绑定后严格验证 version6，不修复非法输入。受限组件的七个 Go parent、69 个 owner 测试和 24 个 transport 测试不能证明完整 native/source 或 G2 通过；新 C 待验收，完整 G2 为 NOT_READY，永久删除 HTTP 保持 CLOSED。
+settlement 值精确为 `purpose,collection,started,wait,ack_committed,ack_sent,removal,followup`；collection 仅 UNAVAILABLE/EMPTY/OBSERVED/INVALID，wait 为原十三责任标签或 null，事件观察为精确 bool。OBSERVED 至少一项观测，其他 collection 全为 false/null；允许前置包缺失，缺包不推导未准入、未提交或未发送。removal 仅在 OBSERVED 且 wait=OBJECT_REMOVAL 时可为完整七字段值，全零 detail 表示未采集而非空对象快照；followup 只能来自有效 event5，可独立于 event2 到达，此时 wait/removal 可为 null。接收复用 held/named custody、root 内核凭据及截断检查；最多五个不同 event，第六包、重复、错 purpose/形状/保留位、部分 detail、枚举或关系不符、身份漂移均 INVALID，所有已交付 SCM_RIGHTS FD 在数量和内容校验前关闭。有效 event5 后停止阻塞等待，再有界非阻塞排空已排队数据；INVALID 清除全部观察、removal 和 followup，不声称检测收集结束后到达的包。settlement 与非 null owner/Info/start_error 互斥；独立 collector 在完整原 parser 与候选绑定后严格验证 version6，不修复非法输入。
 
 OBJECT_REMOVAL detail 只在原一次样本到期时，投影该 return 实际 lookup 的同 cookie/object；不改变 map 遍历顺序、不重选最低 cookie、不遍历完整引用图。七个字段为 `object,held_fd,grant_cleanup,creator,creation_cleanup,lifecycle,removal_authorized`：分别报告对象缺失/类别/身份不符、held FD map 成员和符号、同 cookie/grant/creator 的 cleanup 存值、已核 transaction ID/grant/publication.ObjectCookie 的 creator 状态、该 creator 的 cleanupActive、同 cookie 且 kernelID/class 匹配的 lifecycle 标记，以及身份有效对象的 tracker removalAuthorized。对象缺失或身份不符时 creator、creation_cleanup 和 removal_authorized 不可用；creator 未建立或身份不符时 creation_cleanup 不可用；removal_authorized 仅为 null 或精确 bool。lifecycle 缺条目与 checkpoint/lifecycle 不可用分开表示，不能当成已移除。所有字段只读同步内存关系，不查询 FD 或内核；cleanup 的存零不证明 close 已执行，close 成功不等于原生 removal，cleanupActive 不证明当前仍在清理。该对象不是全部未移除对象、唯一/最后引用或 timeout 最终阻塞者；未知 requester/kernel 引用、未 drain 事件及样本后的退休/ACK 仍未由此证明。
 
@@ -509,7 +511,7 @@ bundle prepare 在原实际求值的拒绝点仅记录首个失败谓词，或�
 
 broker 从注册时实际 held 的 launcher/package-target key 追加唯一 `containerd_launcher` pair，成功后才发布 registry；追加失败使 epoch faulted，不能重入安装或继续 WATCH。真实 WATCH 必须由原 drain 路径导出并核验后才能记录 stopped-daemon/ACK；顺序为 runtime-root→pair→对应 WATCH guard→stopped-daemon，随后才是 generation2 dockerd exec 与 executing-daemon。launcher 必须是 watched dockerd 进程或其工作线程的直接独立子进程，且为 fork 后首次 own exec；同 task 紧邻 exec 到 pinned containerd 后才获得 managed provenance，fork/thread 不能借用未完成的 launcher 历史。live observer 与独立完整/partial/reboot replay 分别验证 held pair、package pin、同 WATCH root 和历史转换，拒绝重复、别名、缺失或借用历史；失败关闭原 epoch，不新增恢复接管路径。
 
-合成 target 的组件证据只证明 launcher 的权限继承、同 PID exec、环境与 FD 收束。真实 exact 中严格消费者接受，只证明该次被检查对象满足原谓词；不倒推 selection123 的完整 mode、creator/umask/ACL 历史，也不声称所有 containerd 分支都采用该 mask。组件、独立审查和单次 source 场景均不替代完整 G2，永久删除 HTTP 保持 CLOSED。
+合成 target 的组件证据只证明 launcher 的权限继承、同 PID exec、环境与 FD 收束。真实 exact 中严格消费者接受，只证明该次被检查对象满足原谓词；不倒推完整 mode、creator/umask/ACL 历史，也不声称所有 containerd 分支都采用该 mask。
 
 固定 Docker 29.8.2、overlay2 MergedDir 与既有 none/固定 named bridge 模板的创建期准入，将配置承诺和未物化的运行期事实分开。三个 system-path inspect 字段仍必须是 string：精确空字符串只表示尚未物化，期望路径独立推导为 `/var/lib/g2/docker/containers/<完整 CID>/{hostname,hosts,resolv.conf}`；非空值必须精确匹配并立即通过原身份检查。缺键、null、错误类型、其它 CID 或非规范路径仍拒绝，不从 actual OCI spec 取得期望，不开放网络模式或 mount override。ADMIT 保留独立 image/container 配置、daemon、资源、安全与 mount-source 检查，不读取尚未物化 rootfs 的 passwd/group。
 
@@ -609,7 +611,7 @@ DNS probe 覆盖 PostgreSQL 镜像的 entrypoint，因此同时显式配置并�
 
 recreate/updown 在本次真实 IPv6 路由文件读取完成后、原始返回值交给生产验证前执行一次变更；只保留该次读取的原始内容，不过滤、替换或重新读取。原订阅持续覆盖此窗口，随后必须由生产实际接收的通知触发拒绝。该负例证明路由读取后至检查结束前的变更检出，不证明变更后的路由策略合法或拓扑已恢复；master/route 的首次 snapshot 后注入与 late 的末次 snapshot 后注入保持不变。selection48 中路由策略先拒绝、尚无通知记录的失败保留，不能当作事件检出成功。
 
-当前 begin-only、多代 continuity、认证 ready 判定和上述载体实现仍是未完成真实 guest 验收的候选。本地 journal/真实 PostgreSQL fresh-observation 回归及测试 checkpoint 不构成 root/guest 权限证据。未见证 ready 的放弃必须经过认证判定、exact C80/EmergencyTarget 结算与 root ACK，不能把请求失败解释为未见证，亦不能补造 live ACK。不同 RID 的 Compose 排他保护保持有效，不能从 successor inventory 推导跨 RID 转移授权。完整 root/guest 崩溃矩阵、独立实现审查 finding 闭合与 G2 验收完成前，该候选仍不是 G2 READY；永久删除 HTTP 保持 CLOSED。
+未见证 ready 的放弃必须经过认证的 ready disposition、exact C80/EmergencyTarget 结算与 root ACK；请求失败不等于未见证，也不能补造 live ACK。不同 RID 的 Compose 排他保护保持有效，不能从 successor inventory 推导跨 RID 转移授权。本地 journal、PostgreSQL fresh-observation 回归及测试 checkpoint 不构成 root/guest 权限证据；完整 root/guest 崩溃矩阵、独立实现审查 finding 闭合与 G2 接受仍须分别完成。
 
 - Preview 在任何 reservation/operation 写入前要求九个 adapter 全部注册且 health proof 有效，并重新授权 current record。它绑定 actor scope、record/current revision、lock/auth/content-delivery epoch、dependency/backup/processor inventory、adapter readiness/preview 和 witness head；任一未知、缺失或漂移都 fail closed。
 - Execute 只接受同一 preview 的 opaque token commitment/request fingerprint，重新授权并重新计算全部 binding 后才建立 provisional fence。相同 token/fingerprint replay 返回同一 operation；token 复用到不同 binding 是只读 conflict。
@@ -696,7 +698,7 @@ recreate/updown 在本次真实 IPv6 路由文件读取完成后、原始返回�
 - V2 使用**命令内最终 live 授权与事务持锁排他**：source/namespace 准入后，依次持有 graph shared、comparison exclusive transaction advisory lock，再按 reservation→存在的 epoch→必须存在的 fence→gate→operation→存在的 root→原 affected 资源顺序取锁。所有命令入口保留 direct-login 和 READ COMMITTED 要求；comparison 不先 shared 再升级。成功命令的保护持续到 COMMIT/ROLLBACK，允许提交时刻晚于原 expiry；后续命令仍独立检查原 tuple，过期即拒绝，不自动续租。接管者等待原事务释放后，用实际持久状态重验：非终态过期项递增 generation，已提交终态无工作。root/epoch/fence 的缺失由 surviving reservation/gate、共同锁前缀及受限 creator 协议保护，不宣称锁住不存在的行。
 - finish 在 receipt/完整责任锁等待后再核原 owner，终态效果后核 operation/reservation/gate/receipt、两 owner 为 `''/0/NULL`、exact fence 已删除，然后以捕获的原 expiry 和独立语句中的 fresh `clock_timestamp()` 完成最后授权。exact terminal replay 只在当前 worker/source 准入和全部终态身份不变量成立时只读返回，允许原 expiry 已过；不同 identity/digest 拒绝。同事务后续命令不能恢复 owner/fence 或重新开启终态。V2 不使用 deferred owner/terminal deadline checks；V1 queue 与 deferred 检查继续独立保留，queue 对 V2 operation 明确拒绝。
 - savepoint 的锁与效果遵循 PostgreSQL 事务语义：回滚到命令前的 savepoint 撤销二者；RELEASE 并入父事务；命令后创建的 savepoint 不能撤销此前保护。PREPARE TRANSACTION 保留锁与效果直至 COMMIT/ROLLBACK PREPARED，包括隔离 APP 重启恢复；不以 backend 退出或提交时钟代替锁证明，不新增生产 2PC 禁令。未知 prepared 事务继续阻止原 offline drain，不自动处理。
-- 历史隔离 PG 反例已证明 EXEC-only LOGIN 可用 `SET CONSTRAINTS ALL IMMEDIATE` 提前清除 deferred 检查，随后过期 COMMIT 仍成功；该证据保留，不改称旧 actual-COMMIT 保证已修复。上述新合同已获批准，并已在绑定候选上完成真实并发、savepoint、最终效果等待（含外部 TOAST 物化反例与修复）、直接调用隔离、2PC/APP 重启与物理 consumer 恢复验收及独立 GPT 复核闭合；永久删除 HTTP 保持 CLOSED。
+- 历史隔离 PG 反例已证明 EXEC-only LOGIN 可用 `SET CONSTRAINTS ALL IMMEDIATE` 提前清除 deferred 检查，随后过期 COMMIT 仍成功；不能据此宣称 actual-COMMIT 期限保证。
 
 #### V2 Markdown / Comparison adapter 与受限命令
 
@@ -719,10 +721,7 @@ recreate/updown 在本次真实 IPv6 路由文件读取完成后、原始返回�
   或 source 的 workbench/save-attempt，以及目标拥有的 result 的 dependency/completion
   索引；其他 owner 的结果及认证来源不因引用目标而删除。规范要求真实签发后验证
   A-purge/B-retention、接管、expiry rollback 和 receipt 重放，不能用只读预览代替。
-- 当前局部运行证据覆盖真实签名 comparison、两个 adapter 的 health/preview、受限
-  角色拒绝以及不存在 operation 的无写入拒绝；未覆盖合法 V2 operation 的成功 purge
-  或错误 reservation/fence 拒绝。一致 comparison 决策读取已实现；接线仍需持久 birth/cutover
-  证明、全 writer 协调及独立 worker 生命周期，不能将缺失历史视为已关闭。
+- 一致 comparison 决策读取与 adapter 的受限授权须按上述合同执行，生产装配及端到端接受仍须证明 M1/source-bound issuer、持久 birth/cutover、source、全 writer 协调与独立 worker 生命周期；不能将局部证据或缺失历史视为完整 V2/source 接受。
 
 #### Comparison 只读库存与保留副本预览
 
@@ -738,7 +737,7 @@ recreate/updown 在本次真实 IPv6 路由文件读取完成后、原始返回�
   index/health/preview/impact digest 域和 length framing、库存排序与 UTF-8 字节保持不变。
   单 statement 只保证读取一致性；issuer 必须等待统一 writer fence 后在 READ COMMITTED 下
   捕获一次 decision，并让该次 comparison health/preview 共用它，才能结合 fence 保护 gate 提交。
-- 比较库存的原始 runtime DML 已撤销；数据库命令和相关输入 guard 与同一 comparison fence 协调，包括库存当前为空时的新行写入。V1 evidence 清理的 guard 只证明持久 operation 的清理资格、epoch 与 fence 参与；数据库内的 live owner 不等于 SQL 调用方持有 exact owner authority。V1 调用方绑定、真实 V2 issuer 与独立 worker 成功清理仍分别保持未验收，不能因决策锁反例通过而宣称整体授权边界完成。
+- 比较库存的原始 runtime DML 已撤销；数据库命令和相关输入 guard 与同一 comparison fence 协调，包括库存当前为空时的新行写入。V1 evidence 清理的 guard 只证明持久 operation 的清理资格、epoch 与 fence 参与；数据库内的 live owner 不等于 SQL 调用方持有 exact owner authority。V1 续接必须绑定调用方原 authority 和 exact owner；真实 V2 issuer 与独立 worker 端到端接受仍须满足现行合同，不能因决策锁反例通过而宣称整体授权边界完成。
 - 保留副本按同 project、其他 owner 的 `DISTINCT result_snapshot_id` 聚合。
   同结果引用目标的多个 revision/snapshot 只计一次；目标自己拥有的结果不计，
   复制结果按其认证来源计算，不因复制来源的 owner 等于目标就推断依赖目标。

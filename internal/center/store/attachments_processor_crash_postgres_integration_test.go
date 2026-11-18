@@ -70,13 +70,21 @@ func TestPostgresIntegrationAttachmentProcessorCrashCutpointsConvergeAfterRestar
 			if err := fixture.db.QueryRow(ctx, `select processor_job_id from public.attachment_processor_jobs where upload_id=$1`, uploadID).Scan(&seed.ProcessorJobID); err != nil {
 				t.Fatal(err)
 			}
+			// This fixture directly seeds a worker row for the active signed
+			// contract; membership issuer acceptance is tested separately.
+			if _, err := fixture.db.Exec(ctx, `insert into public.deployment_membership
+				(instance_id,deployment_id,project_id,instance_kind,capability,deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at)
+				select 'compose-processor',deployment_id,project_id,'worker','records.runtime',active_domain_identity_epoch,minimum_fence_contract_version,false,true,clock_timestamp()+interval '1 hour'
+				from public.deployment_contract_state where project_id='default'`); err != nil {
+				t.Fatal(err)
+			}
 			workspaceRoot := filepath.Join(t.TempDir(), "processor-root")
 			container, deploymentID := newContentProcessorLaunchFixture(t, ctx, fixture, helperBinary, blobRoot, workspaceRoot)
 			environment := contentProcessorCrashEnvironment(databaseURL, blobRoot, workspaceRoot)
 			environment = append(environment,
 				"HOUFENG_RECORD_BIRTH_LAUNCH_FILE=/run/houfeng/records-authority/birth-launch-processor.json",
 				"HOUFENG_RECORD_DEPLOYMENT_ID="+deploymentID,
-				"HOUFENG_RECORD_INSTANCE_ID=compose-center", "HOUFENG_RECORD_INSTANCE_KIND=api",
+				"HOUFENG_RECORD_INSTANCE_ID=compose-processor", "HOUFENG_RECORD_INSTANCE_KIND=worker",
 				"HOUFENG_RECORD_INSTANCE_CAPABILITY=records.runtime")
 
 			output, err := runContentProcessorCrashHelper(container, environment, "crash", cutpoint)

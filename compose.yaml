@@ -18,11 +18,15 @@ services:
         install -d -o 10002 -g 10002 -m 0755 /state/center-config &&
         install -d -o 10002 -g 10002 -m 0700 /state/secrets &&
         install -d -o 10002 -g 10002 -m 0700 /state/secrets/db-init &&
-        install -d -o 10002 -g 10001 -m 0750 /state/secrets/processor
+        install -d -o 10002 -g 10001 -m 0750 /state/secrets/processor &&
+        install -d -o 10001 -g 10001 -m 0700 /state/local-namespace-init &&
+        install -d -o 10002 -g 10001 -m 0750 /state/secrets/local-namespace-init &&
+        /usr/local/bin/houfeng-record-platform-admin deploy-prepare-storage --scope compose
     restart: "no"
     network_mode: none
     volumes:
       - ./data:/state
+      - ./maintenance:/var/lib/houfeng-maintenance
 
   houfeng-secrets-init:
     logging: *bounded-logging
@@ -83,6 +87,8 @@ services:
     entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]
     command: ["deploy-init", "--scope", "compose"]
     user: "10002:10002"
+    group_add:
+      - "10001"
     restart: "no"
     read_only: true
     cap_drop:
@@ -101,12 +107,41 @@ services:
       - ./data/secrets/db-init:/run/secrets:ro
       - ./maintenance:/var/lib/houfeng-maintenance
 
+  houfeng-local-namespace-init:
+    logging: *bounded-logging
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
+    entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]
+    command: ["deploy-local-namespace", "--scope", "compose"]
+    user: "10001:10001"
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    depends_on:
+      houfeng-storage-init:
+        condition: service_completed_successfully
+      houfeng-secrets-init:
+        condition: service_completed_successfully
+      houfeng-db-init:
+        condition: service_completed_successfully
+    environment:
+      HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"
+    volumes:
+      - ./data/attachments:/var/lib/houfeng/attachments
+      - ./data/local-namespace-init:/var/lib/houfeng/local-namespace-init
+      - ./data/secrets/local-namespace-init:/run/secrets:ro
+      - ./maintenance:/var/lib/houfeng-maintenance:ro
+
   houfeng-record-authority:
     logging: *bounded-logging
     image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
     entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]
     command: ["record-authority", "--scope", "compose"]
     user: "10002:10002"
+    group_add:
+      - "10001"
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -158,6 +193,8 @@ services:
       houfeng-storage-init:
         condition: service_completed_successfully
       houfeng-db-init:
+        condition: service_completed_successfully
+      houfeng-local-namespace-init:
         condition: service_completed_successfully
       houfeng-record-authority:
         condition: service_healthy
@@ -241,6 +278,8 @@ services:
         condition: service_completed_successfully
       houfeng-db-init:
         condition: service_completed_successfully
+      houfeng-local-namespace-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       clamav:
@@ -249,6 +288,10 @@ services:
       HOUFENG_DATABASE_USER: houfeng_runtime
       HOUFENG_DATABASE_NAME: houfeng
       HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_runtime_password
+      HOUFENG_RECORD_DEPLOYMENT_ID_FILE: /run/houfeng/records-authority/deployment-id
+      HOUFENG_RECORD_INSTANCE_ID: compose-processor
+      HOUFENG_RECORD_INSTANCE_KIND: worker
+      HOUFENG_RECORD_INSTANCE_CAPABILITY: records.runtime
       HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"
       HOUFENG_ATTACHMENT_BLOB_ROOT: /var/lib/houfeng/attachments
       HOUFENG_ATTACHMENT_S3_ENDPOINT: "${HOUFENG_ATTACHMENT_S3_ENDPOINT:-}"
@@ -286,6 +329,7 @@ services:
       - /var/lib/houfeng/processor-workspace:rw,noexec,nosuid,nodev,size=536870912,mode=0700,uid=10001,gid=10001
     volumes:
       - ./data/attachments:/var/lib/houfeng/attachments
+      - ./data/center-config:/run/houfeng/records-authority:ro
       - ./optional-secrets/s3:/run/houfeng/optional-secrets/s3:ro
       - ./data/secrets/processor:/run/secrets:ro
 

@@ -18,7 +18,6 @@ RUN npm run build
 FROM golang:${GO_VERSION}-bookworm AS go-build
 WORKDIR /src
 
-ARG VERSION=dev
 ENV CGO_ENABLED=0
 
 COPY go.mod go.sum ./
@@ -27,6 +26,9 @@ RUN go mod download
 COPY cmd/ ./cmd/
 COPY db/ ./db/
 COPY internal/ ./internal/
+# Declared after dependency download so a per-build VERSION does not
+# invalidate the module download cache layer.
+ARG VERSION=dev
 RUN go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/houfeng-center ./cmd/houfeng-center
 RUN go build -trimpath -ldflags "-s -w" -o /out/houfeng-content-processor ./cmd/houfeng-content-processor
 RUN go build -trimpath -ldflags "-s -w" -o /out/houfeng-record-platform-admin ./cmd/houfeng-record-platform-admin

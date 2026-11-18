@@ -56,6 +56,7 @@ var (
 	ErrComposeInitOpenRuntime        = errors.New("open Compose runtime PostgreSQL connection failed")
 	ErrComposeInitAdmitRuntime       = errors.New("admit current Compose runtime database failed")
 	ErrComposeInitMaintenance        = errors.New("Compose source maintenance check failed")
+	ErrComposeColdUpgradeRequired    = errors.New("active ordinary Compose V1 requires cold upgrade")
 )
 
 type ComposeInitPasswords struct {
@@ -200,10 +201,11 @@ type composePostgresEndpoint struct {
 type composeInitDependencies struct {
 	openPostgres       func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error)
 	closePostgres      func(*pgxpool.Pool)
-	prepareAuthority   func(context.Context, *pgxpool.Pool, string) (recordauthority.VerifiedComposeState, error)
+	preflightAuthority func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState, *SourceMaintenanceConfig) error
+	prepareAuthority   func(context.Context, *pgxpool.Pool, string, *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error)
 	provisionBootstrap func(context.Context, *pgxpool.Pool, platformmigrate.ComposeBootstrapConfig) error
 	convergeCurrent    func(context.Context, *pgxpool.Pool, string, string, string) error
-	activateAuthority  func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState) error
+	activateAuthority  func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState, platformmigrate.AppRoleSetV2) error
 	publishAuthority   func(string, recordauthority.VerifiedComposeState, string) error
 	prepareBirthLaunch func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState, *SourceMaintenanceConfig, string, string, string) (composeBirthLaunchPair, error)
 	inspectBirthLaunch func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState, *SourceMaintenanceConfig, string, bool) (composeBirthLaunchPair, error)
@@ -236,6 +238,7 @@ func defaultComposeInitDependencies(
 	return composeInitDependencies{
 		openPostgres:       openPostgres,
 		closePostgres:      func(pool *pgxpool.Pool) { pool.Close() },
+		preflightAuthority: preflightComposeAuthorityState,
 		prepareAuthority:   prepareComposeAuthorityState,
 		provisionBootstrap: platformmigrate.ProvisionComposeBootstrap,
 		convergeCurrent: func(ctx context.Context, pool *pgxpool.Pool, runtimeRole, adminRole, deletionWorkerRole string) error {
@@ -245,15 +248,35 @@ func defaultComposeInitDependencies(
 		activateAuthority:  activateComposeAuthorityState,
 		publishAuthority:   publishComposeAuthorityDeploymentID,
 		prepareBirthLaunch: prepareComposeBirthLaunch,
-		inspectBirthLaunch: inspectPublishedComposeBirthLaunch,
+		inspectBirthLaunch: func(ctx context.Context, pool *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig, directory string, opened bool) (composeBirthLaunchPair, error) {
+			return inspectPublishedComposeBirthLaunch(ctx, pool, state, maintenance, directory, opened, normalComposeExecutablePaths())
+		},
 		heartbeatAuthority: heartbeatComposeAuthority,
 		admitRuntime:       migrate.AdmitAppACLCurrentRuntime,
 		probeRuntime:       probeComposeRuntimeLaunch,
 		withMaintenance: func(ctx context.Context, pool *pgxpool.Pool, fn func(*SourceMaintenanceConfig) error) error {
-			return WithSourceMaintenance(ctx, pool, SourceMaintenanceConfigPath, false, fn)
+			return withComposeManagementGuard(ctx, pool, SourceMaintenanceConfigPath, OrdinaryComposeGuardRoot, fn)
 		},
 		verifyCredentials: VerifySourceMaintenanceCredentials,
 	}
+}
+
+// Source-configured operations keep their existing source guard. When the
+// source control file is absent, acquire the ordinary guard before inspecting
+// source admission and retain it through the complete operation.
+func withComposeManagementGuard(ctx context.Context, pool *pgxpool.Pool, sourcePath, ordinaryRoot string, fn func(*SourceMaintenanceConfig) error) error {
+	_, err := LoadSourceMaintenanceConfig(sourcePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return WithOrdinaryComposeGuard(ctx, ordinaryRoot, false, func() error {
+			return WithSourceMaintenance(ctx, pool, sourcePath, false, fn)
+		})
+	}
+	return WithSourceMaintenance(ctx, pool, sourcePath, false, func(maintenance *SourceMaintenanceConfig) error {
+		if maintenance != nil {
+			return fn(maintenance)
+		}
+		return WithOrdinaryComposeGuard(ctx, ordinaryRoot, false, func() error { return fn(nil) })
+	})
 }
 
 func initializeComposeWithDependencies(ctx context.Context, config ComposeInitConfig, deps composeInitDependencies) error {
@@ -303,6 +326,13 @@ func initializeComposeGuarded(ctx context.Context, config ComposeInitConfig, dep
 	if stateErr != nil && !errors.Is(stateErr, recordauthority.ErrComposeStateAbsent) {
 		return ErrComposeInitPrepareAuthority
 	}
+	if stateErr == nil && deps.preflightAuthority != nil {
+		if err := deps.preflightAuthority(ctx, bootstrapPool, existing, maintenance); errors.Is(err, ErrComposeColdUpgradeRequired) {
+			return ErrComposeColdUpgradeRequired
+		} else if err != nil {
+			return ErrComposeInitPrepareAuthority
+		}
+	}
 	passwords := platformmigrate.ComposeRolePasswords{
 		Runtime:        config.Passwords.Runtime,
 		PlatformAdmin:  config.Passwords.PlatformAdmin,
@@ -315,7 +345,10 @@ func initializeComposeGuarded(ctx context.Context, config ComposeInitConfig, dep
 	if err := deps.verifyCredentials(ctx, bootstrapPool, maintenance, config.Roles, config.AuthorityRole, passwords); err != nil {
 		return ErrComposeInitMaintenance
 	}
-	authorityState, err := deps.prepareAuthority(ctx, bootstrapPool, config.AuthorityStateRoot)
+	authorityState, err := deps.prepareAuthority(ctx, bootstrapPool, config.AuthorityStateRoot, maintenance)
+	if errors.Is(err, ErrComposeColdUpgradeRequired) {
+		return ErrComposeColdUpgradeRequired
+	}
 	if err != nil {
 		return ErrComposeInitPrepareAuthority
 	}
@@ -363,7 +396,7 @@ func initializeComposeGuarded(ctx context.Context, config ComposeInitConfig, dep
 		deps.closePostgres(migratorPool)
 		return ErrComposeInitConvergeCurrent
 	}
-	if err := deps.activateAuthority(ctx, migratorPool, config.AuthorityStateRoot, authorityState); err != nil {
+	if err := deps.activateAuthority(ctx, migratorPool, config.AuthorityStateRoot, authorityState, config.Roles); err != nil {
 		deps.closePostgres(migratorPool)
 		return ErrComposeInitActivateAuthority
 	}
@@ -392,6 +425,24 @@ func initializeComposeGuarded(ctx context.Context, config ComposeInitConfig, dep
 	}
 	defer deps.closePostgres(authorityPool)
 
+	currentAuthority, err := recordauthority.LoadComposeState(config.AuthorityStateRoot)
+	if err != nil || !sameVerifiedComposeAuthorityState(currentAuthority, authorityState) {
+		return ErrComposeInitPrepareAuthority
+	}
+	if currentAuthority.MembershipVersion == 2 &&
+		(recordauthority.VerifyActivationReceipt(config.AuthorityStateRoot, currentAuthority) != nil ||
+			recordauthority.VerifyMembershipRotationReceipt(config.AuthorityStateRoot, currentAuthority) != nil) {
+		return ErrComposeInitPrepareAuthority
+	}
+	verified, err := deps.inspectBirthLaunch(ctx, authorityPool, currentAuthority, maintenance, launchDirectory, true)
+	if err != nil || verified.revision != launch.revision || !bytes.Equal(verified.centerBytes, launch.centerBytes) ||
+		!bytes.Equal(verified.processorBytes, launch.processorBytes) || verified.centerDigest != launch.centerDigest || verified.processorDigest != launch.processorDigest {
+		return ErrComposeInitBirthLaunch
+	}
+	if err := deps.heartbeatAuthority(ctx, authorityPool, currentAuthority); err != nil {
+		return ErrComposeInitHeartbeatAuthority
+	}
+
 	runtimeEndpoint := baseEndpoint
 	runtimeEndpoint.Role = config.Roles.CenterRuntime
 	runtimeEndpoint.Password = config.Passwords.Runtime
@@ -413,18 +464,6 @@ func initializeComposeGuarded(ctx context.Context, config ComposeInitConfig, dep
 	}
 	deps.closePostgres(runtimePool)
 
-	currentAuthority, err := recordauthority.LoadComposeState(config.AuthorityStateRoot)
-	if err != nil || !sameVerifiedComposeAuthorityState(currentAuthority, authorityState) {
-		return ErrComposeInitPrepareAuthority
-	}
-	verified, err := deps.inspectBirthLaunch(ctx, authorityPool, currentAuthority, maintenance, launchDirectory, true)
-	if err != nil || verified.revision != launch.revision || !bytes.Equal(verified.centerBytes, launch.centerBytes) ||
-		!bytes.Equal(verified.processorBytes, launch.processorBytes) || verified.centerDigest != launch.centerDigest || verified.processorDigest != launch.processorDigest {
-		return ErrComposeInitBirthLaunch
-	}
-	if err := deps.heartbeatAuthority(ctx, authorityPool, currentAuthority); err != nil {
-		return ErrComposeInitHeartbeatAuthority
-	}
 	return nil
 }
 
@@ -499,12 +538,50 @@ type composeDatabaseContractState struct {
 	DeploymentID recordplatform.DeploymentID
 }
 
-func prepareComposeAuthorityState(ctx context.Context, pool *pgxpool.Pool, root string) (recordauthority.VerifiedComposeState, error) {
+func preflightComposeAuthorityState(ctx context.Context, pool *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig) error {
+	if maintenance != nil {
+		if state.MembershipVersion != 1 {
+			return errors.New("source-configured Compose V2 is unsupported")
+		}
+		return nil
+	}
+	if state.MembershipVersion != 1 {
+		return nil
+	}
+	contract, err := readComposeDatabaseContractState(ctx, pool)
+	if err != nil {
+		return err
+	}
+	if contract.Active {
+		return ErrComposeColdUpgradeRequired
+	}
+	return nil
+}
+
+func prepareComposeAuthorityState(ctx context.Context, pool *pgxpool.Pool, root string, maintenance *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 	contract, err := readComposeDatabaseContractState(ctx, pool)
 	if err != nil {
 		return recordauthority.VerifiedComposeState{}, err
 	}
-	return reconcileComposeAuthorityState(root, contract)
+	existing, loadErr := recordauthority.LoadComposeState(root)
+	if loadErr == nil {
+		if maintenance == nil && contract.Active && existing.MembershipVersion == 1 {
+			return recordauthority.VerifiedComposeState{}, ErrComposeColdUpgradeRequired
+		}
+		if maintenance != nil && existing.MembershipVersion != 1 {
+			return recordauthority.VerifiedComposeState{}, errors.New("source-configured Compose V2 is unsupported")
+		}
+	} else if !errors.Is(loadErr, recordauthority.ErrComposeStateAbsent) {
+		return recordauthority.VerifiedComposeState{}, loadErr
+	}
+	state, err := reconcileComposeAuthorityState(root, contract)
+	if err != nil || maintenance != nil {
+		return state, err
+	}
+	if state.MembershipVersion == 2 {
+		return state, nil
+	}
+	return recordauthority.PrepareComposeMembershipV2(root)
 }
 
 func reconcileComposeAuthorityState(root string, contract composeDatabaseContractState) (recordauthority.VerifiedComposeState, error) {
@@ -562,13 +639,40 @@ func readComposeDatabaseContractState(ctx context.Context, pool *pgxpool.Pool) (
 	return composeDatabaseContractState{Active: true, DeploymentID: validated}, nil
 }
 
-func activateComposeAuthorityState(ctx context.Context, pool *pgxpool.Pool, root string, state recordauthority.VerifiedComposeState) error {
+func activateComposeAuthorityState(ctx context.Context, pool *pgxpool.Pool, root string, state recordauthority.VerifiedComposeState, roles platformmigrate.AppRoleSetV2) error {
 	if pool == nil {
 		return errors.New("Compose Records activation has no migrator PostgreSQL pool")
 	}
 	command, err := state.ActivationCommand.MarshalBinary()
 	if err != nil {
 		return errors.New("Compose Records activation command is invalid")
+	}
+	if state.MembershipVersion == 2 {
+		canonical, err := recordauthority.LoadComposeState(root)
+		if err != nil || !sameVerifiedComposeAuthorityState(canonical, state) || canonical.MembershipRotation == nil {
+			return errors.New("Compose Records membership state is invalid")
+		}
+		for _, verify := range []func(string, recordauthority.VerifiedComposeState) error{recordauthority.VerifyActivationReceipt, recordauthority.VerifyMembershipRotationReceipt} {
+			if err := verify(root, canonical); err != nil && !errors.Is(err, recordauthority.ErrComposeActivationReceiptAbsent) && !errors.Is(err, recordauthority.ErrComposeMembershipRotationReceiptAbsent) {
+				return errors.New("Compose Records membership receipt is invalid")
+			}
+		}
+		rotation, err := canonical.MembershipRotation.MarshalBinary()
+		if err != nil {
+			return errors.New("Compose Records membership rotation is invalid")
+		}
+		receipt, err := migrate.ProjectComposeMembershipV2(ctx, pool, roles, command, rotation)
+		if err != nil {
+			return errors.New("project Compose Records membership failed")
+		}
+		genesisReceipt := recordplatform.ProjectionCASReceiptDigestV1(command)
+		if err := recordauthority.PersistActivationReceipt(root, canonical, genesisReceipt[:]); err != nil {
+			return errors.New("persist Compose Records activation receipt failed")
+		}
+		if err := recordauthority.PersistMembershipRotationReceipt(root, canonical, receipt); err != nil {
+			return errors.New("persist Compose Records membership receipt failed")
+		}
+		return nil
 	}
 	var receipt []byte
 	if err := pool.QueryRow(ctx, `select public.record_platform_cas_contract_activation_projection($1::bytea)`, command).Scan(&receipt); err != nil {
@@ -594,12 +698,21 @@ func heartbeatComposeAuthorityAt(
 	if pool == nil {
 		return time.Time{}, errors.New("Compose Records authority heartbeat has no PostgreSQL pool")
 	}
-	command, wantExpiry, err := recordauthority.MarshalMembershipHeartbeatCommandV1(state, issuedAt)
+	var command []byte
+	var wantExpiry time.Time
+	var err error
+	query := `select public.record_platform_compose_membership_heartbeat($1::bytea)`
+	if state.MembershipVersion == 2 {
+		command, wantExpiry, err = recordauthority.MarshalMembershipHeartbeatCommandV2(state, issuedAt)
+		query = `select public.record_platform_compose_membership_heartbeat_v2($1::bytea)`
+	} else {
+		command, wantExpiry, err = recordauthority.MarshalMembershipHeartbeatCommandV1(state, issuedAt)
+	}
 	if err != nil {
 		return time.Time{}, errors.New("Compose Records authority heartbeat command is invalid")
 	}
 	var gotExpiry time.Time
-	if err := pool.QueryRow(ctx, `select public.record_platform_compose_membership_heartbeat($1::bytea)`, command).Scan(&gotExpiry); err != nil {
+	if err := pool.QueryRow(ctx, query, command).Scan(&gotExpiry); err != nil {
 		return time.Time{}, fmt.Errorf("renew Compose Records authority membership: %w", err)
 	}
 	if !gotExpiry.UTC().Equal(wantExpiry) {

@@ -151,13 +151,15 @@ func TestAppACLCurrentPrimarySubjectReplacementPrefixes(t *testing.T) {
 	for _, fragment := range current.fragments {
 		for _, replacement := range fragment.FunctionReplacements {
 			replacementCount++
-			if fragment.Migration != recordDeletionSuccessorMigration || replacement.Before.SchemaName != "record_platform_internal" || replacement.Before.Identity != "validate_record_revision_primary_subject()" || replacement.Before.SecurityDefiner || !replacement.After.SecurityDefiner {
+			primary := replacement.Before.SchemaName == "record_platform_internal" && replacement.Before.Identity == "validate_record_revision_primary_subject()" && !replacement.Before.SecurityDefiner && replacement.After.SecurityDefiner
+			heartbeat := replacement.Before.SchemaName == "public" && replacement.Before.Identity == "record_platform_compose_membership_heartbeat(bytea)" && replacement.Before.SecurityDefiner && replacement.After.SecurityDefiner
+			if fragment.Migration != recordDeletionSuccessorMigration || (!primary && !heartbeat) {
 				t.Fatalf("unexpected replacement in %s: %#v", fragment.Migration, replacement)
 			}
 		}
 	}
-	if replacementCount != 1 {
-		t.Fatalf("replacement count = %d, want 1", replacementCount)
+	if replacementCount != 2 {
+		t.Fatalf("replacement count = %d, want 2", replacementCount)
 	}
 	c80 := appACLCurrentSourceAtProfile(t, current, appACLCurrentProfileP80)
 	var first appACLCurrentSourceContract

@@ -91,6 +91,7 @@ type appAdminDependencies struct {
 	composeInit  composeDeployInitDependencies
 	composeStage composeDeployInitDependencies
 	authority    composeRecordAuthorityDependencies
+	namespace    composeLocalNamespaceDependencies
 }
 
 type composeDeployInitDependencies struct {
@@ -111,6 +112,27 @@ const (
 )
 
 func main() {
+	// Private target modes must run before signal.NotifyContext and before
+	// constructing the ordinary administrative dependencies.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "_ordinary-launch-target":
+			if runOrdinaryTargetLauncher(os.Args[1:]) != nil {
+				os.Exit(1)
+			}
+			return
+		case "_ordinary-target-contract":
+			if runOrdinaryTargetContract(os.Args[1:]) != nil {
+				os.Exit(1)
+			}
+			return
+		case "_ordinary-native-participant":
+			if len(os.Args) != 2 || centerdeploy.RunOrdinaryNativeParticipant(context.Background()) != nil {
+				os.Exit(1)
+			}
+			return
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := runAdminWithDeps(ctx, os.Args[1:], defaultAppAdminDependencies()); err != nil {
@@ -141,6 +163,11 @@ func defaultAppAdminDependencies() appAdminDependencies {
 			initialize: centerdeploy.StageComposeSecrets,
 		},
 		authority: composeRecordAuthorityDependencies{run: centerdeploy.RunComposeAuthority},
+		namespace: composeLocalNamespaceDependencies{
+			guard:      centerdeploy.WithOrdinaryComposeGuard,
+			initialize: centerdeploy.InitializeComposeLocalNamespace,
+			getenv:     os.Getenv,
+		},
 	}
 }
 
@@ -193,6 +220,15 @@ func defaultAppACLR2FinalizeDependencies() appACLR2FinalizeDependencies {
 func runAdminWithDeps(ctx context.Context, args []string, deps appAdminDependencies) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "_ordinary-launch-target":
+			return runOrdinaryTargetLauncher(args)
+		case "_ordinary-target-contract":
+			return runOrdinaryTargetContract(args)
+		case "_ordinary-native-participant":
+			if len(args) != 1 {
+				return errors.New("invalid ordinary native participant invocation")
+			}
+			return centerdeploy.RunOrdinaryNativeParticipant(ctx)
 		case "local-namespace":
 			return runLocalNamespace(ctx, args)
 		case "source-authority":
@@ -214,6 +250,12 @@ func runAdminWithDeps(ctx context.Context, args []string, deps appAdminDependenc
 			return runAppACLR2FinalizeWithDeps(ctx, args, deps.finalize)
 		case "deploy-init":
 			return runComposeDeployInitWithDeps(ctx, args, deps.composeInit)
+		case "deploy-local-namespace":
+			return runComposeLocalNamespace(ctx, args, deps.namespace)
+		case "deploy-prepare-storage":
+			return runComposeStoragePreparation(args)
+		case "deploy-ordinary-upgrade":
+			return runOrdinaryComposeUpgrade(ctx, args)
 		case "deploy-stage-secrets":
 			if len(args) != 3 || args[1] != "--scope" || args[2] != "compose" {
 				return errors.New("only deploy-stage-secrets --scope compose is supported")

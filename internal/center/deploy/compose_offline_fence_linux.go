@@ -373,14 +373,7 @@ func FenceComposeSource(ctx context.Context, r ComposeOfflineFenceRequest, fn fu
 		if e != nil || now != cfg || !fenceRequestValid(r) {
 			return errComposeOfflineFence
 		}
-		if e = fenceDockerBinary(); e != nil {
-			return e
-		}
-		swarm, e := fenceDocker(ctx, "info", "--format", "{{.Swarm.LocalNodeState}}")
-		if e != nil || strings.TrimSpace(string(swarm)) != "inactive" {
-			return errComposeOfflineFence
-		}
-		if e = fencePerform(ctx, r, &result); e != nil {
+		if e = fenceDockerPerform(ctx, r, &result); e != nil {
 			return e
 		}
 		now, e = LoadSourceMaintenanceConfig(r.ControlConfigPath)
@@ -399,7 +392,26 @@ func FenceComposeSource(ctx context.Context, r ComposeOfflineFenceRequest, fn fu
 	return nil
 }
 
+// fenceDockerPerform is shared by offline coordinators that have already
+// acquired their own exclusive management guard and validated their intent.
+func fenceDockerPerform(ctx context.Context, r ComposeOfflineFenceRequest, result *ComposeOfflineFence) error {
+	if err := fenceDockerBinary(); err != nil {
+		return err
+	}
+	swarm, err := fenceDocker(ctx, "info", "--format", "{{.Swarm.LocalNodeState}}")
+	if err != nil || strings.TrimSpace(string(swarm)) != "inactive" {
+		return errComposeOfflineFence
+	}
+	return fencePerform(ctx, r, result)
+}
+
 func fencePerform(ctx context.Context, r ComposeOfflineFenceRequest, result *ComposeOfflineFence) error {
+	return fencePerformWithDrain(ctx, r, result, nil)
+}
+
+// The ordinary controller may prove client quiescence after the stopped
+// inventory is joined and before the database loses its original networks.
+func fencePerformWithDrain(ctx context.Context, r ComposeOfflineFenceRequest, result *ComposeOfflineFence, drain func() error) error {
 	dir, err := fenceJournalDir(r.ControlConfigPath)
 	if err != nil {
 		return err
@@ -485,6 +497,11 @@ func fencePerform(ctx context.Context, r ComposeOfflineFenceRequest, result *Com
 	}
 	if !fenceJournalDirMatches(r.ControlConfigPath, dir) {
 		return errComposeOfflineFence
+	}
+	if drain != nil {
+		if err := drain(); err != nil {
+			return err
+		}
 	}
 	network, networkExists, err = fenceFindNetwork(ctx, r)
 	if err != nil {

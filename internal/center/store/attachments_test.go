@@ -20,6 +20,25 @@ import (
 
 var _ attachments.ProcessorRepository = (*PostgresAttachmentRepository)(nil)
 
+func TestAttachmentProcessorAdmissionRequiresWorkerGate(t *testing.T) {
+	repository := &PostgresAttachmentRepository{}
+	if err := repository.ConfigureProcessorAdmission(nil); !errors.Is(err, ErrRecordPlatformAdmissionUnavailable) {
+		t.Fatalf("nil gate = %v", err)
+	}
+	if err := repository.ConfigureProcessorAdmission(mustDeploymentMembershipAdmissionGate(t)); !errors.Is(err, ErrRecordPlatformAdmissionUnavailable) {
+		t.Fatalf("API gate = %v", err)
+	}
+	identity := testDeploymentMembershipIdentity()
+	identity.InstanceKind = "worker"
+	gate, err := NewDeploymentMembershipAdmissionGate(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ConfigureProcessorAdmission(gate); err != nil {
+		t.Fatalf("worker gate = %v", err)
+	}
+}
+
 func TestPostgresAttachmentRepositoryReadsExactDownloadObjectAndOwnerRoute(t *testing.T) {
 	t.Parallel()
 
@@ -297,9 +316,9 @@ func TestPostgresAttachmentRepositoryAttachmentProcessorRenewalBindsObservedExpi
 	if renewed != want {
 		t.Fatalf("RenewProcessorClaim() = %#v, want %#v", renewed, want)
 	}
-	if !tx.committed || len(tx.querySQL) != 1 || len(tx.execSQL) != 0 {
-		t.Fatalf("RenewProcessorClaim() transaction = committed %t queries %d execs %d",
-			tx.committed, len(tx.querySQL), len(tx.execSQL))
+	if !tx.committed || tx.rollbackCount == 0 || len(tx.querySQL) != 1 {
+		t.Fatalf("RenewProcessorClaim() transaction = committed %t rollbacks %d queries %d",
+			tx.committed, tx.rollbackCount, len(tx.querySQL))
 	}
 	assertAttachmentProcessorOwnerFenceSQL(t, tx.querySQL[0])
 	assertAttachmentProcessorFullClaimFenceSQL(t, tx.querySQL[0], tx.queryArgs[0], claim)

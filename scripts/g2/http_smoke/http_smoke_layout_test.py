@@ -106,6 +106,60 @@ class SmokeLayoutTest(unittest.TestCase):
         self.assertEqual(list(self.scripts.iterdir()), [])
         self.assertEqual({p.name: p.read_bytes() for p in HERE.iterdir() if p.is_file()}, before)
 
+    def test_production_storage_precedes_deploy_init_with_same_maintenance(self):
+        commands = []
+
+        def command(args, log=None, timeout=300):
+            commands.append(args)
+            if "deploy-init" in args:
+                raise bootstrap.Failure("fixture stop after storage")
+            return b""
+
+        with mock.patch.object(bootstrap, "CHECKOUT", self.checkout), \
+             mock.patch.dict(os.environ, self.env, clear=True), \
+             mock.patch.object(sys, "argv", ["bootstrap.py"]), \
+             mock.patch.object(bootstrap, "btrfs", return_value=True), \
+             mock.patch.object(bootstrap, "Proxy"), \
+             mock.patch.object(bootstrap, "command", side_effect=command), \
+             mock.patch.object(bootstrap.subprocess, "run", return_value=mock.Mock(returncode=0)):
+            with self.assertRaisesRegex(bootstrap.Failure, "fixture stop after storage"):
+                bootstrap.run()
+
+        storage_index = next(i for i, args in enumerate(commands) if "deploy-prepare-storage --scope compose" in args[-1])
+        deploy_index = next(i for i, args in enumerate(commands) if "deploy-init" in args)
+        self.assertLess(storage_index, deploy_index)
+        storage, deploy = commands[storage_index], commands[deploy_index]
+        self.assertEqual(storage[storage.index("--user") + 1], "0:0")
+        self.assertIn("--network=none", storage)
+        self.assertIn(f"type=bind,src={self.binaries / 'houfeng-record-platform-admin'},dst=/usr/local/bin/houfeng-record-platform-admin,readonly", storage)
+        storage_mount = next(arg for arg in storage if ",dst=/var/lib/houfeng-maintenance" in arg)
+        self.assertIn(storage_mount, deploy)
+        self.assertIn("test -f /var/lib/houfeng-maintenance/ordinary/disposition.json", storage[-1])
+        result = json.loads((next(self.root.iterdir()) / "result.json").read_text())
+        self.assertTrue(result["stages"]["production_storage_prepared"])
+
+    def test_missing_storage_disposition_stops_before_deploy_init(self):
+        commands = []
+
+        def command(args, log=None, timeout=300):
+            commands.append(args)
+            if "deploy-prepare-storage --scope compose" in args[-1]:
+                raise bootstrap.Failure("fixture missing disposition")
+            return b""
+
+        with mock.patch.object(bootstrap, "CHECKOUT", self.checkout), \
+             mock.patch.dict(os.environ, self.env, clear=True), \
+             mock.patch.object(sys, "argv", ["bootstrap.py"]), \
+             mock.patch.object(bootstrap, "btrfs", return_value=True), \
+             mock.patch.object(bootstrap, "Proxy"), \
+             mock.patch.object(bootstrap, "command", side_effect=command), \
+             mock.patch.object(bootstrap.subprocess, "run", return_value=mock.Mock(returncode=0)):
+            with self.assertRaisesRegex(bootstrap.Failure, "ordinary disposition is missing"):
+                bootstrap.run()
+        self.assertFalse(any("deploy-init" in args for args in commands))
+        result = json.loads((next(self.root.iterdir()) / "result.json").read_text())
+        self.assertNotIn("production_storage_prepared", result["stages"])
+
     def test_clamdb_fixed_historical_path_and_missing_failure(self):
         self.assertEqual(runtime.CLAMDB, CHECKOUT / "tmp/agent/g2arc-5u6fzq04/main-http-smoke/clamdb")
         with mock.patch.object(runtime, "CLAMDB", self.agent / "missing-clamdb"), \

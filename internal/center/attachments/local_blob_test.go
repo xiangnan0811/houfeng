@@ -5,6 +5,7 @@ package attachments
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -12,7 +13,109 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
+
+func TestLocalNamespaceMarkerInterruptedPublication(t *testing.T) {
+	for _, state := range []string{"empty temp", "partial temp", "complete temp", "foreign temp", "truncated final", "foreign final"} {
+		t.Run(state, func(t *testing.T) {
+			ctx := context.Background()
+			root := filepath.Join(t.TempDir(), "blobs")
+			if err := os.Mkdir(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			uid, gid := uint32(os.Geteuid()), uint32(os.Getegid())
+			newID := func() string {
+				id, err := newLocalUUID()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return id
+			}
+			request := LocalProvisionRequest{Root: root, NamespaceID: newID(), IncarnationID: newID(), RequestID: newID(), OwnerUID: uid, OwnerGID: gid}
+			rootFD, err := openLocalRoot(root, false, uid, gid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lockFD, err := openLocalProvisionLock(ctx, rootFD, true, true, uid, gid)
+			if err != nil {
+				unix.Close(rootFD)
+				t.Fatal(err)
+			}
+			lockStat, err := localStat(lockFD, unix.S_IFREG, uid, gid, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lockNonce, err := localReadFile(lockFD, 36)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(localMarkerForRequest(request, lockStat, lockNonce))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := unix.Close(lockFD); err != nil {
+				t.Fatal(err)
+			}
+			if err := unix.Close(rootFD); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, localMarkerTempPrefix+request.RequestID)
+			written := body
+			switch state {
+			case "empty temp":
+				written = nil
+			case "partial temp":
+				written = body[:len(body)/2]
+			case "foreign temp":
+				written = []byte("foreign temporary state")
+			case "truncated final":
+				path = filepath.Join(root, localMarkerName)
+				written = body[:len(body)/2]
+			case "foreign final":
+				path = filepath.Join(root, localMarkerName)
+				other := localMarkerForRequest(request, lockStat, lockNonce)
+				other.NamespaceID = newID()
+				written, err = json.Marshal(other)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(path, written, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			repository := &localBlobTestRepository{}
+			result, err := ProvisionLocalNamespace(ctx, request, repository)
+			if state == "foreign temp" || state == "truncated final" || state == "foreign final" {
+				if err == nil {
+					t.Fatal("foreign or truncated marker accepted")
+				}
+				after, readErr := os.ReadFile(path)
+				if readErr != nil || !bytes.Equal(after, written) {
+					t.Fatal("foreign or truncated artifact changed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("retry after %s: %v", state, err)
+			}
+			if result.AdmissionState != "active" || result.RequestID != request.RequestID {
+				t.Fatal("retry did not admit expected namespace")
+			}
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("temporary marker remains")
+			}
+			actual, err := os.ReadFile(filepath.Join(root, localMarkerName))
+			if err != nil || !bytes.Equal(actual, body) {
+				t.Fatal("published marker differs from durable request")
+			}
+			if _, err := ProvisionLocalNamespace(ctx, request, repository); err != nil {
+				t.Fatalf("published marker replay: %v", err)
+			}
+		})
+	}
+}
 
 func TestLocalBlobManagedNamespaceAndGuard(t *testing.T) {
 	t.Run("raw_mutation_has_no_authority", func(t *testing.T) {

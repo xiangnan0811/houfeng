@@ -56,6 +56,7 @@ func StageComposeSecrets(ctx context.Context, config ComposeInitConfig) error {
 			{"/state/secrets/db-init/houfeng_record_deletion_worker_password", config.Passwords.DeletionWorker, 0400, 10002},
 			{"/state/secrets/db-init/houfeng_migrator_password", config.Passwords.Migrator, 0400, 10002},
 			{"/state/secrets/processor/houfeng_runtime_password", config.Passwords.Runtime, 0040, 10001},
+			{"/state/secrets/local-namespace-init/houfeng_platform_admin_password", config.Passwords.PlatformAdmin, 0440, 10001},
 		}
 		for _, file := range files {
 			if err := publishComposeSecret(file.path, file.password, file.mode, file.group); err != nil {

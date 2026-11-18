@@ -572,7 +572,7 @@ func newInstalledBirthLaunchFixture(t *testing.T) *installedBirthLaunchFixture {
 	if _, err := owner.Exec(ctx, `select record_platform_internal.record_birth_launch_close($1::bigint)`, old.revision); err != nil {
 		t.Fatalf("close ordinary fixture launch: %v", err)
 	}
-	pair, err := expectedComposeBirthLaunch(ctx, owner, state, &maintenance)
+	pair, err := expectedComposeBirthLaunch(ctx, owner, state, &maintenance, normalComposeExecutablePaths())
 	if err != nil || !pair.center.BirthInstalled || pair.center.BirthBinding != binding || pair.center.Witness != domain {
 		t.Fatalf("construct installed fixture launch from actual authority and executables: %v", err)
 	}
@@ -583,7 +583,7 @@ func newInstalledBirthLaunchFixture(t *testing.T) *installedBirthLaunchFixture {
 	if err := publishComposeBirthLaunchPair(launchDirectory, pair); err != nil {
 		t.Fatalf("publish protected installed launch pair: %v", err)
 	}
-	if _, err := inspectPublishedComposeBirthLaunch(ctx, owner, state, &maintenance, launchDirectory, false); err != nil {
+	if _, err := inspectPublishedComposeBirthLaunch(ctx, owner, state, &maintenance, launchDirectory, false, normalComposeExecutablePaths()); err != nil {
 		t.Fatalf("inspect staged fixture launch against real W2: %v", err)
 	}
 	if _, err := owner.Exec(ctx, `select record_platform_internal.record_birth_launch_open($1::bigint)`, pair.revision); err != nil {
@@ -618,7 +618,7 @@ func (f *installedBirthLaunchFixture) heartbeat() (entered, inspected bool, expi
 		if err != nil || !sameVerifiedComposeAuthorityState(current, f.state) {
 			return ErrComposeAuthorityLoadState
 		}
-		if _, err := inspectPublishedComposeBirthLaunch(f.ctx, f.authority, current, maintenance, f.launchDirectory, true); err != nil {
+		if _, err := inspectPublishedComposeBirthLaunch(f.ctx, f.authority, current, maintenance, f.launchDirectory, true, normalComposeExecutablePaths()); err != nil {
 			return err
 		}
 		inspected = true

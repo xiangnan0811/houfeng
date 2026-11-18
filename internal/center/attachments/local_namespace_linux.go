@@ -20,6 +20,7 @@ import (
 
 const (
 	localMarkerName        = ".houfeng-local-namespace"
+	localMarkerTempPrefix  = ".houfeng-local-namespace.tmp-"
 	localProvisionLockName = ".houfeng-local-provision.lock"
 	localResolve           = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_XDEV
 )
@@ -286,6 +287,52 @@ func readLocalMarker(root int, uid, gid uint32) (localNamespaceMarker, unix.Stat
 	return marker, stat, data, nil
 }
 
+// A marker nonce can be reconstructed after an interrupted temporary write
+// from the durable random provision-lock nonce and the request identity.
+func localMarkerForRequest(request LocalProvisionRequest, lockStat unix.Stat_t, lockNonce []byte) localNamespaceMarker {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("HOUFENG-LOCAL-NAMESPACE-MARKER-NONCE-V1\x00"))
+	_, _ = hash.Write(lockNonce)
+	_, _ = hash.Write([]byte(request.NamespaceID + request.IncarnationID + request.RequestID))
+	digest := hash.Sum(nil)
+	digest[6] = (digest[6] & 0x0f) | 0x40
+	digest[8] = (digest[8] & 0x3f) | 0x80
+	nonce := fmt.Sprintf("%x-%x-%x-%x-%x", digest[:4], digest[4:6], digest[6:8], digest[8:10], digest[10:16])
+	return localNamespaceMarker{Version: 2, NamespaceID: request.NamespaceID, IncarnationID: request.IncarnationID, RequestID: request.RequestID, Nonce: nonce,
+		ProvisionLockInode: lockStat.Ino, ProvisionLockNonce: string(lockNonce)}
+}
+
+// The request-bound name and exact content prefix identify an interrupted
+// write, including an empty file. Never remove a mismatched or unsafe file.
+func cleanupLocalMarkerTemp(root int, name string, expected []byte, uid, gid uint32) error {
+	fd, err := openLocalAt(root, name, unix.O_RDONLY, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	before, err := localStat(fd, unix.S_IFREG, uid, gid, 0o600)
+	if err != nil || before.Nlink != 1 {
+		return ErrLocalIdentityChanged
+	}
+	data, err := localReadFile(fd, 4096)
+	if err != nil || !bytes.HasPrefix(expected, data) {
+		return ErrLocalIdentityChanged
+	}
+	var after, named unix.Stat_t
+	if unix.Fstat(fd, &after) != nil || unix.Fstatat(root, name, &named, unix.AT_SYMLINK_NOFOLLOW) != nil ||
+		before.Dev != after.Dev || before.Ino != after.Ino || before.Mode != after.Mode || before.Uid != after.Uid || before.Gid != after.Gid || before.Nlink != after.Nlink || before.Size != after.Size || before.Mtim != after.Mtim || before.Ctim != after.Ctim ||
+		after.Dev != named.Dev || after.Ino != named.Ino || after.Mode != named.Mode || after.Uid != named.Uid || after.Gid != named.Gid || after.Nlink != named.Nlink || after.Size != named.Size || after.Mtim != named.Mtim || after.Ctim != named.Ctim {
+		return ErrLocalIdentityChanged
+	}
+	if err := unix.Unlinkat(root, name, 0); err != nil {
+		return err
+	}
+	return unix.Fsync(root)
+}
+
 // ProvisionLocalNamespace is an offline, one-shot filesystem participant. A
 // source-enabled tree requires its outer coordinator and is not activated here.
 func ProvisionLocalNamespace(ctx context.Context, request LocalProvisionRequest, repository LocalNamespaceAdministrator) (LocalNamespace, error) {
@@ -318,25 +365,11 @@ func ProvisionLocalNamespace(ctx context.Context, request LocalProvisionRequest,
 	if err != nil {
 		return result, err
 	}
-	marker, _, _, err := readLocalMarker(files.root, request.OwnerUID, request.OwnerGID)
+	tempName := localMarkerTempPrefix + request.RequestID
+	marker, _, markerData, err := readLocalMarker(files.root, request.OwnerUID, request.OwnerGID)
 	if errors.Is(err, unix.ENOENT) {
 		if known {
 			return result, ErrLocalIdentityChanged
-		}
-		// Fresh means empty, not merely lacking a marker. Unknown legacy bytes
-		// and temporary objects retain their offline-adoption blocker.
-		entries, readErr := localDirectoryNames(files.root)
-		if readErr != nil {
-			return result, readErr
-		}
-		for _, name := range entries {
-			if name != localProvisionLockName {
-				return result, fmt.Errorf("%w: legacy_capability_unresolved", ErrLocalNamespaceClosed)
-			}
-		}
-		nonce, nonceErr := newLocalUUID()
-		if nonceErr != nil {
-			return result, nonceErr
 		}
 		lockStat, lockErr := localStat(files.provision, unix.S_IFREG, request.OwnerUID, request.OwnerGID, 0o600)
 		if lockErr != nil {
@@ -346,36 +379,46 @@ func ProvisionLocalNamespace(ctx context.Context, request LocalProvisionRequest,
 		if lockErr != nil || !validLocalUUID(string(lockNonce)) {
 			return result, ErrLocalIdentityChanged
 		}
-		marker = localNamespaceMarker{Version: 2, NamespaceID: request.NamespaceID, IncarnationID: request.IncarnationID, RequestID: request.RequestID, Nonce: nonce,
-			ProvisionLockInode: lockStat.Ino, ProvisionLockNonce: string(lockNonce)}
+		marker = localMarkerForRequest(request, lockStat, lockNonce)
 		data, marshalErr := json.Marshal(marker)
 		if marshalErr != nil {
 			return result, marshalErr
 		}
-		fd, createErr := openLocalAt(files.root, localMarkerName, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL, 0o600)
+		if err := cleanupLocalMarkerTemp(files.root, tempName, data, request.OwnerUID, request.OwnerGID); err != nil {
+			return result, err
+		}
+		// An unbound root may contain only the exact empty released skeleton.
+		if err := localValidateUnboundEntries(files.root, false, true); err != nil {
+			return result, err
+		}
+		fd, createErr := openLocalAt(files.root, tempName, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL, 0o600)
 		if createErr != nil {
 			return result, createErr
 		}
 		writeErr := localWriteFile(fd, data)
 		closeErr := unix.Close(fd)
-		if err := errors.Join(writeErr, closeErr, unix.Fsync(files.root)); err != nil {
+		if err := errors.Join(writeErr, closeErr); err != nil {
+			return result, err
+		}
+		if err := unix.Renameat2(files.root, tempName, files.root, localMarkerName, unix.RENAME_NOREPLACE); err != nil {
+			return result, err
+		}
+		if err := unix.Fsync(files.root); err != nil {
 			return result, err
 		}
 	} else if err != nil {
 		return result, err
-	}
-	if marker.NamespaceID != request.NamespaceID || marker.IncarnationID != request.IncarnationID || marker.RequestID != request.RequestID {
-		return result, ErrLocalIdentityChanged
-	}
-	if !known {
-		entries, err := localDirectoryNames(files.root)
-		if err != nil {
+	} else {
+		if marker.NamespaceID != request.NamespaceID || marker.IncarnationID != request.IncarnationID || marker.RequestID != request.RequestID {
+			return result, ErrLocalIdentityChanged
+		}
+		if err := cleanupLocalMarkerTemp(files.root, tempName, markerData, request.OwnerUID, request.OwnerGID); err != nil {
 			return result, err
 		}
-		for _, name := range entries {
-			if name != localProvisionLockName && name != localMarkerName && name != "sha256" && name != ".locks" {
-				return result, fmt.Errorf("%w: legacy_capability_unresolved", ErrLocalNamespaceClosed)
-			}
+	}
+	if !known {
+		if err := localValidateUnboundEntries(files.root, true, true); err != nil {
+			return result, err
 		}
 		for _, name := range []string{"sha256", ".locks"} {
 			if err := unix.Mkdirat(files.root, name, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
@@ -435,6 +478,38 @@ func ProvisionLocalNamespace(ctx context.Context, request LocalProvisionRequest,
 		return result, ErrLocalNamespaceClosed
 	}
 	return admitted, nil
+}
+
+// The accepted names are shared by provisioning and its read-only preflight.
+func localValidateUnboundEntries(root int, markerPresent, allowProvisionLock bool) error {
+	entries, err := localDirectoryNames(root)
+	if err != nil {
+		return err
+	}
+	for _, name := range entries {
+		if (allowProvisionLock && name == localProvisionLockName) || (markerPresent && (name == localMarkerName || name == "sha256" || name == ".locks")) {
+			continue
+		}
+		if !markerPresent && name == "sha256" {
+			var rootStat unix.Stat_t
+			if unix.Fstat(root, &rootStat) != nil {
+				return ErrLocalIdentityChanged
+			}
+			fd, err := openLocalAt(root, name, unix.O_RDONLY|unix.O_DIRECTORY, 0)
+			if err != nil {
+				return ErrLocalIdentityChanged
+			}
+			stat, statErr := localStat(fd, unix.S_IFDIR, rootStat.Uid, rootStat.Gid, 0o700)
+			children, readErr := localDirectoryNames(fd)
+			closeErr := unix.Close(fd)
+			if statErr != nil || stat.Nlink == 0 || readErr != nil || closeErr != nil || len(children) != 0 {
+				return fmt.Errorf("%w: legacy_capability_unresolved", ErrLocalNamespaceClosed)
+			}
+			continue
+		}
+		return fmt.Errorf("%w: legacy_capability_unresolved", ErrLocalNamespaceClosed)
+	}
+	return nil
 }
 
 func localDirectoryNames(directory int) ([]string, error) {

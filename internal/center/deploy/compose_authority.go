@@ -77,12 +77,20 @@ func RunComposeAuthority(ctx context.Context) error {
 		now:    func() time.Time { return time.Now().UTC() },
 		heartbeat: func(ctx context.Context, pool *pgxpool.Pool, state recordauthority.VerifiedComposeState, issuedAt time.Time) (time.Time, error) {
 			var expiry time.Time
-			err := WithSourceMaintenanceAuthority(ctx, pool, SourceMaintenanceConfigPath, func(maintenance *SourceMaintenanceConfig) error {
+			err := withComposeManagementGuard(ctx, pool, SourceMaintenanceConfigPath, OrdinaryComposeGuardRoot, func(maintenance *SourceMaintenanceConfig) error {
 				current, err := recordauthority.LoadComposeState(composeAuthorityStateRoot)
-				if err != nil || !sameVerifiedComposeAuthorityState(current, state) {
+				if err != nil || !sameVerifiedComposeAuthorityState(current, state) ||
+					recordauthority.VerifyActivationReceipt(composeAuthorityStateRoot, current) != nil {
 					return ErrComposeAuthorityLoadState
 				}
-				if _, err := inspectPublishedComposeBirthLaunch(ctx, pool, current, maintenance, filepath.Dir(composeCenterDeploymentIDPath), true); err != nil {
+				if maintenance == nil {
+					if current.MembershipVersion != 2 || recordauthority.VerifyMembershipRotationReceipt(composeAuthorityStateRoot, current) != nil {
+						return ErrComposeAuthorityLoadState
+					}
+				} else if current.MembershipVersion != 1 {
+					return ErrComposeAuthorityLoadState
+				}
+				if _, err := inspectPublishedComposeBirthLaunch(ctx, pool, current, maintenance, filepath.Dir(composeCenterDeploymentIDPath), true, normalComposeExecutablePaths()); err != nil {
 					return ErrComposeAuthorityHeartbeat
 				}
 				expiry, err = heartbeatComposeAuthorityAt(ctx, pool, current, issuedAt)
@@ -232,7 +240,12 @@ func (runtime *composeAuthorityRuntime) renew(
 	if err != nil || !sameVerifiedComposeAuthorityState(state, runtime.baseline) {
 		return errors.New("Compose Records authority durable state verification failed")
 	}
-	_, wantExpiry, err := recordauthority.MarshalMembershipHeartbeatCommandV1(state, issuedAt)
+	var wantExpiry time.Time
+	if state.MembershipVersion == 2 {
+		_, wantExpiry, err = recordauthority.MarshalMembershipHeartbeatCommandV2(state, issuedAt)
+	} else {
+		_, wantExpiry, err = recordauthority.MarshalMembershipHeartbeatCommandV1(state, issuedAt)
+	}
 	if err != nil {
 		return errors.New("Compose Records authority heartbeat command is invalid")
 	}
@@ -261,7 +274,11 @@ func (runtime *composeAuthorityRuntime) healthyAt(now time.Time) bool {
 
 func sameVerifiedComposeAuthorityState(left, right recordauthority.VerifiedComposeState) bool {
 	if left.DeploymentID != right.DeploymentID || left.DatabasePassword() != right.DatabasePassword() ||
+		left.MembershipVersion != right.MembershipVersion || (left.MembershipRotation == nil) != (right.MembershipRotation == nil) ||
 		len(left.Memberships) != len(right.Memberships) {
+		return false
+	}
+	if left.MembershipRotation != nil && *left.MembershipRotation != *right.MembershipRotation {
 		return false
 	}
 	for index := range left.Memberships {

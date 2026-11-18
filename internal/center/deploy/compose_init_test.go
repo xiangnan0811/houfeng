@@ -79,7 +79,7 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 				t.Fatal("closed unknown PostgreSQL pool")
 			}
 		},
-		prepareAuthority: func(_ context.Context, pool *pgxpool.Pool, root string) (recordauthority.VerifiedComposeState, error) {
+		prepareAuthority: func(_ context.Context, pool *pgxpool.Pool, root string, _ *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 			events = append(events, "prepare-authority")
 			if pool != bootstrapPool || root != config.AuthorityStateRoot {
 				t.Fatal("authority preparation did not use bootstrap pool and fixed state root")
@@ -99,7 +99,7 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 			}
 			return nil
 		},
-		activateAuthority: func(_ context.Context, pool *pgxpool.Pool, root string, state recordauthority.VerifiedComposeState) error {
+		activateAuthority: func(_ context.Context, pool *pgxpool.Pool, root string, state recordauthority.VerifiedComposeState, _ platformmigrate.AppRoleSetV2) error {
 			events = append(events, "activate-authority")
 			if pool != migratorPool || root != config.AuthorityStateRoot || state.DeploymentID != authorityState.DeploymentID {
 				t.Fatal("authority activation did not use migrator pool and verified state")
@@ -170,12 +170,12 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 		"publish-authority",
 		"close:migrator",
 		"open:houfeng_records_authority",
+		"inspect-launch",
+		"heartbeat-authority",
 		"open:houfeng_runtime",
 		"admit-runtime",
 		"probe-runtime",
 		"close:runtime",
-		"inspect-launch",
-		"heartbeat-authority",
 		"close:authority",
 		"close:bootstrap",
 	}
@@ -255,15 +255,17 @@ func TestInitializeComposeRejectsAuthorityCredentialReuseBeforeBootstrapMutation
 			return bootstrapPool, nil
 		},
 		closePostgres: func(*pgxpool.Pool) {},
-		prepareAuthority: func(context.Context, *pgxpool.Pool, string) (recordauthority.VerifiedComposeState, error) {
+		prepareAuthority: func(context.Context, *pgxpool.Pool, string, *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 			return authorityState, nil
 		},
 		provisionBootstrap: func(context.Context, *pgxpool.Pool, platformmigrate.ComposeBootstrapConfig) error {
 			provisioned = true
 			return nil
 		},
-		convergeCurrent:    func(context.Context, *pgxpool.Pool, string, string, string) error { return nil },
-		activateAuthority:  func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState) error { return nil },
+		convergeCurrent: func(context.Context, *pgxpool.Pool, string, string, string) error { return nil },
+		activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState, platformmigrate.AppRoleSetV2) error {
+			return nil
+		},
 		publishAuthority:   func(string, recordauthority.VerifiedComposeState, string) error { return nil },
 		prepareBirthLaunch: testComposePrepareBirthLaunch,
 		inspectBirthLaunch: testComposeInspectBirthLaunch,
@@ -330,7 +332,7 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 					return &pgxpool.Pool{}, nil
 				},
 				closePostgres: func(*pgxpool.Pool) { closed++ },
-				prepareAuthority: func(context.Context, *pgxpool.Pool, string) (recordauthority.VerifiedComposeState, error) {
+				prepareAuthority: func(context.Context, *pgxpool.Pool, string, *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 					prepared++
 					if failedStage == "prepare" {
 						return recordauthority.VerifiedComposeState{}, wantFailure
@@ -344,7 +346,7 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 					}
 					return nil
 				},
-				activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState) error {
+				activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState, platformmigrate.AppRoleSetV2) error {
 					activated++
 					if failedStage == "activate" {
 						return wantFailure
@@ -419,7 +421,7 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 			if failedStage == "converge" && admitted != 0 {
 				t.Fatal("convergence failure continued to runtime admission")
 			}
-			if (failedStage == "launch-prepare" || failedStage == "probe" || failedStage == "launch-inspect") && heartbeated != 0 {
+			if (failedStage == "launch-prepare" || failedStage == "launch-inspect") && heartbeated != 0 {
 				t.Fatal("failed launch verification reached membership heartbeat")
 			}
 			if prepared > 1 || provisioned > 1 || converged > 1 || activated > 1 || published > 1 || heartbeated > 1 || admitted > 1 {
@@ -481,7 +483,7 @@ func TestInitializeComposeChecksCredentialsInsideMaintenanceBeforeProvision(t *t
 			}
 			return errors.New("private stale credential")
 		},
-		prepareAuthority: func(context.Context, *pgxpool.Pool, string) (recordauthority.VerifiedComposeState, error) {
+		prepareAuthority: func(context.Context, *pgxpool.Pool, string, *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 			if !guarded {
 				t.Fatal("authority preparation occurred outside guard")
 			}
@@ -491,8 +493,10 @@ func TestInitializeComposeChecksCredentialsInsideMaintenanceBeforeProvision(t *t
 			provisioned = true
 			return nil
 		},
-		convergeCurrent:    func(context.Context, *pgxpool.Pool, string, string, string) error { return nil },
-		activateAuthority:  func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState) error { return nil },
+		convergeCurrent: func(context.Context, *pgxpool.Pool, string, string, string) error { return nil },
+		activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState, platformmigrate.AppRoleSetV2) error {
+			return nil
+		},
 		publishAuthority:   func(string, recordauthority.VerifiedComposeState, string) error { return nil },
 		prepareBirthLaunch: testComposePrepareBirthLaunch,
 		inspectBirthLaunch: testComposeInspectBirthLaunch,

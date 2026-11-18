@@ -42,6 +42,13 @@ func (repository *PostgresLocalBlobRepository) CheckLocalProvisionAuthority(ctx 
 	return nil
 }
 
+// ComposeSourceEnrolled reports source enrollment without granting provisioning authority.
+func (repository *PostgresLocalBlobRepository) ComposeSourceEnrolled(ctx context.Context) (bool, error) {
+	var enrolled bool
+	err := repository.pool.QueryRow(ctx, `select exists(select 1 from public.source_authority_admission)`).Scan(&enrolled)
+	return enrolled, err
+}
+
 func (repository *PostgresLocalBlobRepository) LoadLocalNamespace(ctx context.Context, root string) (attachments.LocalNamespace, error) {
 	var n attachments.LocalNamespace
 	err := repository.pool.QueryRow(ctx, `select n.namespace_id::text,n.current_incarnation_id::text,n.provision_request_id::text,

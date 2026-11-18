@@ -20,12 +20,22 @@ import (
 // their own real UID/source/reader fixture.
 func TestPostgresIntegrationComposeBirthLaunchPublication(t *testing.T) {
 	fixtureRoot := os.Getenv("HOUFENG_BIRTH_LAUNCH_FIXTURE_ROOT")
-	if os.Getenv("HOUFENG_POSTGRES_INTEGRATION") != "1" || fixtureRoot == "" {
+	if os.Getenv("HOUFENG_POSTGRES_INTEGRATION") != "1" {
 		t.Skip("requires strict PostgreSQL runner and protected UID launch fixture")
+	}
+	if fixtureRoot == "" {
+		t.Fatal("strict launch integration requires a protected UID launch fixture")
 	}
 	if os.Getuid() != composeLaunchPublisherUID || os.Geteuid() != composeLaunchPublisherUID || !filepath.IsAbs(fixtureRoot) || filepath.Clean(fixtureRoot) != fixtureRoot ||
 		os.Getenv("HOUFENG_RECORD_PLATFORM_EPHEMERAL_OWNER") == "" || os.Getenv("HOUFENG_RECORDS_RUN_ID") == "" {
 		t.Fatal("launch fixture requires UID10002, isolated protected path and ownership-checked PostgreSQL")
+	}
+	guardRoot := os.Getenv("HOUFENG_ORDINARY_GUARD_FIXTURE_ROOT")
+	if !filepath.IsAbs(guardRoot) || filepath.Clean(guardRoot) != guardRoot || filepath.Base(guardRoot) != "ordinary" {
+		t.Fatal("strict launch integration requires a preprovisioned ordinary guard")
+	}
+	if err := WithOrdinaryComposeGuard(t.Context(), guardRoot, false, func() error { return nil }); err != nil {
+		t.Fatalf("verify preprovisioned ordinary guard: %v", err)
 	}
 	ctx := context.Background()
 	baseConfig, err := pgxpool.ParseConfig(os.Getenv("HOUFENG_DATABASE_URL"))
@@ -75,7 +85,7 @@ func TestPostgresIntegrationComposeBirthLaunchPublication(t *testing.T) {
 	deps := defaultComposeInitDependencies(open)
 	controlPath := filepath.Join(directory, "source-authority.json")
 	deps.withMaintenance = func(ctx context.Context, app *pgxpool.Pool, fn func(*SourceMaintenanceConfig) error) error {
-		return WithSourceMaintenance(ctx, app, controlPath, false, fn)
+		return withComposeManagementGuard(ctx, app, controlPath, guardRoot, fn)
 	}
 	if err := initializeComposeWithDependencies(ctx, config, deps); err != nil {
 		t.Fatalf("first protected launch initialization: %v", err)
@@ -104,6 +114,18 @@ func TestPostgresIntegrationComposeBirthLaunchPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer owner.Close()
+	stateForPaths, err := recordauthority.LoadComposeState(config.AuthorityStateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal, err := expectedComposeBirthLaunch(ctx, owner, stateForPaths, nil, normalComposeExecutablePaths())
+	if err != nil {
+		t.Fatal(err)
+	}
+	swapped, err := expectedComposeBirthLaunch(ctx, owner, stateForPaths, nil, composeExecutablePaths{center: composeProcessorExecutable, processor: composeCenterExecutable})
+	if err != nil || swapped.center.BinaryDigest != normal.processor.BinaryDigest || swapped.processor.BinaryDigest != normal.center.BinaryDigest {
+		t.Fatalf("launch construction ignored explicit executable paths: %v", err)
+	}
 	var revision int64
 	if err := owner.QueryRow(ctx, `select revision from record_platform_internal.record_birth_launch_state where singleton`).Scan(&revision); err != nil || revision <= 0 {
 		t.Fatalf("read launch revision: %v", err)
@@ -142,7 +164,7 @@ func TestPostgresIntegrationComposeBirthLaunchPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer authority.Close()
-	if _, err := inspectPublishedComposeBirthLaunch(ctx, authority, state, nil, centerDirectory, true); err != nil {
+	if _, err := inspectPublishedComposeBirthLaunch(ctx, authority, state, nil, centerDirectory, true, normalComposeExecutablePaths()); err != nil {
 		t.Fatalf("constrained authority launch readback: %v", err)
 	}
 	wrong := digest

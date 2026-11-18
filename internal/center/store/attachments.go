@@ -34,6 +34,7 @@ type PostgresAttachmentRepository struct {
 	beginTx                        func(context.Context, pgx.TxOptions) (attachmentTx, error)
 	members                        CollaborationMembershipReader
 	authorization                  currentRecordAuthorizationPrefetcher
+	processorAdmission             []any
 	newBlobGCDeletionID            func() (string, error)
 	newBlobPublicationID           func() (string, error)
 	attachmentDeletionBlobMu       sync.RWMutex
@@ -68,6 +69,29 @@ func (repository *PostgresAttachmentRepository) ConfigureRecordMutationAuthoriza
 	}
 	repository.members = members
 	repository.authorization = authorization
+	return nil
+}
+
+// ConfigureProcessorAdmission binds the job consumer to a worker identity.
+// Other attachment and cleanup operations retain their own authorization.
+func (repository *PostgresAttachmentRepository) ConfigureProcessorAdmission(gate *DeploymentMembershipAdmissionGate) error {
+	if repository == nil || gate == nil || gate.identity.InstanceKind != deploymentMembershipInstanceKindWorker || validateDeploymentMembershipIdentity(gate.identity) != nil {
+		return ErrRecordPlatformAdmissionUnavailable
+	}
+	repository.processorAdmission = []any{
+		string(gate.identity.DeploymentID), string(gate.identity.ProjectID),
+		gate.identity.InstanceID, gate.identity.Capability,
+	}
+	return nil
+}
+
+func (repository *PostgresAttachmentRepository) admitProcessor(ctx context.Context, tx attachmentTx) error {
+	if repository.processorAdmission == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `select public.record_processor_worker_admit($1::text, $2::text, $3::text, $4::text)`, repository.processorAdmission...); err != nil {
+		return fmt.Errorf("%w: processor worker: %w", ErrRecordPlatformAdmissionUnavailable, err)
+	}
 	return nil
 }
 
@@ -1149,6 +1173,9 @@ func (repository *PostgresAttachmentRepository) claimDiscoveredProcessorJob(
 		return nil, false, fmt.Errorf("begin attachment processor claim: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := repository.admitProcessor(ctx, tx); err != nil {
+		return nil, false, err
+	}
 	var namespaces []string
 	if err := lockAttachmentWriterPrefix(ctx, tx, attachmentWriterRoute{
 		attachmentIDs: []string{candidate.attachmentID}, uploadIDs: []string{candidate.uploadID},
@@ -1209,6 +1236,9 @@ func (repository *PostgresAttachmentRepository) claimDiscoveredProcessorJob(
 		if err := records.AuthorizeRecordResource(actor, recordauth.CapabilityAttachmentUpdate, currentAuthorization.Evidence); err != nil {
 			return nil, false, err
 		}
+	}
+	if err := repository.admitProcessor(ctx, tx); err != nil {
+		return nil, false, err
 	}
 	row := tx.QueryRow(ctx, `
 		with candidate as (
@@ -1304,6 +1334,12 @@ func (repository *PostgresAttachmentRepository) RenewProcessorClaim(
 		return attachments.ProcessorClaim{}, fmt.Errorf("begin attachment processor renewal: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `select public.source_application_admit()`); err != nil {
+		return attachments.ProcessorClaim{}, fmt.Errorf("admit processor renewal: %w", err)
+	}
+	if err := repository.admitProcessor(ctx, tx); err != nil {
+		return attachments.ProcessorClaim{}, err
+	}
 
 	var renewedExpiry time.Time
 	err = tx.QueryRow(ctx, `
@@ -2110,6 +2146,9 @@ func (repository *PostgresAttachmentRepository) completeDiscoveredProcessorJob(
 		return attachments.ProcessorCompletionResult{}, fmt.Errorf("begin attachment processor completion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := repository.admitProcessor(ctx, tx); err != nil {
+		return attachments.ProcessorCompletionResult{}, err
+	}
 	var namespaces []string
 	route := attachmentWriterRoute{
 		attachmentIDs: []string{input.Claim.AttachmentID}, uploadIDs: []string{input.Claim.UploadID},
@@ -2221,6 +2260,9 @@ func (repository *PostgresAttachmentRepository) completeDiscoveredProcessorJob(
 		return attachments.ProcessorCompletionResult{}, err
 	}
 	if err := validateAttachmentProcessorUploadForClaim(upload, input.Claim); err != nil {
+		return attachments.ProcessorCompletionResult{}, err
+	}
+	if err := repository.admitProcessor(ctx, tx); err != nil {
 		return attachments.ProcessorCompletionResult{}, err
 	}
 	result, err := commitAttachmentProcessorResult(

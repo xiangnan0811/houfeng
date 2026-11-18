@@ -25,6 +25,17 @@ const (
 	composeProcessorExecutable      = "/usr/local/bin/houfeng-content-processor"
 )
 
+// composeExecutablePaths binds both launch identities to one explicit image.
+// Cold callers must validate the paths against the pinned image.
+type composeExecutablePaths struct {
+	center    string
+	processor string
+}
+
+func normalComposeExecutablePaths() composeExecutablePaths {
+	return composeExecutablePaths{center: composeCenterExecutable, processor: composeProcessorExecutable}
+}
+
 var errComposeBirthLaunch = errors.New("Compose birth launch verification failed")
 
 type composeBirthLaunchPair struct {
@@ -49,7 +60,8 @@ type composeBirthLaunchRegistry struct {
 // The normal initializer may create only the first ordinary registration. A
 // closed installed registration, or any replacement, needs an offline ceremony.
 func prepareComposeBirthLaunch(ctx context.Context, owner *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig, directory, runtimeRole, workerRole string) (composeBirthLaunchPair, error) {
-	pair, err := expectedComposeBirthLaunch(ctx, owner, state, maintenance)
+	paths := normalComposeExecutablePaths()
+	pair, err := expectedComposeBirthLaunch(ctx, owner, state, maintenance, paths)
 	if err != nil {
 		return composeBirthLaunchPair{}, errComposeBirthLaunch
 	}
@@ -79,11 +91,11 @@ func prepareComposeBirthLaunch(ctx context.Context, owner *pgxpool.Pool, state r
 			return composeBirthLaunchPair{}, errComposeBirthLaunch
 		}
 	}
-	observed, err := inspectPublishedComposeBirthLaunch(ctx, owner, state, maintenance, directory, registry.opened)
+	observed, err := inspectPublishedComposeBirthLaunch(ctx, owner, state, maintenance, directory, registry.opened, paths)
 	if err != nil && !registry.opened {
 		// Another initializer can finish the same staged pair before this
 		// readback. Accept only its exact opened revision and role binding.
-		observed, err = inspectPublishedComposeBirthLaunch(ctx, owner, state, maintenance, directory, true)
+		observed, err = inspectPublishedComposeBirthLaunch(ctx, owner, state, maintenance, directory, true, paths)
 		if err == nil {
 			registry.opened = true
 		}
@@ -95,7 +107,7 @@ func prepareComposeBirthLaunch(ctx context.Context, owner *pgxpool.Pool, state r
 		if _, err := owner.Exec(ctx, `select record_platform_internal.record_birth_launch_open($1::bigint)`, registry.revision); err != nil {
 			return composeBirthLaunchPair{}, errComposeBirthLaunch
 		}
-		observed, err = inspectPublishedComposeBirthLaunch(ctx, owner, state, maintenance, directory, true)
+		observed, err = inspectPublishedComposeBirthLaunch(ctx, owner, state, maintenance, directory, true, paths)
 		if err != nil || observed.revision != registry.revision || !bytes.Equal(observed.centerBytes, pair.centerBytes) || !bytes.Equal(observed.processorBytes, pair.processorBytes) {
 			return composeBirthLaunchPair{}, errComposeBirthLaunch
 		}
@@ -128,7 +140,7 @@ func readComposeBirthLaunchRegistry(ctx context.Context, owner *pgxpool.Pool) (*
 
 // Only the database owner reads private birth tables. Runtime admission is not
 // usable here: the launch registry has not necessarily been opened yet.
-func expectedComposeBirthLaunch(ctx context.Context, owner *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig) (composeBirthLaunchPair, error) {
+func expectedComposeBirthLaunch(ctx context.Context, owner *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig, paths composeExecutablePaths) (composeBirthLaunchPair, error) {
 	if owner == nil {
 		return composeBirthLaunchPair{}, errComposeBirthLaunch
 	}
@@ -173,11 +185,11 @@ func expectedComposeBirthLaunch(ctx context.Context, owner *pgxpool.Pool, state 
 			return composeBirthLaunchPair{}, errComposeBirthLaunch
 		}
 	}
-	centerDigest, err := recordbirth.DigestExecutable(composeCenterExecutable)
+	centerDigest, err := recordbirth.DigestExecutable(paths.center)
 	if err != nil {
 		return composeBirthLaunchPair{}, errComposeBirthLaunch
 	}
-	processorDigest, err := recordbirth.DigestExecutable(composeProcessorExecutable)
+	processorDigest, err := recordbirth.DigestExecutable(paths.processor)
 	if err != nil {
 		return composeBirthLaunchPair{}, errComposeBirthLaunch
 	}
@@ -219,7 +231,7 @@ func encodeComposeBirthLaunchPair(center, processor recordbirth.LaunchBinding) (
 
 // Every invocation reads both protected files, the fixed images and, when
 // installed, a fresh independent W2 anchor before the APP ancestry inspection.
-func inspectPublishedComposeBirthLaunch(ctx context.Context, app *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig, directory string, opened bool) (composeBirthLaunchPair, error) {
+func inspectPublishedComposeBirthLaunch(ctx context.Context, app *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig, directory string, opened bool, paths composeExecutablePaths) (composeBirthLaunchPair, error) {
 	centerPath := filepath.Join(directory, composeCenterBirthLaunchFile)
 	processorPath := filepath.Join(directory, composeProcessorBirthLaunchFile)
 	center, centerDigest, err := recordbirth.ReadPublishedLaunchBinding(centerPath, "center")
@@ -253,11 +265,11 @@ func inspectPublishedComposeBirthLaunch(ctx context.Context, app *pgxpool.Pool, 
 		(center.BirthInstalled && (maintenance.BirthProtocolVersion != 1 || center.BirthBinding.LineageID != maintenance.BirthLineageID)) {
 		return composeBirthLaunchPair{}, errComposeBirthLaunch
 	}
-	centerImage, err := recordbirth.DigestExecutable(composeCenterExecutable)
+	centerImage, err := recordbirth.DigestExecutable(paths.center)
 	if err != nil || centerImage != center.BinaryDigest {
 		return composeBirthLaunchPair{}, errComposeBirthLaunch
 	}
-	processorImage, err := recordbirth.DigestExecutable(composeProcessorExecutable)
+	processorImage, err := recordbirth.DigestExecutable(paths.processor)
 	if err != nil || processorImage != processor.BinaryDigest {
 		return composeBirthLaunchPair{}, errComposeBirthLaunch
 	}

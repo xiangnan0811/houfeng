@@ -16396,3 +16396,424 @@ language sql security definer set search_path=pg_catalog as $$ select * from rec
 revoke all on function record_platform_internal.record_portability_v1_finished(text),
   record_platform_internal.record_portability_finish_v1(bytea,boolean),public.record_portability_purge_v1(bytea),
   public.record_portability_purge_verify_v1(bytea) from public;
+
+-- A rotated head no longer contains its predecessor hash. Preserve the exact
+-- commands so replay cannot issue a receipt for a different predecessor.
+create table record_platform_internal.compose_membership_transition (
+  singleton boolean primary key default true check (singleton),
+  activation_command bytea not null check (octet_length(activation_command)=532),
+  rotation_command bytea not null check (octet_length(rotation_command)=508),
+  rotation_receipt bytea not null check (octet_length(rotation_receipt)=32),
+  manifest_digest bytea not null check (octet_length(manifest_digest)=32),
+  migration_set_digest bytea not null check (octet_length(migration_set_digest)=32)
+);
+create trigger compose_membership_transition_immutable
+  before update or delete or truncate on record_platform_internal.compose_membership_transition
+  for each statement execute function record_platform_internal.reject_immutable_mutation();
+revoke all on record_platform_internal.compose_membership_transition from public;
+
+-- The V2 lease is an indivisible admission of the two signed Compose members.
+create function public.record_platform_compose_membership_heartbeat_v2(bytea)
+returns timestamptz language plpgsql security definer set search_path=pg_catalog as $$
+declare
+  command alias for $1;
+  deployment text; issued bigint; expires bigint; now_epoch bigint; expiry timestamptz;
+  source public.source_authority_admission; launch record_platform_internal.record_birth_launch_state;
+  contract public.deployment_contract_state; center public.deployment_membership;
+  processor public.deployment_membership; manifest bytea;
+begin
+  if session_user <> 'houfeng_records_authority' or current_setting('role') <> 'none'
+    or not exists(select 1 from pg_roles r where r.rolname=session_user and r.rolcanlogin
+      and not r.rolinherit and not r.rolsuper and not r.rolcreaterole and not r.rolcreatedb
+      and not r.rolreplication and not r.rolbypassrls
+      and not exists(select 1 from pg_auth_members m where m.member=r.oid or m.roleid=r.oid)) then
+    raise exception using errcode='42501',message='Compose heartbeat requires direct authority login';
+  end if;
+  perform record_platform_internal.record_platform_projection_validate_header_v1(command,4,9,240);
+  deployment:=record_platform_internal.record_platform_projection_read_token_v1(command,37,'dp-');
+  if record_platform_internal.record_platform_projection_read_uint64_v1(command,136)<>2
+    or record_platform_internal.record_platform_projection_read_uint64_v1(command,176)<>2
+    or record_platform_internal.record_platform_projection_read_uint64_v1(command,216)<>1 then
+    raise exception using errcode='22023',message='invalid Compose V2 heartbeat counters';
+  end if;
+  issued:=record_platform_internal.record_platform_projection_read_uint64_v1(command,224);
+  expires:=record_platform_internal.record_platform_projection_read_uint64_v1(command,232);
+  now_epoch:=floor(date_part('epoch',transaction_timestamp()))::bigint;
+  if issued<=0 or expires<=0 or issued<now_epoch-30 or issued>now_epoch+30
+    or expires<=now_epoch or expires>now_epoch+120 or issued>9223372036854775717
+    or expires<>issued+90 then
+    raise exception using errcode='22023',message='invalid Compose V2 heartbeat time window';
+  end if;
+  expiry:=to_timestamp(expires);
+  lock table public.source_authority_admission in share mode nowait;
+  select * into source from public.source_authority_admission where singleton for share nowait;
+  lock table record_platform_internal.record_birth_lineage in share mode nowait;
+  lock table record_platform_internal.record_birth_launch_state in row share mode nowait;
+  select * into launch from record_platform_internal.record_birth_launch_state where singleton for share nowait;
+  select h.manifest_digest into manifest from public.app_acl_manifest_head h
+    join public.app_acl_manifest_revisions r using(manifest_revision,manifest_digest)
+    where h.singleton for share of h;
+  if manifest is null or launch.revision is null or not launch.opened or launch.manifest_digest<>manifest then
+    raise exception using errcode='42501',message='Compose V2 heartbeat launch is closed or stale';
+  end if;
+  if not exists(select 1 from record_platform_internal.compose_membership_transition a
+    where a.singleton and a.manifest_digest=manifest
+      and substring(a.activation_command from 38 for 67)=substring(command from 38 for 67)
+      and substring(a.activation_command from 277 for 32)=substring(command from 105 for 32)
+      and substring(a.rotation_command from 349 for 32)=substring(command from 145 for 32)
+      and substring(a.rotation_command from 389 for 32)=substring(command from 185 for 32)
+      and a.rotation_receipt=record_platform_internal.record_platform_projection_cas_receipt_v1(a.rotation_command)) then
+    raise exception using errcode='42501',message='Compose V2 heartbeat transition is absent or stale';
+  end if;
+  if source.singleton is not null and (source.mode<>'active' or source.deployment_id<>deployment
+    or not exists(select 1 from public.source_application_principals p where p.principal=session_user
+      and p.generation=source.generation and p.purpose='authority')) then
+    raise exception using errcode='42501',message='Compose V2 heartbeat source is closed or stale';
+  end if;
+  select * into contract from public.deployment_contract_state where project_id='default' for share nowait;
+  if not found or contract.deployment_id is distinct from deployment
+    or contract.active_profile is distinct from 'postgres_sync'
+    or contract.activation_bundle_digest is distinct from substring(command from 105 for 32)
+    or contract.witnessed_ledger_sequence is distinct from 2
+    or contract.witnessed_ledger_hash is distinct from substring(command from 145 for 32)
+    or contract.last_domain_identity_sequence is distinct from 2
+    or contract.last_domain_identity_entry_hash is distinct from substring(command from 145 for 32)
+    or contract.active_domain_identity_epoch is distinct from 2
+    or contract.active_domain_identity_set_digest is distinct from substring(command from 185 for 32)
+    or contract.minimum_fence_contract_version is distinct from 1 then
+    raise exception using errcode='55000',message='Compose V2 heartbeat contract mismatch';
+  end if;
+  if not exists(select 1 from record_platform_internal.compose_membership_transition a where a.singleton
+    and contract.trust_revision=2 and contract.trust_head_hash=substring(a.rotation_command from 477 for 32)
+    and contract.active_adapter_policy_generation=1
+    and contract.active_adapter_policy_digest=substring(a.rotation_command from 429 for 32)
+    and contract.activation_sequence=1
+    and contract.activation_mutation_id=record_platform_internal.record_platform_projection_read_token_v1(a.activation_command,105,'tm-')
+    and contract.activation_plan_digest=substring(a.activation_command from 213 for 32)
+    and contract.activation_authorization_artifact_digest=substring(a.activation_command from 245 for 32)
+    and contract.inventory_digest=substring(a.activation_command from 349 for 32)
+    and contract.approval_policy_digest=substring(a.activation_command from 381 for 32)
+    and contract.activation_adapter_policy_generation=1
+    and contract.activation_adapter_policy_digest=substring(a.activation_command from 421 for 32)
+    and contract.drain_receipt_digest=substring(a.activation_command from 453 for 32)
+    and contract.activation_domain_identity_epoch=1
+    and contract.activation_domain_identity_set_digest=substring(a.activation_command from 493 for 32)) then
+    raise exception using errcode='55000',message='Compose V2 heartbeat immutable activation mismatch';
+  end if;
+  perform record_platform_internal.record_birth_launch_validate(launch.center_binding,'center',source);
+  perform record_platform_internal.record_birth_launch_validate(launch.processor_binding,'content-processor',source);
+  select * into center from public.deployment_membership where instance_id='compose-center' for update nowait;
+  select * into processor from public.deployment_membership where instance_id='compose-processor' for update nowait;
+  if exists(select 1 from public.deployment_membership where deployment_id=deployment and project_id='default'
+    and instance_id not in ('compose-center','compose-processor')) then
+    raise exception using errcode='55000',message='Compose V2 heartbeat foreign membership';
+  end if;
+  if (center.instance_id,center.deployment_id,center.project_id,center.instance_kind,center.capability,
+      center.deployment_epoch,center.fence_contract_version) is distinct from
+      ('compose-center',deployment,'default','api','records.runtime',2::bigint,1::bigint)
+    or (processor.instance_id,processor.deployment_id,processor.project_id,processor.instance_kind,processor.capability,
+      processor.deployment_epoch,processor.fence_contract_version) is distinct from
+      ('compose-processor',deployment,'default','worker','records.runtime',2::bigint,1::bigint)
+    or (center.load_balancer_admitted,center.queue_admitted,processor.load_balancer_admitted,processor.queue_admitted)
+      not in ((false,false,false,false),(true,false,false,true)) then
+    raise exception using errcode='55000',message='Compose V2 heartbeat membership mismatch';
+  end if;
+  update public.deployment_membership set load_balancer_admitted=(instance_id='compose-center'),
+    queue_admitted=(instance_id='compose-processor'),heartbeat_expires_at=expiry,updated_at=transaction_timestamp()
+    where instance_id in ('compose-center','compose-processor');
+  return expiry;
+exception when lock_not_available then
+  raise exception using errcode='40001',message='Compose V2 heartbeat busy; restart transaction';
+end $$;
+revoke all on function public.record_platform_compose_membership_heartbeat_v2(bytea) from public;
+
+-- The caller verifies the embedded source and catalog in this transaction.
+-- This function holds the corresponding manifest, ledger and admission locks
+-- until that transaction commits, and returns only the rotation CAS receipt.
+create function public.record_platform_compose_inventory_upgrade(bytea,bytea)
+returns bytea language plpgsql security definer set search_path=pg_catalog as $$
+declare
+  activation alias for $1; rotation alias for $2;
+  deployment text; state public.deployment_contract_state;
+  center public.deployment_membership; processor public.deployment_membership;
+  manifest public.app_acl_manifest_revisions; launch record_platform_internal.record_birth_launch_state;
+  source public.source_authority_admission;
+  migration_body bytea; expected_identity bytea; canonical_identity bytea; mutation bytea;
+  receipt bytea; replay boolean; ts timestamptz:=transaction_timestamp();
+begin
+  if current_setting('role')<>'none' or session_user<>current_user
+    or not exists(select 1 from pg_roles r where r.rolname=session_user and r.rolcanlogin
+      and not r.rolinherit and not r.rolsuper and not r.rolcreaterole and not r.rolcreatedb
+      and not r.rolreplication and not r.rolbypassrls
+      and not exists(select 1 from pg_auth_members m where m.member=r.oid or m.roleid=r.oid)) then
+    raise exception using errcode='42501',message='Compose inventory requires direct migrator login';
+  end if;
+  perform record_platform_internal.record_platform_projection_validate_header_v1(activation,1,18,532);
+  perform record_platform_internal.record_platform_projection_validate_header_v1(rotation,2,21,508);
+  deployment:=record_platform_internal.record_platform_projection_read_token_v1(activation,37,'dp-');
+  perform record_platform_internal.record_platform_projection_read_token_v1(activation,105,'tm-');
+  if record_platform_internal.record_platform_projection_read_token_v1(rotation,37,'dp-')<>deployment
+    or record_platform_internal.record_platform_projection_read_profile_v1(activation,104)<>'postgres_sync'
+    or record_platform_internal.record_platform_projection_read_profile_v1(rotation,104)<>'postgres_sync'
+    or record_platform_internal.record_platform_projection_read_uint64_v1(activation,172)<>1
+    or record_platform_internal.record_platform_projection_read_uint64_v1(activation,308)<>1
+    or record_platform_internal.record_platform_projection_read_uint64_v1(activation,412)<>1
+    or record_platform_internal.record_platform_projection_read_uint64_v1(activation,484)<>1
+    or record_platform_internal.record_platform_projection_read_uint64_v1(activation,524)<>1
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,172)<>1
+    or substring(rotation from 181 for 32)<>substring(activation from 181 for 32)
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,212)<>1
+    or substring(rotation from 221 for 32)<>substring(activation from 493 for 32)
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,252)<>1
+    or substring(rotation from 261 for 32)<>substring(activation from 421 for 32)
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,292)<>1
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,300)<>1
+    or substring(rotation from 309 for 32)<>substring(activation from 317 for 32)
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,340)<>2
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,380)<>2
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,420)<>1
+    or substring(rotation from 429 for 32)<>substring(activation from 421 for 32)
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,460)<>1
+    or record_platform_internal.record_platform_projection_read_uint64_v1(rotation,468)<>2 then
+    raise exception using errcode='22023',message='invalid Compose inventory transition';
+  end if;
+  canonical_identity:=convert_to('{"version":2,"deployment_id":"'||deployment||'","project_id":"default","memberships":['
+    ||'{"instance_id":"compose-center","instance_kind":"api","capability":"records.runtime","deployment_epoch":2,"fence_contract_version":1,"load_balancer_admitted":true,"queue_admitted":false},'
+    ||'{"instance_id":"compose-processor","instance_kind":"worker","capability":"records.runtime","deployment_epoch":2,"fence_contract_version":1,"load_balancer_admitted":false,"queue_admitted":true}]}','UTF8');
+  expected_identity:=record_platform_internal.digest(convert_to('HOUFENG-COMPOSE-RECORDS-AUTHORITY-IDENTITY-SET-V2','UTF8')
+    ||decode('00','hex')||int4send(octet_length(canonical_identity))||canonical_identity,'sha256');
+  mutation:=record_platform_internal.digest(convert_to('HOUFENG-COMPOSE-RECORDS-AUTHORITY-MEMBERSHIP-MUTATION-V2','UTF8')
+    ||decode('00','hex')||int4send(96)||substring(activation from 181 for 32)||expected_identity
+    ||substring(activation from 277 for 32),'sha256');
+  if substring(rotation from 389 for 32)<>expected_identity
+    or record_platform_internal.record_platform_projection_read_token_v1(rotation,105,'tm-')<>'tm-'||encode(mutation,'hex') then
+    raise exception using errcode='22023',message='invalid Compose inventory identity or mutation';
+  end if;
+  lock table public.schema_migrations in share mode;
+  select r.* into manifest from public.app_acl_manifest_head h
+    join public.app_acl_manifest_revisions r using(manifest_revision,manifest_digest)
+    where h.singleton for share of h;
+  if manifest.manifest_revision is null or manifest.migrator_catalog_role<>session_user then
+    raise exception using errcode='42501',message='Compose inventory migrator or manifest mismatch';
+  end if;
+  select convert_to('HOUFENG-APP-MIGRATION-SET-V1','UTF8')||
+    string_agg(int4send(octet_length(name))||convert_to(name,'UTF8')||decode(checksum,'hex'),''::bytea order by name collate "C")
+    into migration_body from public.schema_migrations;
+  if migration_body is distinct from manifest.canonical_migration_set
+    or not exists(select 1 from public.schema_migrations where name='0081_record_deletion_successor.sql') then
+    raise exception using errcode='55000',message='Compose inventory manifest migration ledger mismatch';
+  end if;
+  lock table public.source_authority_admission in share row exclusive mode nowait;
+  lock table record_platform_internal.record_birth_lineage in share row exclusive mode nowait;
+  lock table record_platform_internal.record_birth_launch_state in exclusive mode nowait;
+  select * into launch from record_platform_internal.record_birth_launch_state where singleton for update;
+  if exists(select 1 from public.source_authority_admission)
+    or exists(select 1 from record_platform_internal.record_birth_lineage) then
+    raise exception using errcode='42501',message='Compose inventory requires absent source and birth';
+  end if;
+  select * into state from public.deployment_contract_state where project_id='default' for update;
+  if not found then raise exception using errcode='55000',message='Compose inventory contract missing'; end if;
+  replay:=state.active_domain_identity_epoch=2;
+  if not coalesce(replay,false) and coalesce(launch.opened,false) then
+    raise exception using errcode='42501',message='Compose inventory transition requires closed launch';
+  end if;
+  if coalesce(replay,false) then
+    if not exists(select 1 from record_platform_internal.compose_membership_transition
+      where singleton and activation_command=activation and rotation_command=rotation
+        and rotation_receipt=record_platform_internal.record_platform_projection_cas_receipt_v1(rotation)
+        and manifest_digest=manifest.manifest_digest and migration_set_digest=manifest.sorted_migration_set_digest) then
+      raise exception using errcode='55000',message='Compose inventory replay command mismatch';
+    end if;
+  elsif exists(select 1 from record_platform_internal.compose_membership_transition) then
+    raise exception using errcode='55000',message='Compose inventory transition already recorded';
+  end if;
+  if not coalesce(replay,false) then
+    perform public.record_platform_cas_contract_activation_projection(activation);
+    perform public.record_platform_cas_domain_rotation_projection(rotation);
+    select * into state from public.deployment_contract_state where project_id='default';
+  end if;
+  if state.deployment_id is distinct from deployment or state.active_profile is distinct from 'postgres_sync'
+    or state.activation_sequence is distinct from 1
+    or state.activation_mutation_id is distinct from record_platform_internal.record_platform_projection_read_token_v1(activation,105,'tm-')
+    or state.activation_plan_digest is distinct from substring(activation from 213 for 32)
+    or state.activation_authorization_artifact_digest is distinct from substring(activation from 245 for 32)
+    or state.activation_bundle_digest is distinct from substring(activation from 277 for 32)
+    or state.inventory_digest is distinct from substring(activation from 349 for 32)
+    or state.approval_policy_digest is distinct from substring(activation from 381 for 32)
+    or state.activation_adapter_policy_generation is distinct from 1
+    or state.activation_adapter_policy_digest is distinct from substring(activation from 421 for 32)
+    or state.drain_receipt_digest is distinct from substring(activation from 453 for 32)
+    or state.activation_domain_identity_epoch is distinct from 1
+    or state.activation_domain_identity_set_digest is distinct from substring(activation from 493 for 32)
+    or state.active_adapter_policy_generation is distinct from 1
+    or state.active_adapter_policy_digest is distinct from substring(rotation from 429 for 32)
+    or state.active_domain_identity_epoch is distinct from 2
+    or state.active_domain_identity_set_digest is distinct from expected_identity
+    or state.witnessed_ledger_sequence is distinct from 2
+    or state.witnessed_ledger_hash is distinct from substring(rotation from 349 for 32)
+    or state.last_domain_identity_sequence is distinct from 2
+    or state.last_domain_identity_entry_hash is distinct from substring(rotation from 349 for 32)
+    or state.trust_revision is distinct from 2
+    or state.trust_head_hash is distinct from substring(rotation from 477 for 32)
+    or state.minimum_fence_contract_version is distinct from 1 then
+    raise exception using errcode='55000',message='Compose inventory contract postcondition mismatch';
+  end if;
+  if coalesce(replay,false) and coalesce(launch.opened,false) then
+    if launch.manifest_digest is distinct from manifest.manifest_digest then
+      raise exception using errcode='42501',message='Compose inventory replay launch manifest mismatch';
+    end if;
+    perform record_platform_internal.record_birth_launch_validate(launch.center_binding,'center',source);
+    perform record_platform_internal.record_birth_launch_validate(launch.processor_binding,'content-processor',source);
+  end if;
+  select * into center from public.deployment_membership where instance_id='compose-center' for update nowait;
+  select * into processor from public.deployment_membership where instance_id='compose-processor' for update nowait;
+  if exists(select 1 from public.deployment_membership where deployment_id=deployment and project_id='default'
+      and instance_id not in ('compose-center','compose-processor')) then
+    raise exception using errcode='55000',message='Compose inventory has foreign membership';
+  end if;
+  if coalesce(replay,false) then
+    if (center.instance_id,center.deployment_id,center.project_id,center.instance_kind,center.capability,center.deployment_epoch,center.fence_contract_version)
+      is distinct from ('compose-center',deployment,'default','api','records.runtime',2::bigint,1::bigint)
+      or (processor.instance_id,processor.deployment_id,processor.project_id,processor.instance_kind,processor.capability,processor.deployment_epoch,processor.fence_contract_version)
+      is distinct from ('compose-processor',deployment,'default','worker','records.runtime',2::bigint,1::bigint)
+      or (center.load_balancer_admitted,center.queue_admitted,processor.load_balancer_admitted,processor.queue_admitted)
+        not in ((false,false,false,false),(true,false,false,true)) then
+      raise exception using errcode='55000',message='Compose inventory replay membership mismatch';
+    end if;
+  else
+    if processor.instance_id is not null or (center.instance_id is not null and
+      (center.deployment_id,center.project_id,center.instance_kind,center.capability,center.deployment_epoch,
+       center.fence_contract_version,center.load_balancer_admitted,center.queue_admitted)
+      is distinct from (deployment,'default','api','records.runtime',1::bigint,1::bigint,true,false)) then
+      raise exception using errcode='55000',message='Compose inventory predecessor membership mismatch';
+    end if;
+    if center.instance_id is null then
+      insert into public.deployment_membership(instance_id,deployment_id,project_id,instance_kind,capability,
+        deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at,created_at,updated_at)
+      values('compose-center',deployment,'default','api','records.runtime',2,1,false,false,ts+interval '90 seconds',ts,ts);
+    else
+      update public.deployment_membership set deployment_epoch=2,load_balancer_admitted=false,queue_admitted=false,
+        heartbeat_expires_at=ts+interval '90 seconds',updated_at=ts where instance_id='compose-center';
+    end if;
+    insert into public.deployment_membership(instance_id,deployment_id,project_id,instance_kind,capability,
+      deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at,created_at,updated_at)
+    values('compose-processor',deployment,'default','worker','records.runtime',2,1,false,false,ts+interval '90 seconds',ts,ts);
+    insert into record_platform_internal.compose_membership_transition
+      (activation_command,rotation_command,rotation_receipt,manifest_digest,migration_set_digest)
+      values(activation,rotation,record_platform_internal.record_platform_projection_cas_receipt_v1(rotation),
+        manifest.manifest_digest,manifest.sorted_migration_set_digest);
+  end if;
+  select rotation_receipt into strict receipt from record_platform_internal.compose_membership_transition where singleton;
+  return receipt;
+exception when lock_not_available then
+  raise exception using errcode='40001',message='Compose inventory busy; restart transaction';
+end $$;
+revoke all on function public.record_platform_compose_inventory_upgrade(bytea,bytea) from public;
+
+-- Historical wire operation 3 is exclusively an epoch-one operation.  In
+-- particular it cannot renew just one member after the atomic V2 transition.
+create or replace function public.record_platform_compose_membership_heartbeat(bytea)
+returns timestamptz language plpgsql security definer set search_path=pg_catalog as $$
+declare
+  command alias for $1; deployment text; fence bigint; issued bigint; expires bigint; now_epoch bigint; expiry timestamptz;
+  contract public.deployment_contract_state; member public.deployment_membership;
+begin
+  perform record_platform_internal.record_platform_projection_validate_header_v1(command,3,10,177);
+  deployment:=record_platform_internal.record_platform_projection_read_token_v1(command,37,'dp-');
+  if substring(command from 105 for 7)<>convert_to('default','UTF8')
+    or substring(command from 112 for 14)<>convert_to('compose-center','UTF8')
+    or substring(command from 126 for 3)<>convert_to('api','UTF8')
+    or substring(command from 129 for 15)<>convert_to('records.runtime','UTF8')
+    or get_byte(command,159)<>1 or get_byte(command,160)<>0
+    or record_platform_internal.record_platform_projection_read_uint64_v1(command,143)<>1 then
+    raise exception using errcode='22023',message='invalid Compose V1 heartbeat identity';
+  end if;
+  fence:=record_platform_internal.record_platform_projection_read_uint64_v1(command,151);
+  if fence<=0 then
+    raise exception using errcode='22023',message='invalid Compose V1 heartbeat fence';
+  end if;
+  issued:=record_platform_internal.record_platform_projection_read_uint64_v1(command,161);
+  expires:=record_platform_internal.record_platform_projection_read_uint64_v1(command,169);
+  now_epoch:=floor(date_part('epoch',transaction_timestamp()))::bigint;
+  if issued<=0 or expires<=0 or issued<now_epoch-30 or issued>now_epoch+30
+    or expires<=now_epoch or expires>now_epoch+120 or issued>9223372036854775717 or expires<>issued+90 then
+    raise exception using errcode='22023',message='invalid Compose V1 heartbeat time window';
+  end if;
+  expiry:=to_timestamp(expires);
+  select * into contract from public.deployment_contract_state where project_id='default' for update;
+  if not found or contract.deployment_id is distinct from deployment
+    or contract.active_profile is distinct from 'postgres_sync'
+    or contract.active_domain_identity_epoch is distinct from 1
+    or contract.minimum_fence_contract_version is distinct from fence then
+    raise exception using errcode='55000',message='Compose V1 heartbeat contract mismatch';
+  end if;
+  select * into member from public.deployment_membership where instance_id='compose-center' for update;
+  if found then
+    if (member.deployment_id,member.project_id,member.instance_kind,member.capability,member.deployment_epoch,
+        member.fence_contract_version,member.load_balancer_admitted,member.queue_admitted)
+      is distinct from (deployment,'default','api','records.runtime',1::bigint,fence,true,false) then
+      raise exception using errcode='55000',message='Compose V1 heartbeat membership mismatch';
+    end if;
+    update public.deployment_membership set heartbeat_expires_at=expiry,updated_at=transaction_timestamp()
+      where instance_id='compose-center';
+  else
+    insert into public.deployment_membership(instance_id,deployment_id,project_id,instance_kind,capability,
+      deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at,created_at,updated_at)
+    values('compose-center',deployment,'default','api','records.runtime',1,fence,true,false,expiry,transaction_timestamp(),transaction_timestamp());
+  end if;
+  return expiry;
+end $$;
+revoke all on function public.record_platform_compose_membership_heartbeat(bytea) from public;
+
+-- Record job effects must hold the processor launch, current contract and
+-- worker membership locks for the remainder of their transaction.
+create function public.record_processor_worker_admit(text,text,text,text)
+returns void language plpgsql security definer set search_path=pg_catalog as $$
+declare
+  deployment alias for $1; project alias for $2; instance alias for $3; capability alias for $4;
+  launch record_platform_internal.record_birth_launch_state;
+  contract public.deployment_contract_state; member public.deployment_membership;
+  manifest bytea; claimed text;
+begin
+  perform public.source_application_admit();
+  if current_setting('transaction_read_only')='on' or current_setting('role')<>'none'
+    or deployment is null or deployment !~ '^dp-[0-9a-f]{64}$'
+    or project is distinct from 'default' or instance is null or instance !~ '^[a-z0-9_-]{1,128}$'
+    or capability is null or capability !~ '^[a-z0-9_.]{1,128}$' then
+    raise exception using errcode='42501',message='invalid processor worker admission identity';
+  end if;
+  lock table record_platform_internal.record_birth_launch_state in row share mode nowait;
+  select * into launch from record_platform_internal.record_birth_launch_state where singleton for share nowait;
+  claimed:=current_setting('houfeng.birth_launch_digest',true);
+  if launch.revision is null or not launch.opened or session_user<>launch.runtime_principal
+    or coalesce(claimed,'') !~ '^[0-9a-f]{64}$'
+    or decode(claimed,'hex') is distinct from record_platform_internal.digest(launch.processor_binding,'sha256') then
+    raise exception using errcode='42501',message='processor worker launch is absent, closed or stale';
+  end if;
+  select h.manifest_digest into manifest from public.app_acl_manifest_head h
+    join public.app_acl_manifest_revisions r using(manifest_revision,manifest_digest)
+    where h.singleton for share of h nowait;
+  if manifest is null or launch.manifest_digest is distinct from manifest then
+    raise exception using errcode='42501',message='processor worker launch manifest is stale';
+  end if;
+  select * into contract from public.deployment_contract_state where project_id='default' for share nowait;
+  if not found or contract.deployment_id is distinct from deployment
+    or contract.active_profile is null or contract.active_domain_identity_epoch is null
+    or contract.active_domain_identity_epoch<=0 or contract.active_domain_identity_set_digest is null
+    or contract.minimum_fence_contract_version<=0
+    or contract.last_domain_identity_sequence is distinct from contract.witnessed_ledger_sequence
+    or contract.last_domain_identity_entry_hash is distinct from contract.witnessed_ledger_hash then
+    raise exception using errcode='42501',message='processor worker deployment contract is stale';
+  end if;
+  select * into member from public.deployment_membership where instance_id=instance for share nowait;
+  if not found or member.deployment_id is distinct from deployment or member.project_id is distinct from project
+    or member.instance_kind is distinct from 'worker' or member.capability is distinct from capability
+    or member.deployment_epoch is distinct from contract.active_domain_identity_epoch
+    or member.fence_contract_version<contract.minimum_fence_contract_version
+    or not member.queue_admitted or member.heartbeat_expires_at<=clock_timestamp() then
+    raise exception using errcode='42501',message='processor worker membership is stale or not admitted';
+  end if;
+exception when lock_not_available then
+  raise exception using errcode='40001',message='processor worker admission busy; restart transaction';
+end $$;
+revoke all on function public.record_processor_worker_admit(text,text,text,text) from public;

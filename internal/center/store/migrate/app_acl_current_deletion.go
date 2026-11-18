@@ -80,6 +80,11 @@ func recordDeletionSuccessorAppACLCurrentMigrationFragment() AppACLCurrentMigrat
 			ObjectClass:    AppACLObjectClassFunction,
 			ObjectIdentity: "public.record_birth_launch_inspect(bigint, bytea)",
 			Privilege:      AppACLPrivilegeExecute,
+		}, {
+			CatalogRole:    recordsAuthorityCatalogRole,
+			ObjectClass:    AppACLObjectClassFunction,
+			ObjectIdentity: "public.record_platform_compose_membership_heartbeat_v2(bytea)",
+			Privilege:      AppACLPrivilegeExecute,
 		}},
 	}
 	for _, table := range []string{
@@ -111,6 +116,7 @@ func recordDeletionSuccessorAppACLCurrentMigrationFragment() AppACLCurrentMigrat
 		"record_birth_lineage", "record_birth_keys", "record_birth_bindings", "record_birth_enabled", "record_birth_allocations",
 		"record_birth_checkpoint_head", "record_birth_checkpoints",
 		"record_birth_launch_state",
+		"compose_membership_transition",
 		"record_external_delivery_commit_checks",
 		"record_portability_v1_epoch",
 	} {
@@ -144,6 +150,9 @@ func recordDeletionSuccessorAppACLCurrentMigrationFragment() AppACLCurrentMigrat
 		identity string
 		definer  bool
 	}{
+		{appACLManagedPublicSchemaR1, "record_platform_compose_inventory_upgrade(bytea, bytea)", true},
+		{appACLManagedPublicSchemaR1, "record_platform_compose_membership_heartbeat_v2(bytea)", true},
+		{appACLManagedPublicSchemaR1, "record_processor_worker_admit(text, text, text, text)", true},
 		{appACLManagedInternalSchemaR1, "source_legacy_retirement_command(body bytea)", false},
 		{appACLManagedInternalSchemaR1, "source_legacy_retirement_binding(body bytea, install boolean)", true},
 		{appACLManagedPublicSchemaR1, "source_legacy_retirement_install(bytea)", true},
@@ -429,6 +438,11 @@ func recordDeletionSuccessorAppACLCurrentMigrationFragment() AppACLCurrentMigrat
 			Identity: "validate_record_revision_primary_subject()", Kind: "f", Config: []string{"search_path=pg_catalog"}},
 		After: AppACLCurrentFunctionContract{SchemaName: appACLManagedInternalSchemaR1,
 			Identity: "validate_record_revision_primary_subject()", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+	}, {
+		Before: AppACLCurrentFunctionContract{SchemaName: appACLManagedPublicSchemaR1,
+			Identity: "record_platform_compose_membership_heartbeat(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		After: AppACLCurrentFunctionContract{SchemaName: appACLManagedPublicSchemaR1,
+			Identity: "record_platform_compose_membership_heartbeat(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 	}}
 	return fragment
 }
@@ -439,6 +453,10 @@ func recordDeletionSuccessorAppACLCurrentPrivileges(databaseName string) []AppAC
 		{Subject: worker, ObjectClass: AppACLObjectClassDatabase, ObjectIdentity: databaseName, Privilege: AppACLPrivilegeConnect},
 		{Subject: worker, ObjectClass: AppACLObjectClassSchema, ObjectIdentity: appACLManagedPublicSchemaR1, Privilege: AppACLPrivilegeUsage},
 	}
+	privileges = append(privileges, AppACLPrivilege{
+		Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassFunction,
+		ObjectIdentity: "public.record_processor_worker_admit(text, text, text, text)", Privilege: AppACLPrivilegeExecute,
+	})
 	for _, function := range []string{"public.source_legacy_retirement_install(bytea)", "public.source_legacy_retirement_verify(bytea)"} {
 		privileges = append(privileges, AppACLPrivilege{
 			Subject: AppACLSubjectPlatformAdmin, ObjectClass: AppACLObjectClassFunction,

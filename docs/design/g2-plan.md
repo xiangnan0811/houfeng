@@ -1,173 +1,62 @@
-# G2 执行路线
+# G2 剩余执行路线
 
-本页是 G2 的当前续接路线，行为以 [记录删除与恢复合同](../spec/contracts/records/deletion-recovery.md)、[记录集成与恢复合同](../spec/contracts/records/integration-recovery.md)、[授权合同](../spec/contracts/records/authorization.md)及其引用的现行规范为准。本页安排工作与验收，不替代合同。
+本页安排持久删除与恢复的剩余工作；行为以[删除合同](../spec/contracts/records/deletion-recovery.md)、[集成与恢复合同](../spec/contracts/records/integration-recovery.md)、[授权合同](../spec/contracts/records/authorization.md)及其引用的现行规范为准。原编号用于追溯，不表示各项均须从头实现。
 
-当前 **G2 NOT_READY，永久删除 HTTP CLOSED**。唯一活动候选为 `feat/g2-durable-deletion-integrated` 的完整工作区。运行源码已迁入 `scripts/g2/source/`、`scripts/g2/phase0/` 和 `scripts/g2/http_smoke/`；源码迁移不代表产品验收完成。`phase0` 是固定输入，历史运行数据仍在各自原位置。历史材料如 `tmp/full-audit-2026-10-19/11-remediation-roadmap.md`、`tmp/agent/remediation-engineering-27180de1/target-spec.md`、`tmp/agent/remediation-engineering-27180de1/tickets/` 和 `tmp/agent/settlement-followup-4wg7iie_/remaining-g2-gates.md` 是证据指针，不是干净 checkout 的运行依赖。
+当前候选是 `feat/g2-durable-deletion-integrated` 的完整工作区，**G2 NOT_READY，永久删除 HTTP CLOSED**。受限历史 V1 九 adapter continuation/portability 与 N ABI V5 有界诊断及失败 readback 已阶段接受并交付，详见 [PR #635](https://github.com/xiangnan0811/houfeng/pull/635) 和[固定修订](https://github.com/xiangnan0811/houfeng/tree/ad460e207bf6d2f7b58e6e08a7c2389b8454ee70)。这些切片不代替整体接受。
 
-## 状态口径与依赖
+源码入口为 `scripts/g2/source/`、`scripts/g2/phase0/` 和 `scripts/g2/http_smoke/`；`phase0` 是固定输入。历史运行资产及私有归档是证据，不是 clean checkout 的运行依赖。新 VM 或 source 运行需要新增明确授权；两次已有 exact 授权均已消耗。
 
-每个工作项在实际推进时分别记录五种状态：**实现**（存在的范围和缺口）、**本候选验收**（指纹、实际 RUN/PASS/FAIL/NOT_RUN、skip 和失效范围）、**独立审查**（候选、模型和已关闭发现）、**Git 交付**（提交、PR 与 required CI），以及 **环境证据**（运行条件、实际 provider 和恢复目标）。未取得同候选证据时写待验，不将历史局部 PASS、旧审查或阶段提交外推为整项完成。新修复只使实际受影响的证据失效；最终验收仍须绑定同一完整指纹。
+## 阶段合并与后继迁移
 
-|工作包|当前范围和下一动作|关闭条件与依赖|
-|---|---|---|
-|N：source/native|ABI V5、固定容量 settlement evidence、独立通道和失败 readback 已集成。Python 七模块 205/205 保持适用；runtime-root 第二批修复后的完整 Go 1112/1112、Python owner-probe 81/81、layout 10+9 PASS，均零 skip。独立 GPT 完成原 46 文件首轮及两批定向修复复核，N-GPT-001/002/003 与 N-RUNTIME-001 均关闭，无新增修复缺陷。追加授权后的真实 source selection146/build150 的 prepare/build/gate 与 verify setup PASS；追加唯一 exact 仍为 UID SETTLE 超时 FAIL，但 UID 的 ENROLLED、WAIT、FINAL 已真实导出，独立校验 quality=COMPLETE、verification_limits 为空。已观察到 RELEASE_RETURN，等待点为 OBJECT_REMOVAL；delivery/timeliness 仍 UNKNOWN，reference_holder=UNRESOLVED，不声称原生 stall 已修复。原 selection145/build149 的 UNAVAILABLE 失败与 receipt 保留；追加 exact 额度也已用完，不自动再跑。精确候选、20,047 字节失败 artifact 及报告由 `tmp/agent/g2-n-implementation-fKGC8EjM/n-state.json` 索引。N 的有界诊断功能通过本轮 B/C 接受，整体 G2 仍 NOT_READY，永久删除 HTTP CLOSED。|本轮功能检查、独立 GPT 审查和真实取证合同已闭合，可按已授权 D 阶段完成 Git/hooks/CI 交付；native scenario 仍 FAIL，不等于完整 source 接受。全 51 场景门禁仍要求 51 PASS、0 FAIL、0 NOT_RUN；后续矩阵与原生 stall 归因独立续接，不能因本次有效取证自动扩授权。|
-|P：独立产品和 M1|受限历史 V1 fence、client/outbox 与完整九 adapter continuation 已实现；portability 以 immutable inventory、source provenance、shared handoff 和 exact physical receipt 闭环，ordinary/V2 行为保留。`final-r17` focused 178/178、lane03 668/668、local 584/584、真实 MinIO S3 818/818，均 0 FAIL/0 SKIP；完整 migrate 包、docs、vet 通过。独立 GPT 关闭全部 P 发现并复核四个 hook 夹具，49 文件候选通过。提交 `d6bacc7` 已推送至 PR #635，原生 commit/pre-push hooks 与 CI 43836649183 七个 required contexts 全通过，P 阶段交付闭合。|这是本候选本地/CI 接受及独立审查，不代表生产或完整 G2 接受。historical NULL 不回填，pending handoff 不称 absence，worker 无原表权限。N 现可按既定顺序实施；M1/source-bound issuer、全 writer 接受、K、J 与真实 HTTP smoke 独立待验。|
-|K：正向物理恢复|独立调查设计输入：可信 stopped-writer/restore-unit producer、同 generation APP/W2、旧凭据及 namespace 撤销、W2 inventory/prepare、真实 filesystem identity/handoff、root-independent 义务、seal→activation producer/证据与失败闭合。|现无完整 source recovery coordinator/CLI。具体协议、真实 CLI envelope 和正向 driver 必须先形成决策完整的后续原生 Plan 并获批准。通用 restore 或 local/S3 `--all` 不能关闭此项；见 [集成恢复合同](../spec/contracts/records/integration-recovery.md) 和 [Compose authority](../spec/contracts/platform/compose-authority.md)。|
-|J：联合接受|N、P、K 闭合后冻结完整源码、产品、工具链、配置和输入，冻结后不并发写产品。|同 APP/RID、多 generation、C81 fresh/dual carriers/systemd、三 normal/recovery、source handoff/V1 reconcile、birth/namespace/跨 RID、root-absent/late I/O/quota-once 和 D1–D7 均须真实闭合；OLD 未解差异和未知远端 provider 义务各有独立关闭条件。|
-|D：阶段交付|完整候选经过适用门禁与独立审查后，可提交、推送并建立或更新 draft PR，持续 required CI。|区分源码迁移与未完成的产品验收；完整 index 一起交付，不隐藏候选。阶段提交不等于 G2 READY；不合并、发布、部署或开放永久删除 HTTP。|
+本阶段候选尚待合并；最终合并 C81 以实际候选为准。合并前普通 Compose 所需的 `0081` schema/ACL 修订须同步 compiler 与独立 oracle 并验证，`0001`–`0080` 原字节不变。阶段合并一旦发生，最终合并修订中的 `0081`/C81 即冻结为不可回写的前驱。此后需要的 schema 或 ACL 变化须追加迁移：先检查届时 `db/migrations/` 的实际最大编号，使用其后的下一个未占用序号；`0082` 仅是没有并发新增时的例子。
 
-source、产品和恢复的独立调查可以并行；M1 的合法 source 签发、全 writer 接受和最终联合验收不能跳过实际前置。相关历史局部实现和独立审查可在输入未变且覆盖相同时复用，复用理由须绑定具体文件和环境。
+后继 compiler 改动前，须从精确的最终合并 C81 修订及 pristine C81 PostgreSQL 独立取得 canonical migration/privilege bodies 和 catalog 事实，记录修订、数据库及角色绑定、body 长度和 hash；以这些独立事实注册 C81 predecessor profile、精确后继 fragment/权限差量与 hardening、完整支持的链及 suffix 和独立 oracle。scoped writer 保持单个 `SERIALIZABLE` 事务整体提交或回滚，runtime 只读准入。后继验收覆盖 fresh/successor、C81 升级、全部声明的链、自定义角色、历史字节、repeat、升级前拒绝/后准入、漂移拒绝及失败回滚；细则见 [APP 当前迁移合同](../spec/contracts/platform/app-acl-current.md)。
 
-## G2 票据与联合前置
+后继策略本身不要求提前新增 P81 或后继 golden；当前为 82 sources、30 fragments、18 profiles、196607 chains。合并及这些后继前置均不证明 G2、source 或 K 已闭合，也不开放永久删除 HTTP。
 
-下表的实现栏只描述已知切片；所有整票的本候选验收、整合独立审查和 Git 交付均待对应证据确认，环境证据不得由历史隔离结果替代。每项关闭还须满足本页状态口径。
+## Native 归因与完整矩阵
 
-|项目|实现与关闭条件|现行合同|
-|---|---|---|
-|M1|G2-01、05、06 联合前置：C81/schema/角色、issuer 和资源协调基础，加两个真实 adapter 和浏览器；同一受限授权路径实际签发九 adapter，完整 registry/receipt，不用 subset 或 prepare-gate 旁路。source 准入未证时真实 source-bound 签发待验。三票共同通过才关闭 M1。|[APP ACL](../spec/contracts/platform/app-acl-current.md)、[删除](../spec/contracts/records/deletion-recovery.md)|
-|G2-01|已有授权、C81、角色和 V2 局部切片；完整签发待验。真实 resource/source 权限及二次确认绑定 project、record、lifecycle/version、auth epoch、fence；非法 issuer/worker/旧 operation 拒绝，gate 脱离 root 持久且租约到期只接管。验证 restore/edit 两锁序、fresh/注册 predecessor successor 的真实 admission、漂移拒绝、失败回滚、exact replay、重启重读及冻结资产保护。|[授权](../spec/contracts/records/authorization.md)、[APP ACL](../spec/contracts/platform/app-acl-current.md)、[删除](../spec/contracts/records/deletion-recovery.md)|
-|G2-02|已有 typed actor 与 participant 资源声明等局部实现，声明不等于取得锁。逐一覆盖 revision、draft、upload/promotion、processor、copy、evidence、search/activity、collaboration/outbox、import/export/PDF 真实 writer；gate 前提交纳入清理，gate 后不发布或复活，仅允许原 obligation 记录迟到事实。验证统一 rank、反序 batch、expiry、source/target 与 import/GC 两顺序、重读变化 rollback/reselect，保留其他记录与 origin tombstone。整票依赖 M1/source。|[删除](../spec/contracts/records/deletion-recovery.md)、[投递原语](../spec/contracts/platform/delivery-primitives.md)|
-|G2-03|七个既有 adapter 的单独迁移与实际验收须核候选；依赖 M1、G2-02 和已合并的 S3GC-01。各 destructive 事务内核 current owner/generation/expiry/fence，effects、absence、receipt 原子提交或回滚；失权旧 owner 无副作用，接管重放稳定、quota 一次。保留共享对象/其他 record、checkpoint、origin tombstone；真实精确 claim 与 guard，root-dependent 责任完成或真实移交后 core 最后删除；缺 adapter 或未结义务 fail closed。|[删除](../spec/contracts/records/deletion-recovery.md)、[投递原语](../spec/contracts/platform/delivery-primitives.md)|
-|G2-04|已有 local 持久 I/O 和 D5 局部切片；完整 drain 待 M1、02、03 与 local sealing。逐 I/O durable obligation、namespace/incarnation、持久 nonce、跨进程 key guard、keywide 核对和封口；真实 root 已无后重启接管、精确 cleanup 与 quota 一次，阻塞 Put 保持 pending，迟到 version 仅绑定原义务。取消、超时、lease/URL 到期或单次 absence 不证明远端关闭；未知结果可接管且不假报终态。|[删除](../spec/contracts/records/deletion-recovery.md)、[投递原语](../spec/contracts/platform/delivery-primitives.md)|
-|G2-05|已有客户端存储/传输与 adapter 局部切片，整票与 M1 待验。真实 event/target/receipt 与效果原子，root 消失后可送达；两 context/两 tab 实测在线关闭、丢 ack 重放、IDB abort 不 ack、迟到 save/unmount/切换拒绝、logout 清当前用户而 401 不删、其他用户/记录保留；启动 TTL 和重连 reconcile。离线副本 unknown/null，不承诺远端设备擦除。|[删除](../spec/contracts/records/deletion-recovery.md)、[Web](../spec/contracts/records/web-surfaces.md)|
-|G2-06|已有 signed 来源、copy、索引和 preview 局部切片；真实签发与 A purge/B 保留待验。真实 A/B 包含 metadata-only 输入，历史 canonical 校验与补索引，损坏或未认证阻塞；B 的 payload/refs/lineage/正文 hash 保持，其他 owner 的 distinct 结果精确计数且不泄露身份。浏览器成功/丢响应不重复创建 B，A 失效后旧 save 不得发布。|[删除](../spec/contracts/records/deletion-recovery.md)、[证据快照](../spec/contracts/evidence-snapshot.md)、[Web](../spec/contracts/records/web-surfaces.md)|
+先使用已保存失败取证归因 UID SETTLE：selection146/build150 为 **0 PASS / 1 FAIL / 50 NOT_RUN**，已观察到 `RELEASE_RETURN`，等待 `OBJECT_REMOVAL`。取证 `COMPLETE` 只说明失败证据完整，不是场景 PASS；delivery/timeliness 为 `UNKNOWN`，holder 为 `UNRESOLVED`。有界诊断组件及 readback 的阶段接受不能证明 stall 已解决。
 
-## D1–D7、P1–P5 与 Q1 关闭条件
+取得新运行授权并解决归因后，实际接受 registration/WATCH 顺序、held launcher→target、两个 owner probe 的单次只读 bind 与 retired grants、后续 realm registration，以及 pinned-runc OCI 和 broker-kill。按实际合同完成全 51 场景，最终须 **51 PASS / 0 FAIL / 0 NOT_RUN**；只复用输入与候选未变且覆盖相同的有效证据。
 
-这些项目均须分别记录实现、本候选验收、独立审查、Git 交付和环境证据。历史局部结果只作为对应切片的线索，以下条件均未由本页声明已通过。
+## M1：签发、客户端与 Comparison
 
-|项目|关闭条件|合同|
-|---|---|---|
-|D1：markdown client|G2-05 的真实 adapter 与双 context/双 tab 清理、事务完成后 ack、未知离线副本披露和其他数据保留；无权 record 不可枚举。|[删除](../spec/contracts/records/deletion-recovery.md)、[Web](../spec/contracts/records/web-surfaces.md)|
-|D2：comparison|G2-06 的真实 A/B、历史索引完整性、保留 B、精确聚合、身份保护与旧 intent 拒绝；不能自动改写 B。|[删除](../spec/contracts/records/deletion-recovery.md)、[证据快照](../spec/contracts/evidence-snapshot.md)|
-|D3：远端 capability|核实际支持的 provider 合同与慢 body PUT 跨 gate/expiry、断连和晚完成的真实结果；权威证据能关闭所有获准迟到物化才可终态。缺权威 closure 保持 pending，不自定宽限期；MinIO 样本不代替未知真实 provider。|[投递原语](../spec/contracts/platform/delivery-primitives.md)、[删除](../spec/contracts/records/deletion-recovery.md)|
-|D4：旧能力和崩溃转换|核历史签发字段与 operation；provider 已接受后 kill/丢响应、root 已无的真实恢复能找回全部物化身份；证据不足则拒绝受影响记录准入并保留补证/迁移前置，不能等 TTL 或补造授权。|[删除](../spec/contracts/records/deletion-recovery.md)、[集成恢复](../spec/contracts/records/integration-recovery.md)|
-|D5：publication 与共享|真实 prepared/unbound shared 和 bound noncurrent 交错保留 refs/pins/bytes；旧版本删除须有精确授权，普通 publication current-only，未知保持 pending；跨进程封口及 root-absent 接管另证，不能借 GC 扩权。|[投递原语](../spec/contracts/platform/delivery-primitives.md)、[删除](../spec/contracts/records/deletion-recovery.md)|
-|D6：外发与 artifact|明确 processing/unknown/delivered 去重及 root-independent finalize 身份、旧 export/import/PDF artifact 身份转换；真实 send 前 purge 后迟到 finalize、PUT 成功丢响应后重启。不可撤回已发送/下载副本，未知不重发、不假完成。|[删除](../spec/contracts/records/deletion-recovery.md)、[协作通知](../spec/contracts/records/collaboration-notifications.md)、[可移植性](../spec/contracts/records/portability.md)|
-|D7：生命周期与自动策略|真实首次、同 key 同 body 重放、异 body 拒绝、新 key 同状态冲突、丢响应及 restore 后旧 purge；不刷新 `trashed_at`，旧重放不撤销后续状态，保留旧 archive 语义。可信 policy issuer 绑定规则与候选，selection→gate 时重新验证授权、最老顺序及引用；完成 UI 和自动过期/容量淘汰。|[删除](../spec/contracts/records/deletion-recovery.md)、[Web](../spec/contracts/records/web-surfaces.md)|
-|P1：授权与 owner|真实受限角色下缺权限、错 owner/过期 fence 零越权删除，不能用管理员或 mock 代替。|[授权](../spec/contracts/records/authorization.md)、[删除](../spec/contracts/records/deletion-recovery.md)|
-|P2：活跃写入竞争|实际 edit/upload/publication 与 active 直接清除两顺序只有可解释的串行结果；终态后旧 writer 不发布。|[删除](../spec/contracts/records/deletion-recovery.md)|
-|P3：恢复竞争|trash restore 与 purge 两顺序只允许恢复且保留内容，或清除且不可恢复；旧 intent 不得重授权。|[删除](../spec/contracts/records/deletion-recovery.md)|
-|P4：崩溃与重试|实际事务、receipt、I/O 中断和重启接管，原子回滚或可核对地重入，效果与 quota 不重复。|[删除](../spec/contracts/records/deletion-recovery.md)、[投递原语](../spec/contracts/platform/delivery-primitives.md)|
-|P5：共享对象|active 或其他保留内容引用的对象始终可读，仅清除无剩余引用且获准的精确对象版本。|[删除](../spec/contracts/records/deletion-recovery.md)|
-|Q1：容量与淘汰|以独立 oracle 复算全部保留正式 revision 正文、附件/预览和 canonical evidence 字节；trash 内共享对象去重，逻辑占用与物理释放分别报告。每次重新计算并淘汰最老整记录，覆盖零释放、共享及授权/并发变化。默认 30 天/1 GB 可配置。|[删除](../spec/contracts/records/deletion-recovery.md)|
+对应 **G2-01/05/06、D1/D2**。已有授权、C81、客户端和 comparison 局部实现；下一步通过真实 source-bound issuer 与受限角色闭合三票，而非以 subset、prepare-gate 旁路或声明代替九 adapter 注册和 receipt。真实权限及二次确认须绑定 project、record、lifecycle/version、auth epoch 和 fence；错误 issuer/worker、过期 operation 拒绝，root-independent gate 持久，租约到期只允许接管。验证 restore/edit 两锁序、fresh 与 predecessor/successor admission、漂移拒绝、失败回滚、exact replay、重启读回和冻结资产保护。
 
-## 后续执行：N source/native
+客户端以真实 event/target/receipt 和效果原子提交，root 消失后仍可送达。两 context/两 tab 验证在线关闭、丢 ack 重放、IDB abort 不 ack、迟到 save/unmount/切换拒绝、logout 清当前用户而 401 不删、其他用户/记录保留，以及启动 TTL 和重连 reconcile；离线副本为 unknown/null，不承诺擦除远端设备。无权 record 不可枚举。
 
-本阶段按 P→N 两次交付执行；P 的九 adapter continuation 缺口未闭合前，N 实现和 VM 均未启动。`R` 指向保留的历史运行数据，代码入口使用维护树。P 阶段完成后，N 按已批准的有界取证合同实施，验证、独立审查和 build gate 均通过后仅运行一次 exact，exact 非零仍运行 verify，失败停止后续 source。每个命令自己取得原 `source-vm.lock`，不在外层先持同一非重入锁。
+Comparison 验证含 metadata-only 输入的真实 A/B、历史 canonical 校验与补索引，损坏或未认证时阻塞；A purge 后 B 的 payload、refs、lineage 和正文 hash 保持，其他 owner 的 distinct 结果精确计数且不泄露身份。浏览器成功或丢响应均不得重复创建 B，A 失效后的旧 save 不得发布或自动改写 B。
 
-维护树的轻量检查是 `make test-g2-layout`（随 `make test-ci-tools` 运行，不需要历史资产）。依赖历史 R/P0 数据的 source 单元测试在 `scripts/g2/source` 下运行 `python3 -B -m unittest -v source_protocol_test source_copy_test source_resource_test source_retirement_test`；其中 `test_go_early_fixture` 需先用 `go test -c ./source_supervisor/bpf-authority` 生成测试二进制，并以 `G2_EARLY_RESULT_TEST_BINARY` 指向它，缺失即错误，不能以 skip 放行。
+客户端清理及 Comparison 交互见 [Records Web 合同](../spec/contracts/records/web-surfaces.md)与[证据快照合同](../spec/contracts/evidence-snapshot.md)；比较库存与保留副本预览见[删除合同对应条款](../spec/contracts/records/deletion-recovery.md#comparison-只读库存与保留副本预览)。
 
-```bash
-R="$PWD/tmp/agent/g2-c80-inventory-ddac5da9673f4c9ba7d2ad68570fd82d"
-python3 -B scripts/g2/source/browser_negative.py prepare --run-dir "$R"
-python3 -B scripts/g2/source/source_host.py build --run-dir "$R"
-```
+## 全 writer 与九 adapter 的物理闭合
 
-确认 prepare 和 build 均实际 PASS 且 build gate 通过后，执行唯一一次 exact；即使失败也必须执行 verify，并保存两者退出状态。verify 为全 51 场景聚合，新 selection 只执行 exact 时，其余 NOT_RUN 会令 aggregate NOT_READY/exit1；必须独立读取 report 中 `realm-negative/bpf-broker-kill` 的 case 状态与取证质量，不能将 aggregate 非零直接当作 exact 失败，也不能将有效 INCONCLUSIVE 取证当作 case PASS。
+对应 **G2-02/03/04、D3–D6、P1–P5**；依赖 M1/source 准入。已有九 adapter continuation、local I/O 和 S3 exact-version GC 等切片，仍须核对完整候选的真实接线和接受，不把历史切片当作整票完成，也不从头重迁既有 adapter。
 
-```bash
-exact_status=0
-python3 -B scripts/g2/source/source_host.py run --case realm-negative --scenario bpf-broker-kill --run-dir "$R" || exact_status=$?
-verify_status=0
-python3 -B scripts/g2/source/source_host.py verify --run-dir "$R" || verify_status=$?
-printf 'exact=%s verify=%s\n' "$exact_status" "$verify_status"
-```
+物理 I/O、能力关闭和 GC 按[交付原语](../spec/contracts/platform/delivery-primitives.md)；外发与 artifact 的具体责任按[协作通知](../spec/contracts/records/collaboration-notifications.md)和[可移植性](../spec/contracts/records/portability.md)。
 
-以下 observer-capability、bpf-authorization 和后续矩阵不在本阶段一次 exact 授权内。只有 exact case 独立 PASS、必要 native 证据通过并取得后续续接授权后，才逐步执行；每一步失败停止后续步骤：
+- 覆盖 revision、draft、upload/promotion、processor、copy、evidence、search/activity、collaboration/outbox、import/export/PDF 的真实 writer。gate 前提交纳入清理，gate 后不发布或复活；仅允许原 obligation 登记迟到事实。验证统一 rank、反序 batch、expiry、source/target 与 import/GC 两顺序、重读变化后的 rollback/reselect，并保留其他记录和 origin tombstone。
+- 每个 destructive 事务核 current owner/generation/expiry/fence，effects、absence、receipt 原子提交或回滚；错误角色、失权旧 owner 零越权效果，接管重放稳定且 quota 只结算一次。真实 claim/guard 保护共享对象、其他 record、checkpoint 与 tombstone；root-dependent 责任完成或真实移交后 core 最后删除，缺 adapter 或未结义务 fail closed。验证 edit/upload/publication 与 purge、trash restore 与 purge 的两种锁序及中断接管。
+- 每次 I/O 有 durable obligation；local 使用 namespace/incarnation、持久 nonce、跨进程 key guard、keywide 核对和封口。root 已无后仍能重启接管、精确 cleanup 和一次 quota；阻塞 Put 保持 pending，迟到 version 只绑定原义务。取消、超时、lease/URL 到期或单次 absence 不证明远端关闭。
+- D3/D4：按实际 provider 合同验证慢 body PUT 跨 gate/expiry、断连及晚完成；provider 接受后 kill/丢响应和 root-absent 恢复须找回物化身份。旧能力无法证明时拒绝受影响记录准入并保留补证或迁移前置；未知 provider closure 保持 pending，MinIO 样本不能代证。
+- D5：验证 prepared/unbound shared 与 bound noncurrent 交错时 refs/pins/bytes 保留；旧版本删除须精确授权，普通 publication 只处理 current。跨进程封口和 root-absent 接管另证，不借 GC 扩权。
+- D6：闭合 processing/unknown/delivered 去重、root-independent finalize 与旧 export/import/PDF artifact 身份转换；验证 send 前 purge 后迟到 finalize、PUT 成功丢响应后重启。已发送或下载副本不可撤回，未知不重发或假报完成。
 
-```bash
-python3 -B scripts/g2/source/source_host.py run --case realm-negative --scenario observer-capability --run-dir "$R"
-python3 -B scripts/g2/source/source_host.py verify --run-dir "$R"
-python3 -B scripts/g2/source/source_host.py run --case realm-negative --scenario bpf-authorization --run-dir "$R"
-python3 -B scripts/g2/source/source_host.py verify --run-dir "$R"
-python3 -B scripts/g2/source/source_bpf_negative.py --run-dir "$R"
-```
+## 生命周期、自动策略与容量
 
-还须核 registration/WATCH 顺序、held launcher→target、两个 owner probe 的单次只读 bind 与 retired grants、后续 realm registration、完整 pinned-runc OCI 和 broker-kill 证据。然后按 `source_host.CASES` 与 `source_supervisor.contract.scenarios(case)` 原序补齐剩余 51 个场景，每次 run 后 verify；只复用源码、runner、工具和输入未变的同候选 PASS。
+对应 **D7/Q1**；下列已定产品条件尚未全部进入 spec，实施时须同步合同及验证。归档记录先恢复 active 才能移入 trash；trash 可恢复 active；active 或 trashed 经二次确认可立即 purge，archived 不可直接 purge。验证首次请求、同 key 同 body 重放、异 body 拒绝、新 key 同状态冲突、丢响应及 restore 后旧 purge；旧请求重放不撤销后续状态、不刷新 `trashed_at`，保留既有 archive 语义。
 
-## 后续执行：P/J 环境和产品验收
+完成生命周期 UI、可信 policy issuer 和自动过期/容量淘汰。issuer 绑定规则与候选，selection→gate 时重核权限、最老顺序和引用；默认 30 天/1 GB，可配置，每次重新计算并淘汰最老整记录。独立 oracle 复算全部保留正式 revision 正文、附件及预览、canonical evidence；trash 内共享对象去重，逻辑占用与物理释放分开报告。覆盖并发、零释放、共享和权限变化。
 
-以下命令只在工作区根的独立 P/J 子 shell 执行，不继承本轮源码检查的 `TMPDIR`、离线 Go module cache 或 `GOPROXY=off`/`GOSUMDB=off`。创建的 PJ 是本次 owned 目录，先核 realpath 在工作区内、文件系统为 btrfs，`tmp` 为 0700；各 lane 分开保存 argv、条件、stdout/stderr 与退出结果，结束后把必要日志保存到本轮私有证据目录，公开记录不写秘密。使用项目正常 Go/npm/Playwright 缓存和网络/代理；获取锁定依赖只按 [贡献指南](../../CONTRIBUTING.md) 的门禁。source 夹具仍只用已有 cache。
+## K：正向物理恢复
 
-```bash
-(
-  set -eu
-  W="$(pwd -P)"
-  export PJ="$(mktemp -d "$W/tmp/agent/g2-acceptance-XXXXXXXX")"
-  chmod 0700 "$PJ"
-  mkdir -m 0700 "$PJ/tmp"
-  case "$(realpath "$PJ/tmp")" in "$W"/tmp/agent/g2-acceptance-*/tmp) ;; *) exit 1 ;; esac
-  test "$(stat -f -c %T "$PJ/tmp")" = btrfs
-  export TMPDIR="$PJ/tmp" TEMP="$PJ/tmp" TMP="$PJ/tmp"
-  export GO=/home/murray/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.2.linux-amd64/bin/go
-  export PATH="$(dirname "$GO"):$PATH" GOTOOLCHAIN=local GOWORK=off GOENV=off
-  export CGO_ENABLED=0 GOFLAGS=
-  test "$(command -v go)" = "$GO"
-  test "$(command -v gofmt)" = "$(dirname "$GO")/gofmt"
-  "$GO" version
-  # 对照现有固定工具链的字节 pin 核验 go 和 gofmt 后，进入隔离子 shell。
-  bash --noprofile --norc
-)
-```
+现无完整 source recovery coordinator/CLI。下一步设计并实际证明可信 stopped-writer/restore-unit producer、同 generation APP/W2、旧凭据与 namespace 撤销、W2 inventory/prepare、真实 filesystem identity/handoff、root-independent 义务、seal→activation producer/证据以及失败闭环；遵循[集成恢复](../spec/contracts/records/integration-recovery.md)和 [Compose authority](../spec/contracts/platform/compose-authority.md)。未来 K 的具体协议、CLI envelope 和正向 driver 须先有决策完整的原生 Plan 并获批准。通用 local/S3 recovery 不能关闭 K，K 也不是全部备份恢复能力。
 
-在启动的子 shell 中运行以下命令并保存各 lane 证据，完成后 `exit`；普通 lane 使用 `CGO_ENABLED=0`、空 `GOFLAGS`，race 单独设置 `CGO_ENABLED=1 GOFLAGS=-race` 并记录实际 C 编译器。每项失败时停止受影响的依赖步骤。
+## J：联合接受、隔离 smoke 与 OLD
 
-```bash
-scripts/test-record-platform-integration.sh postgres -- "$GO" test -v -count=1 -p 1 -timeout=30m ./internal/center/store -run '^(TestPostgresIntegrationRecordDeletionV2(WorkerLifecycle|LocalAuthority|LocalDispatch|TransactionLocks|FinishResponsibilities)|TestPostgresIntegrationRecordDeletionClientAndComparison|TestPostgresIntegrationLegacyAdaptersRejectUntrustedAuthority|TestPostgresIntegrationLocalBlobObligationLifecycle|TestPostgresIntegrationLocalDraftCleanupContract)$'
-scripts/test-record-platform-integration.sh postgres-v2-locks -- "$GO" test -v -count=1 -p 1 -timeout=30m ./internal/center/store -run '^TestRecordDeletionV2PreparedLocks$'
-scripts/test-record-platform-integration.sh postgres -- "$GO" test -v -count=1 -p 1 -timeout=30m ./internal/center/store/migrate ./internal/center/store -run '^(TestAppACLCurrentDeletionWorkerBindingAndHistoricalC80|TestPostgresIntegrationRecordDeletionSuccessorAuthority|TestPostgresIntegrationAppACLCurrent|TestPostgresIntegrationRecordDeletion.*|TestPostgresIntegrationLocalBlob.*)$'
-bash scripts/test-pg16-catalog.sh postgres:16.0
-bash scripts/test-pg16-catalog.sh postgres:16.6
-bash scripts/test-pg16-catalog.sh postgres:16.12
-bash scripts/run-records-integration.sh --profile local
-CGO_ENABLED=1 GOFLAGS=-race bash scripts/run-records-integration.sh --profile s3
-```
+相关 source、M1、全 writer、产品和 K 前置闭合后，冻结完整源码、产品、工具链、配置与输入，在同一候选上联合接受；冻结后不并发写产品。验证 same APP/RID 多 generation、C81 fresh/dual carriers/systemd、三 normal/recovery、source handoff/V1 reconcile、birth/namespace/跨 RID、root-absent/late I/O/quota-once，以及 D1–D7；未知真实 provider 义务须独立关闭。包含 Begin-only/ready disposition、C80 A retirement、W1 common head、C80 B Preview/Execute、join/refence、C81 convergence 和 C81 A refusal/B mutation。缺失、skip、失败或未知不能记为通过。
 
-每个所选 parent 及 `TestPostgresIntegrationRecordDeletionSuccessorAuthority` 实际 RUN/PASS、零 skip；prepared 四支为 nonterminal/terminal × COMMIT/ROLLBACK PREPARED，均真实 APP 重启并核 runner 自有容器、volume、system identifier 和 GID。验证普通与 immediate constraints、迟到提交/回滚、savepoint、阻塞接管、fresh owner、物理 unlink/guard、receipt 和 quota。issuer 通过既有 profile 路径实际运行 `TestPostgresIntegrationRecordDeletionV2Issuer`：同 snapshot Preview/Execute、三个 inventory、birth 和 serving lease 拒绝、九 adapter。遵循 [集成恢复合同](../spec/contracts/records/integration-recovery.md)：R2 只在三版本 catalog，十个 S3 store 场景只在 S3 profile，prepared parent 只在 `postgres-v2-locks`；通用 selector 不用 skip 代替专用依赖。
+隔离 smoke 须构建并运行 center、processor、record-platform-admin 和 deletion-smoke 四个 binary，使用真实 UID 与受限角色；实际观察 HTTP 上传→processor→下载/import/export、中断重启、stream 拒绝与排空、九 adapter core-last、共享内容保留、独占及临时数据清理与 fsync、quota once、终态重放，以及两个永久删除 endpoint 的真实 503。该 smoke 不开放生产 HTTP。
 
-四个 ELF 在同一子 shell 的新建目录中构建并记录 hash；run root 必须已存在、绝对路径、无 symlink、当前 uid 且 0700、位于 checkout 的 `tmp/agent` 下：
-
-```bash
-mkdir -m 0700 "$PJ/bin" "$PJ/http-run"
-"$GO" build -o "$PJ/bin/houfeng-center" ./cmd/houfeng-center
-"$GO" build -o "$PJ/bin/houfeng-content-processor" ./cmd/houfeng-content-processor
-"$GO" build -o "$PJ/bin/houfeng-record-platform-admin" ./cmd/houfeng-record-platform-admin
-"$GO" build -o "$PJ/bin/deletion-smoke" ./scripts/g2/http_smoke/deletion_smoke.go
-sha256sum "$PJ/bin/houfeng-center" "$PJ/bin/houfeng-content-processor" "$PJ/bin/houfeng-record-platform-admin" "$PJ/bin/deletion-smoke"
-G2_SMOKE_BIN_DIR="$PJ/bin" G2_SMOKE_RUN_ROOT="$PJ/http-run" scripts/test-record-platform-integration.sh postgres -- python3 -B scripts/g2/http_smoke/bootstrap.py
-```
-
-实际 smoke 必须观察受限角色、HTTP 上传→processor→下载/import/export、中断和重启、stream 拒绝与排空、九 adapter 的 core-last、共享内容保留、独占/临时数据清理与 fsync、quota 一次、重启后的终态重放，以及两个永久删除 endpoint 的真实 503。此隔离 smoke 不开放生产 HTTP。
-
-N/P/K 闭合且完成同候选冻结后，J 按实际环境继续：
-
-```bash
-CGO_ENABLED=1 "$GO" test -race ./internal/center/recorddeletion ./internal/center/store -run 'Deletion|Purge|Recovery|Reservation' -count=10
-bash scripts/run-records-browser.sh
-bash scripts/run-records-recovery.sh --profile local --all
-bash scripts/run-records-recovery.sh --profile s3 --all
-make verify-go
-bash scripts/test-business-postgres.sh
-env -u GITHUB_ACTIONS make verify-ci
-```
-
-检查 Begin-only/ready disposition、多 generation、C81 fresh recovery/dual carriers/systemd、三 normal 与 recovery；same APP/RID 的 C80 A retirement、W1 common head、C80 B Preview/Execute、join/refence、C81 convergence、handoff/V1 reconciliation（含 C81 A refusal 与 B mutation），以及 credential/birth/namespace、跨 RID owner、identity→inventory→seal/activation。通用 recovery 的成功不代替 K 的 source 物理恢复。实际 source/产品/配置变化时重新评估受影响证据；任何缺失、skip、失败或未知均不得记为通过。
-
-## OLD 工作区未解差异
-
-旧工作区 `feat/g2-durable-deletion`（`7d2f5cf6`）的 218 项未提交改动已在本轮私有归档中精确保全并实际恢复验证，之后按归档可恢复且无活动依赖退役，不代表本分支是其语义超集。逐项归属：96 项与本分支同字节，56 项行为已保留，15 项由不同实现覆盖，**51 项未证明等价**（仅表示未证明，不等于已确认缺陷）。下列文件在 J 联合接受前须逐项关闭：证明已被现行实现、测试与合同覆盖，或补回缺失行为/测试，或经合同修订明确放弃；不得以行匹配率、函数名消失或 integration-proof 代证。旧内容的取回位置记录在私有归档索引，不作为 clean checkout 依赖。
-
-- `cmd/houfeng-record-platform-admin/`：`main_test.go`
-- `db/migrations/`：`0081_record_deletion_successor.sql`（约束、索引、触发器、函数、grant 与有效角色权限的完整对照）
-- `docs/spec/contracts/`：`platform/app-acl-current.md`、`records/integration-recovery.md`
-- `internal/center/attachments/`、`internal/center/portability/`：`deletion_adapter_test.go`
-- `internal/center/deploy/`：`production_compose_static_test.go`
-- `internal/center/evidence/`：`comparison_dependencies.go`、`comparison_dependencies_test.go`、`comparison_participant.go`
-- `internal/center/http/handlers/`：`record_client_cleanup_test.go`
-- `internal/center/recordclientcleanup/`：`types.go`
-- `internal/center/recorddeletion/`：`issuer.go`、`issuer_test.go`
-- `internal/center/records/`：`revision_mutation_resources.go`、`revision_mutation_resources_test.go`、`revisions.go`
-- `internal/center/store/`：`attachments.go`、`attachments_publication_crash_postgres_integration_test.go`、`attachments_publication_test.go`（本分支已删除）、`comparison_deletion_preview.go`、`comparison_dependencies.go`、`comparison_dependency_maintenance.go`、`comparison_participant.go`、`evidence_recovery.go`（本分支已删除；正向 source 恢复缺口归 K，不得称已交付）、`record_client_cleanup.go`、`record_collaboration_deletion.go`、`record_collaboration_participant_postgres_integration_test.go`、`record_collaboration_providers.go`、`record_deletion_client_comparison_postgres_integration_test.go`、`record_evidence_participant_test.go`、`record_mutation_resources.go`、`record_revision_mutation_discovery.go`、`record_revision_mutation_discovery_attachments.go`、`record_revision_mutation_discovery_postgres_integration_test.go`、`records_test.go`
-- `internal/center/store/migrate/`：`acl_manifest.go`、`acl_manifest_effective_catalog_postgres.go`、`app_acl_current_contract.go`、`app_acl_current_deletion.go`、`app_acl_current_deletion_postgres_test.go`、`app_acl_current_deletion_test.go`、`app_acl_current_postgres_integration_test.go`、`app_acl_current_replay.go`、`app_acl_current_transition.go`、`records_authority_app_acl_test.go`
-- `web/src/`：`lib/comparisonSaveAttempts.test.ts`、`lib/recordClientCleanup.test.ts`、`lib/recordClientCleanupConsumer.test.ts`、`lib/recordReadCleanup.ts`、`pages/RecordComparisonPage.test.tsx`
+OLD 的 **51 项未证明等价**不是 51 个已确认缺陷。J 前逐项对照当前 caller、测试和 spec，证明覆盖，或补回缺失行为/测试，或经合同修订处置；不能以名称或行匹配代证。[固定修订中的 OLD 文件范围](https://github.com/xiangnan0811/houfeng/blob/ad460e207bf6d2f7b58e6e08a7c2389b8454ee70/docs/design/g2-plan.md#old-工作区未解差异)保留逐文件可发现性；原内容及索引另有私有归档，不是 clean checkout 运行依赖。

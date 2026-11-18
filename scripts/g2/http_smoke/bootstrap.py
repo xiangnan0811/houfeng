@@ -202,7 +202,7 @@ def run():
         except subprocess.SubprocessError:
             cleaned = False
         result["stages"]["private_input_cleanup"] = cleaned
-        required = ("isolated_database_created", "production_deploy_init", "production_local_namespace", "actual_blobroot_btrfs", "private_input_cleanup")
+        required = ("isolated_database_created", "production_storage_prepared", "production_deploy_init", "production_local_namespace", "actual_blobroot_btrfs", "private_input_cleanup")
         if (not result.get("failure_class") and all(result["stages"].get(stage) is True for stage in required)
                 and not any(key.startswith("container_cleanup_") for key in result["stages"])
                 and result.get("runtime", {}).get("status") == "PASS"
@@ -218,8 +218,27 @@ def run():
         # runner's disposable PostgreSQL container, never by a business process.
         command(["docker", "run", "--rm", "--network=host", "--env-file", str(files / "pg.env"), PG_IMAGE, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1", "-p", str(parsed.port), "-U", "postgres", "-d", "postgres", "-c", "create database houfeng"], logs / "create-database.log")
         result["stages"]["isolated_database_created"] = True
-        # Root is confined to the owned bind mounts for ownership preparation.
-        command(["docker", "run", "--rm", "--user", "0:0", "--network=none", "--mount", f"type=bind,src={state},dst=/state", "--mount", f"type=bind,src={files},dst=/private", "--entrypoint", "/bin/sh", BASE_IMAGE, "-ec", "install -d -o 10002 -g 10002 -m 0755 /state/center-config; install -d -o 10002 -g 10002 -m 0750 /state/maintenance; install -d -o 10001 -g 10001 -m 0700 /state/attachments; chown 10002:10002 /state; chmod 0750 /state; chown -R 10002:10002 /private"], logs / "prepare-ownership.log")
+        # Docker normally creates the maintenance bind source as root. Create
+        # the equivalent empty mount root inside this owned scratch directory.
+        command(["docker", "run", "--rm", "--user", "0:0", "--network=none", "--mount", f"type=bind,src={state},dst=/state", "--entrypoint", "/bin/sh", BASE_IMAGE, "-ec", "install -d -o 0 -g 0 -m 0755 /state/maintenance"], logs / "prepare-maintenance-mount.log")
+        storage_script = (
+            "install -d -o 10002 -g 10002 -m 0750 /state && "
+            "install -d -o 10001 -g 10001 -m 0700 /state/attachments && "
+            "install -d -o 10002 -g 10002 -m 0755 /state/center-config && "
+            "install -d -o 10002 -g 10002 -m 0700 /state/secrets && "
+            "install -d -o 10002 -g 10002 -m 0700 /state/secrets/db-init && "
+            "install -d -o 10002 -g 10001 -m 0750 /state/secrets/processor && "
+            "install -d -o 10001 -g 10001 -m 0700 /state/local-namespace-init && "
+            "install -d -o 10002 -g 10001 -m 0750 /state/secrets/local-namespace-init && "
+            "chown -R 10002:10002 /private && "
+            "/usr/local/bin/houfeng-record-platform-admin deploy-prepare-storage --scope compose && "
+            "test -f /var/lib/houfeng-maintenance/ordinary/disposition.json"
+        )
+        try:
+            command(["docker", "run", "--rm", "--user", "0:0", "--network=none", "--mount", f"type=bind,src={state},dst=/state", "--mount", f"type=bind,src={state / 'maintenance'},dst=/var/lib/houfeng-maintenance", "--mount", f"type=bind,src={files},dst=/private", "--mount", f"type=bind,src={binaries / 'houfeng-record-platform-admin'},dst=/usr/local/bin/houfeng-record-platform-admin,readonly", "--entrypoint", "/bin/sh", BASE_IMAGE, "-ec", storage_script], logs / "prepare-ownership.log")
+        except Failure as exc:
+            raise Failure("production storage preparation failed or ordinary disposition is missing") from exc
+        result["stages"]["production_storage_prepared"] = True
         mounts = [(state, "/var/lib/houfeng", "rw"), (state / "maintenance", "/var/lib/houfeng-maintenance", "rw"), (files, "/run/secrets", "ro")] + [(binaries / name, "/usr/local/bin/" + name, "readonly") for name in BINARY_NAMES]
         container("deploy-init", "10002:10002", ["/usr/local/bin/houfeng-record-platform-admin", "deploy-init", "--scope", "compose"], mounts)
         result["stages"]["production_deploy_init"] = True

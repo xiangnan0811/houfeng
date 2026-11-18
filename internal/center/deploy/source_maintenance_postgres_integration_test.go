@@ -20,6 +20,7 @@ import (
 
 	"houfeng/internal/center/platformmigrate"
 	"houfeng/internal/center/recordauthority"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/sourceenrollment"
 	"houfeng/internal/center/sourceretirement"
@@ -77,6 +78,16 @@ func TestPostgresIntegrationSourceMaintenanceInterlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := composeLaunchIsolatedInitDependencies(openApp)
+	// This fixture exercises the existing V1 source protocol, not ordinary V2
+	// enrollment. Seed the historical contract explicitly before source setup.
+	deps.preflightAuthority = nil
+	deps.prepareAuthority = func(ctx context.Context, pool *pgxpool.Pool, root string, _ *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
+		contract, err := readComposeDatabaseContractState(ctx, pool)
+		if err != nil {
+			return recordauthority.VerifiedComposeState{}, err
+		}
+		return reconcileComposeAuthorityState(root, contract)
+	}
 	// This fixture proves the real source/W2 interlock only. Protected UID launch
 	// publication and runtime launch verification require their own fixture.
 	// The source guard and credential checks below remain production paths.
@@ -262,6 +273,40 @@ func TestPostgresIntegrationSourceMaintenanceInterlock(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatalf("enroll quiescent isolated APP under exclusive guard: %v", err)
+	}
+	// The isolated fixture simulates the source cutover's closed launch
+	// replacement in SQL; it does not claim protected file publication.
+	registry, err := readComposeBirthLaunchRegistry(ctx, app)
+	if err != nil || registry == nil || !registry.opened {
+		t.Fatalf("read pre-enrollment fixture launch: %v", err)
+	}
+	center, err := recordbirth.DecodeLaunchBinding(registry.centerBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor, err := recordbirth.DecodeLaunchBinding(registry.processorBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := readSourceAdmission(ctx, app)
+	if err != nil || source == nil || source.Generation <= 0 {
+		t.Fatalf("read enrolled fixture source: %v", err)
+	}
+	center.SourceGeneration, center.Witness = uint64(source.Generation), source.Witness
+	processor.SourceGeneration, processor.Witness = uint64(source.Generation), source.Witness
+	pair, err := encodeComposeBirthLaunchPair(center, processor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Exec(ctx, `select record_platform_internal.record_birth_launch_close($1::bigint)`, registry.revision); err != nil {
+		t.Fatal(err)
+	}
+	var revision int64
+	if err := app.QueryRow(ctx, `select record_platform_internal.record_birth_launch_stage($1::bytea,$2::bytea,$3::name,$4::name,$5::bigint)`, pair.centerBytes, pair.processorBytes, config.Roles.CenterRuntime, config.Roles.DeletionWorker, registry.revision).Scan(&revision); err != nil || revision != registry.revision+1 {
+		t.Fatalf("stage enrolled fixture launch: %v", err)
+	}
+	if _, err := app.Exec(ctx, `select record_platform_internal.record_birth_launch_open($1::bigint)`, revision); err != nil {
+		t.Fatal(err)
 	}
 	if err := WithSourceMaintenance(ctx, app, controlPath, false, func(observed *SourceMaintenanceConfig) error {
 		return VerifySourceMaintenanceCredentials(ctx, app, observed, config.Roles, config.AuthorityRole, passwords)

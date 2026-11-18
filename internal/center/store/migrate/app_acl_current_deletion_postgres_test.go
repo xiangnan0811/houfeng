@@ -15,6 +15,7 @@ import (
 
 	"houfeng/db/migrations"
 	"houfeng/internal/center/attachments"
+	"houfeng/internal/center/platformmigrate"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -55,6 +56,13 @@ func TestPostgresIntegrationRecordDeletionSuccessorAuthority(t *testing.T) {
 		fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 		db := fixture.openRolePool(t, ctx, fixture.migratorRole)
 		predecessor, _, oldInput := seedAppACLCurrentReleasedGenesis(t, ctx, fixture, db, profile)
+		legacy, legacyCommand, successorCommand, _ := composeMembershipFixture(t)
+		if _, err := db.Exec(ctx, `select public.record_platform_cas_contract_activation_projection($1::bytea)`, legacyCommand); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(ctx, `insert into public.deployment_membership(instance_id,deployment_id,project_id,instance_kind,capability,deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at) values ('compose-center',$1,'default','api','records.runtime',1,1,true,false,transaction_timestamp()+interval '90 seconds')`, legacy.DeploymentID); err != nil {
+			t.Fatal(err)
+		}
 		before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, oldInput)
 		runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 		assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
@@ -111,6 +119,15 @@ func TestPostgresIntegrationRecordDeletionSuccessorAuthority(t *testing.T) {
 		}
 		if repeatedState := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, currentInput); !reflect.DeepEqual(repeatedState, after) {
 			t.Fatal("C81 exact repeat changed durable state")
+		}
+		roles := platformmigrate.AppRoleSetV2{CenterRuntime: fixture.runtimeRole, PlatformAdmin: fixture.adminRole, DeletionWorker: fixture.deletionWorkerRole, Migrator: fixture.migratorRole}
+		receipt, err := ProjectComposeMembershipV2(ctx, db, roles, legacyCommand, successorCommand)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := ProjectComposeMembershipV2(ctx, db, roles, legacyCommand, successorCommand)
+		if err != nil || !bytes.Equal(receipt, again) {
+			t.Fatalf("predecessor inventory replay: %x %v", again, err)
 		}
 	})
 	t.Run("mutation_row_locks", testPostgresRecordMutationRowLocks)
@@ -401,6 +418,7 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 	}
 	addGrant(workerRole, AppACLObjectClassDatabase, "", after.DatabaseName, AppACLPrivilegeConnect)
 	addGrant(workerRole, AppACLObjectClassSchema, "", "public", AppACLPrivilegeUsage)
+	addGrant(runtimeRole, AppACLObjectClassFunction, "", "public.record_processor_worker_admit(text, text, text, text)", AppACLPrivilegeExecute)
 	addGrant(runtimeRole, AppACLObjectClassFunction, "", "public.record_text_set_is_canonical(text[])", AppACLPrivilegeExecute)
 	// Independent inventory: do not derive this oracle from the production fragment.
 	for _, name := range []string{
@@ -444,6 +462,7 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: "record_external_delivery_commit_checks"}] = true
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: "record_portability_v1_epoch"}] = true
 	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: "record_birth_launch_state"}] = true
+	objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: "compose_membership_transition"}] = true
 	for _, name := range []string{"record_deletion_verified_entries", "record_deletion_effect_scopes", "record_deletion_recovery_sessions", "record_deletion_owner_commit_checks"} {
 		objects[AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: "record_platform_internal", ObjectIdentity: name}] = true
 	}
@@ -488,6 +507,7 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 	if oldRoles["houfeng_records_authority"] {
 		addGrant("houfeng_records_authority", AppACLObjectClassFunction, "", "public.source_maintenance_status()", AppACLPrivilegeExecute)
 		addGrant("houfeng_records_authority", AppACLObjectClassFunction, "", "public.record_birth_launch_inspect(bigint, bytea)", AppACLPrivilegeExecute)
+		addGrant("houfeng_records_authority", AppACLObjectClassFunction, "", "public.record_platform_compose_membership_heartbeat_v2(bytea)", AppACLPrivilegeExecute)
 	}
 	for _, name := range []string{
 		"public.source_retirement_preview(text, text, text)",
@@ -578,6 +598,9 @@ func appACLCurrentCatalogBeforeDeletion(t *testing.T, before, after AppACLEffect
 		schema, name, arguments string
 		definer                 bool
 	}{
+		{"public", "record_platform_compose_inventory_upgrade", "bytea, bytea", true},
+		{"public", "record_processor_worker_admit", "text, text, text, text", true},
+		{"public", "record_platform_compose_membership_heartbeat_v2", "bytea", true},
 		{"record_platform_internal", "source_legacy_retirement_command", "body bytea", false},
 		{"record_platform_internal", "source_legacy_retirement_binding", "body bytea, install boolean", true},
 		{"public", "source_legacy_retirement_install", "bytea", true},

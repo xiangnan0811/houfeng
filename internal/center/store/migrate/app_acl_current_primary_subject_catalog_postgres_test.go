@@ -42,6 +42,27 @@ func TestPostgresIntegrationPrimarySubjectCatalogTampering(t *testing.T) {
 		{"function_search_path", `alter function ` + validator + ` set search_path=public`},
 		{"function_search_path_reset", `alter function ` + validator + ` reset search_path`},
 	}
+	for _, function := range []string{
+		`public.record_platform_compose_inventory_upgrade(bytea,bytea)`,
+		`public.record_platform_compose_membership_heartbeat_v2(bytea)`,
+	} {
+		tampers = append(tampers,
+			tamper{function + "_owner", `alter function ` + function + ` owner to ` + pgx.Identifier{fixture.bootstrapOwner}.Sanitize()},
+			tamper{function + "_invoker", `alter function ` + function + ` security invoker`},
+			tamper{function + "_search_path", `alter function ` + function + ` set search_path=public`},
+			tamper{function + "_public", `grant execute on function ` + function + ` to public`},
+			tamper{function + "_runtime", `grant execute on function ` + function + ` to ` + pgx.Identifier{fixture.runtime}.Sanitize()},
+		)
+	}
+	processorGuard := `public.record_processor_worker_admit(text,text,text,text)`
+	tampers = append(tampers,
+		tamper{"processor_guard_owner", `alter function ` + processorGuard + ` owner to ` + pgx.Identifier{fixture.bootstrapOwner}.Sanitize()},
+		tamper{"processor_guard_invoker", `alter function ` + processorGuard + ` security invoker`},
+		tamper{"processor_guard_search_path", `alter function ` + processorGuard + ` set search_path=public`},
+		tamper{"processor_guard_public", `grant execute on function ` + processorGuard + ` to public`},
+	)
+	tampers = append(tampers, tamper{"compose_transition_immutable_disabled", `alter table record_platform_internal.compose_membership_transition disable trigger compose_membership_transition_immutable`})
+	tampers = append(tampers, tamper{"source_membership_guard_disabled", `alter table public.deployment_membership disable trigger source_membership_effect_guard`})
 	for _, table := range []string{"record_revisions", "record_revision_subjects"} {
 		qualified := `public.` + pgx.Identifier{table}.Sanitize()
 		tampers = append(tampers,

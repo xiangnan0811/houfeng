@@ -598,6 +598,7 @@ func validSuccessorFunctionIdentityV2(identity string) bool {
 		"public.source_maintenance_status()",
 		"public.source_legacy_retirement_blocked(text, text)",
 		"public.record_birth_launch_inspect(bigint, bytea)",
+		"public.record_processor_worker_admit(text, text, text, text)",
 		"public.record_revision_blob_fence()",
 		"public.local_blob_recovery_inventory()",
 		"public.record_comparison_index_write(bytea, bytea)",
