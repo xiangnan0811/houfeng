@@ -155,6 +155,19 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.28.0](https://github.com/xiangnan0811/houfeng/compare/v1.27.5...v1.28.0) (2026-11-18)
+
+
+### Features
+
+* **g2:** deliver workline 00 ordinary Compose upgrade and sync main ([d2b78b1](https://github.com/xiangnan0811/houfeng/commit/d2b78b1fd4458ecbbcf694bc0d6508ada0bcd831))
+* **g2:** retain bounded owner settlement evidence ([ad460e2](https://github.com/xiangnan0811/houfeng/commit/ad460e207bf6d2f7b58e6e08a7c2389b8454ee70))
+
+
+### Bug Fixes
+
+* **records:** restore restricted V1 deletion continuation ([d6bacc7](https://github.com/xiangnan0811/houfeng/commit/d6bacc706ccd81f6480a1751e9217bc861be0716))
+
 ## [1.27.5](https://github.com/xiangnan0811/houfeng/compare/v1.27.4...v1.27.5) (2026-10-27)
 
 
