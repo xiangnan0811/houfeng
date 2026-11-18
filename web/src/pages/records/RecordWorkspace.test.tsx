@@ -223,6 +223,8 @@ describe('RecordWorkspace', () => {
       }] })
     render(<MemoryRouter><RecordWorkspace mode="edit" recordId="rec_001" /></MemoryRouter>)
     expect(await screen.findByLabelText('标题')).toHaveValue('Database outage')
+    // Promotion is ignored until the collaboration lists finish loading.
+    expect(await screen.findByText('暂无行动项')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '提升勾选为行动' }))
     fireEvent.click(screen.getByRole('button', { name: '预览行动项' }))
     fireEvent.click(screen.getByRole('button', { name: '确认创建行动项' }))
