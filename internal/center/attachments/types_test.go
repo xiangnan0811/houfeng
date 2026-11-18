@@ -408,28 +408,6 @@ func TestBlobGCPinCommandsValidate(t *testing.T) {
 func TestUploadLifecycleCommandsRequireConfiguredLimits(t *testing.T) {
 	t.Parallel()
 
-	digest := [32]byte{1}
-	admit := AdmitUploadCommand{
-		ProjectID: "default",
-		UploadID:  "aup_admit1",
-		AuthorID:  "usr_admit1",
-		Blob: BlobObject{
-			Key:           "sha256/0100000000000000000000000000000000000000000000000000000000000000",
-			SHA256:        digest,
-			ObjectVersion: "local-v1",
-			SizeBytes:     1,
-			BackendKind:   BackendKindLocal,
-		},
-		Limits: DefaultLimits(),
-	}
-	if err := admit.Validate(); err != nil {
-		t.Fatalf("AdmitUploadCommand.Validate() error = %v", err)
-	}
-	admit.Limits = Limits{}
-	if err := admit.Validate(); !errors.Is(err, ErrInvalidAttachmentCommand) {
-		t.Fatalf("AdmitUploadCommand.Validate() limits error = %v", err)
-	}
-
 	fail := FailUploadCommand{
 		ProjectID: "default", UploadID: "aup_fail1", AuthorID: "usr_fail1",
 		TargetState: UploadStateRejected, Limits: DefaultLimits(),

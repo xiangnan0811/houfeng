@@ -387,33 +387,34 @@ func TestPostgresIntegrationTargetFreshnessResetUsesPostTransitionWallClock(t *t
 		return time.Now().UTC()
 	}
 	ingestDone := make(chan error, 1)
-	go func() {
-		_, ingestErr := ingestRepository.ApplyBatch(ctx, prepareSyncFixture(syncing.Batch{
-			SessionID:            sessionID,
+	batch := prepareSyncFixture(syncing.Batch{
+		SessionID:            sessionID,
+		MonitoringInstanceID: instanceID,
+		SyncToken:            syncToken,
+		LiveSignal:           &agentapi.LiveSignal{Sequence: 1, Fingerprint: fingerprint},
+		Heartbeats: []syncing.HeartbeatPayload{{
+			ObservedAt:   futureObservedAt,
+			AgentVersion: "freshness-resume-clock-fixture",
+			Fingerprint:  fingerprint,
+			SyncBatchID:  syncBatchID,
+		}},
+		Observations: observations.BatchWrite{
 			MonitoringInstanceID: instanceID,
-			SyncToken:            syncToken,
-			LiveSignal:           &agentapi.LiveSignal{Sequence: 1, Fingerprint: fingerprint},
-			Heartbeats: []syncing.HeartbeatPayload{{
-				ObservedAt:   futureObservedAt,
-				AgentVersion: "freshness-resume-clock-fixture",
-				Fingerprint:  fingerprint,
-				SyncBatchID:  syncBatchID,
-			}},
-			Observations: observations.BatchWrite{
+			ProbeObservations: []observations.ProbeObservationWrite{{
 				MonitoringInstanceID: instanceID,
-				ProbeObservations: []observations.ProbeObservationWrite{{
-					MonitoringInstanceID: instanceID,
-					TargetID:             targetID,
-					ProbeItemID:          probeItemID,
-					ProbeKind:            agentapi.ProbeKindHTTP,
-					ObservedAt:           futureObservedAt,
-					AgentVersion:         "freshness-resume-clock-fixture",
-					Fingerprint:          fingerprint,
-					ResultKind:           agentapi.ProbeResultSuccess,
-					SyncBatchID:          syncBatchID,
-				}},
-			},
-		}))
+				TargetID:             targetID,
+				ProbeItemID:          probeItemID,
+				ProbeKind:            agentapi.ProbeKindHTTP,
+				ObservedAt:           futureObservedAt,
+				AgentVersion:         "freshness-resume-clock-fixture",
+				Fingerprint:          fingerprint,
+				ResultKind:           agentapi.ProbeResultSuccess,
+				SyncBatchID:          syncBatchID,
+			}},
+		},
+	})
+	go func() {
+		_, ingestErr := ingestRepository.ApplyBatch(ctx, batch)
 		ingestDone <- ingestErr
 	}()
 	select {
@@ -478,7 +479,7 @@ func TestPostgresIntegrationTargetFreshnessResetUsesPostTransitionWallClock(t *t
 	var observedAt, receivedAt, resetAt, liveObservedAt time.Time
 	if err := fixture.db.QueryRow(ctx, `
 		select observed_at,received_at from probe_observations where sync_batch_id=$1
-	`, syncBatchID).Scan(&observedAt, &receivedAt); err != nil {
+	`, batch.Observations.ProbeObservations[0].SyncBatchID).Scan(&observedAt, &receivedAt); err != nil {
 		t.Fatalf("read delayed freshness observation timestamps: %v", err)
 	}
 	if !observedAt.Equal(futureObservedAt) {

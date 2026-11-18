@@ -19,6 +19,9 @@ type AttachmentRecoveryInventory struct {
 	UploadIDs       []string
 	ProcessorJobIDs []string
 	WorkspaceIDs    []string
+	// Nil means this inventory has no local database snapshot, never an empty
+	// or reconciled local filesystem. It cannot support a cold handoff.
+	LocalDB *LocalRecoveryDBSnapshot
 }
 
 func (inventory AttachmentRecoveryInventory) Validate() error {
@@ -35,6 +38,9 @@ func (inventory AttachmentRecoveryInventory) Validate() error {
 		validateOrderedRecoveryIDs(inventory.WorkspaceIDs, "cpw_") != nil {
 		return ErrInvalidRecoveryRequest
 	}
+	if inventory.LocalDB != nil && inventory.LocalDB.Validate() != nil {
+		return ErrInvalidRecoveryRequest
+	}
 	return nil
 }
 
@@ -44,6 +50,7 @@ func (inventory AttachmentRecoveryInventory) clone() AttachmentRecoveryInventory
 		UploadIDs:       append(make([]string, 0, len(inventory.UploadIDs)), inventory.UploadIDs...),
 		ProcessorJobIDs: append(make([]string, 0, len(inventory.ProcessorJobIDs)), inventory.ProcessorJobIDs...),
 		WorkspaceIDs:    append(make([]string, 0, len(inventory.WorkspaceIDs)), inventory.WorkspaceIDs...),
+		LocalDB:         inventory.LocalDB.clone(),
 	}
 }
 

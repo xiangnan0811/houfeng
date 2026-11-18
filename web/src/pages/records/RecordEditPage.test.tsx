@@ -4,6 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { recordDetailFixture } from './testFixtures'
 import { RecordEditPage } from './RecordEditPage'
+import type * as DraftBuffers from './draftBuffer'
+
+vi.mock('./draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof DraftBuffers>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 const api = vi.hoisted(() => ({
   getRecord: vi.fn(),

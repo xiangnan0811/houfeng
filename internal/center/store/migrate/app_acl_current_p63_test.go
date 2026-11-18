@@ -53,7 +53,7 @@ func TestPostgresIntegrationAppACLCurrentP63ReleaseProfiles(t *testing.T) {
 			before := readAppACLCurrentTransitionDurableState(t, ctx, migratorDB, input)
 			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("upgrade released P63: %v", err)
 			}
@@ -73,7 +73,7 @@ func TestPostgresIntegrationAppACLCurrentP63ReleaseProfiles(t *testing.T) {
 			if err := migratorDB.QueryRow(ctx, `select exists(select 1 from pg_catalog.pg_attribute where attrelid='public.host_samples'::regclass and attname='network_rates_valid' and atttypid='boolean'::regtype and not attnotnull and not atthasdef and not attisdropped)`).Scan(&networkRatesColumn); err != nil || !networkRatesColumn {
 				t.Fatalf("0064 nullable network rates marker missing or incorrect: %v", err)
 			}
-			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("repeat P63 successor: %v", err)
 			}
@@ -107,7 +107,7 @@ func TestPostgresIntegrationAppACLCurrentP63DriftIsReadOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := readAppACLCurrentTransitionDurableState(t, ctx, state.migratorDB, state.input)
-			if _, err := ConvergeAppACLCurrent(ctx, state.migratorDB, state.fixture.runtimeRole, state.fixture.adminRole); err == nil {
+			if _, err := ConvergeAppACLCurrent(ctx, state.migratorDB, state.fixture.runtimeRole, state.fixture.adminRole, state.fixture.deletionWorkerRole); err == nil {
 				t.Fatal("P63 drift was accepted")
 			}
 			if !reflect.DeepEqual(before, readAppACLCurrentTransitionDurableState(t, ctx, state.migratorDB, state.input)) {

@@ -94,7 +94,9 @@
 
 `cmd/houfeng-import-vps-json` 是当前第一个运维型 CLI：它只负责 flag、文件读取、数据库连接 / migration、事务与报告输出；JSON 结构、dry-run 校验、导入编排和报告模型都放在 `internal/center/importing/`。后续新增 CLI 时沿用这个边界，不要在 `cmd/<binary>/main.go` 里直接堆业务规则。
 
-`cmd/houfeng-backup` / `cmd/houfeng-restore` 同样只做 flag、信号和 `recordbackup.NewService` / `recordrestore.NewService` 装配。编排、manifest、local/S3 store 与恢复状态机分别在 `internal/center/recordbackup/` 与 `internal/center/recordrestore/`。`cmd/houfeng-record-platform-admin` 只做 APP ACL migrate / bootstrap / finalize，**禁止**改成备份 CLI。能力矩阵在 `internal/center/recordreadiness/`，由 `newProductionRecordReadinessRegistry` 接线。
+`cmd/houfeng-backup` / `cmd/houfeng-restore` 同样只做 flag、信号和 `recordbackup.NewService` / `recordrestore.NewService` 装配。编排、manifest、local/S3 store 与恢复状态机分别在 `internal/center/recordbackup/` 与 `internal/center/recordrestore/`。`cmd/houfeng-record-platform-admin` 负责 APP ACL migrate / bootstrap / finalize、Compose 管理以及 source authority 管理，**禁止**改成备份 CLI。能力矩阵在 `internal/center/recordreadiness/`，由 `newProductionRecordReadinessRegistry` 接线。
+
+现有 source authority 命令为 `source-authority provision --scope witness`、`maintenance-provision --request-file …`、`enroll-offline --request-file …`、`retirement-preview --request-file …`、`retire --request-file …` 和 `deliver --retirement-id …`（均在 `source-authority` 下）。W2 provision 仅用于首次 enrollment 或精确重放，不是恢复后 bootstrap；retire prepare 并提交 APP barrier，deliver 单独发布 terminal/pin。offline enrollment 依赖操作者事先实际隔离旧 writer 与 endpoint，不是在线切换；可信 APP bootstrap 读取物理 PostgreSQL identity 并将它绑定到 W2 enrollment，且 APP 与 W2 必须为独立 PostgreSQL 系统。retirement 命令以 W2 已激活 enrollment 为预期 APP 绑定，连接校验身份而不授 APP admin `pg_control_system()` 权限；物理 APP 连续性与 endpoint 隔离由可信 bootstrap/recovery 协调者负责，不能据此声称 clone 检测。当前没有可运行的完整 recovery coordinator/CLI；通用 restore 缺真实依赖仍 fail closed。
 
 ### `internal/center/<domain>/`
 

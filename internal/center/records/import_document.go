@@ -6,11 +6,13 @@ import (
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 )
 
 type ImportDocumentRequest struct {
 	Actor                 recordauth.ActorScope
 	RecordID              string
+	Allocation            *recordbirth.Allocation
 	Title                 string
 	BodyMarkdown          string
 	IdempotencyKey        string
@@ -23,8 +25,9 @@ type ImportDocumentRequest struct {
 }
 
 type ImportedDocument struct {
-	RecordID   string
-	RevisionID string
+	RecordID             string
+	RevisionID           string
+	CertificationPending bool `json:"certification_pending,omitempty"`
 }
 
 type RevisionCommitFinish struct {
@@ -33,12 +36,15 @@ type RevisionCommitFinish struct {
 	SourceRecord   string
 	ImportJobID    string
 	JobLockVersion uint64
-	ActorID        string
+	Actor          recordauth.ActorScope
 }
 
 func (finish RevisionCommitFinish) Validate() error {
+	if _, err := recordauth.NormalizeActorScope(finish.Actor); err != nil {
+		return ErrInvalidRevisionCommand
+	}
 	if finish.OriginKind == "" || finish.OriginDigest == [32]byte{} ||
-		finish.ImportJobID == "" || finish.JobLockVersion == 0 || finish.ActorID == "" {
+		finish.ImportJobID == "" || finish.JobLockVersion == 0 {
 		return ErrInvalidRevisionCommand
 	}
 	return nil
@@ -108,6 +114,7 @@ func (application *Application) ImportDocuments(
 		saves = append(saves, RevisionSaveRequest{
 			Actor:               request.Actor,
 			RecordID:            request.RecordID,
+			Allocation:          request.Allocation,
 			Values:              values,
 			SubjectReferences:   append([]SubjectReference(nil), request.SubjectReferences...),
 			EvidencePreparation: request.EvidencePreparation,
@@ -154,6 +161,7 @@ func (application *Application) ImportDocumentsFinishing(
 		saves = append(saves, RevisionSaveRequest{
 			Actor:               request.Actor,
 			RecordID:            request.RecordID,
+			Allocation:          request.Allocation,
 			Values:              values,
 			SubjectReferences:   append([]SubjectReference(nil), request.SubjectReferences...),
 			EvidencePreparation: request.EvidencePreparation,
@@ -176,7 +184,10 @@ func (application *Application) ImportDocumentsFinishing(
 func importedDocumentsFromResults(results []RevisionCommitResult) []ImportedDocument {
 	written := make([]ImportedDocument, 0, len(results))
 	for _, result := range results {
-		written = append(written, ImportedDocument{RecordID: result.RecordID, RevisionID: result.RevisionID})
+		written = append(written, ImportedDocument{
+			RecordID: result.RecordID, RevisionID: result.RevisionID,
+			CertificationPending: result.CertificationPending,
+		})
 	}
 	return written
 }

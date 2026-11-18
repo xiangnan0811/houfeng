@@ -49,7 +49,7 @@ func classifyAppACLCurrentManifestShape(
 		}
 		return appACLCurrentManifestShape{kind: appACLCurrentManifestShapeGenesis, latest: latest}, nil
 	}
-	if len(transitions) != 17 ||
+	if len(transitions) != 18 ||
 		transitions[0].profile != appACLCurrentProfileP62 ||
 		transitions[1].profile != appACLCurrentProfileP64 ||
 		transitions[2].profile != appACLCurrentProfileP63 ||
@@ -66,8 +66,9 @@ func classifyAppACLCurrentManifestShape(
 		transitions[13].profile != appACLCurrentProfileP76 ||
 		transitions[14].profile != appACLCurrentProfileP77 ||
 		transitions[15].profile != appACLCurrentProfileP78 ||
-		transitions[16].profile != appACLCurrentProfileP79 {
-		return appACLCurrentManifestShape{}, appACLDevelopmentDatabaseRebuildError("APP transition registry is not the exact P62/P64/P63/P66/P67/P68/P69/P70/P71/P72/P73/P74/P75/P76/P77/P78/P79 profile set")
+		transitions[16].profile != appACLCurrentProfileP79 ||
+		transitions[17].profile != appACLCurrentProfileP80 {
+		return appACLCurrentManifestShape{}, appACLDevelopmentDatabaseRebuildError("APP transition registry is not the exact P62/P64/P63/P66/P67/P68/P69/P70/P71/P72/P73/P74/P75/P76/P77/P78/P79/P80 profile set")
 	}
 	for _, manifest := range manifests[:len(manifests)-1] {
 		if manifest.MigratorCatalogRole != migratorRole {
@@ -109,16 +110,27 @@ func classifyAppACLCurrentManifestShape(
 		predecessorTransition = appACLCurrentTransitionForProfile(transitions, predecessorProfiles[len(predecessorProfiles)-1])
 	}
 
+	fixedBindings := databaseName == appACLCurrentTransitionDatabase &&
+		migratorRole == appACLCurrentTransitionMigrator &&
+		(equalAppACLRoleBindings(roleBindings, appACLCurrentTransitionBindings) ||
+			equalAppACLRoleBindings(roleBindings, appACLCurrentTransitionBindingsV2))
 	for index, profile := range predecessorProfiles {
 		transition := appACLCurrentTransitionForProfile(transitions, profile)
-		expectedPrivileges, err := appACLCurrentTransitionPrivilegeBodyFor(
-			transition.predecessor,
-			databaseName,
-			roleBindings,
-			migratorRole,
-		)
-		if err != nil {
-			return appACLCurrentManifestShape{}, fmt.Errorf("compile registered APP predecessor profile %d privileges: %w", profile, err)
+		// Transition compilation already proves these immutable bytes against
+		// the independent predecessor golden. Recompile only when rebinding
+		// database/role identities, not for every manifest in every history.
+		expectedPrivileges := transition.predecessorPrivilegeBody
+		if !fixedBindings {
+			var err error
+			expectedPrivileges, err = appACLCurrentTransitionPrivilegeBodyFor(
+				transition.predecessor,
+				databaseName,
+				roleBindings,
+				migratorRole,
+			)
+			if err != nil {
+				return appACLCurrentManifestShape{}, fmt.Errorf("compile registered APP predecessor profile %d privileges: %w", profile, err)
+			}
 		}
 		manifest := manifests[index]
 		if !bytes.Equal(manifest.CanonicalPrivilegeSet, expectedPrivileges) {

@@ -403,9 +403,13 @@ func storePreparedEvidenceCaptureWithQuotaAndSnapshotTimeOffset(
 		EstimatedCanonicalBytes: snapshot.Size(), RendererVersion: descriptor.Conformance.RendererVersion,
 		PreviewedAt: previewedAt, ValidUntil: previewedAt.Add(evidence.CaptureIntentTTL),
 	}
+	previewDigest, err := evidence.CapturePreviewDigest(preview)
+	if err != nil {
+		t.Fatalf("CapturePreviewDigest() error = %v", err)
+	}
 	intent := evidence.Intent{
 		ID: intentID, Key: descriptor.Key, Selection: selection,
-		PreviewDigest: sha256.Sum256([]byte("preview:" + intentID)), ValidUntil: preview.ValidUntil,
+		PreviewDigest: previewDigest, ValidUntil: preview.ValidUntil,
 	}
 	prepared, err := evidence.PrepareCapture(recordID, snapshotID, descriptor, preview, intent, authorization, snapshot)
 	if err != nil {
@@ -528,7 +532,7 @@ func storePreparedImportedSnapshot(t *testing.T, recordID, snapshotID string) ev
 	if err != nil {
 		t.Fatalf("NewCanonicalSnapshot() error = %v", err)
 	}
-	imported, err := evidence.NewPreparedImportedSnapshot(recordID, snapshotID, snapshot)
+	imported, err := evidence.NewPreparedImportedSnapshot(recordID, snapshotID, snapshot, evidence.ImportedSnapshotRoute{ImportJobID: "rij_test", ImportPlanID: "rip_test"})
 	if err != nil {
 		t.Fatalf("NewPreparedImportedSnapshot() error = %v", err)
 	}
@@ -666,6 +670,12 @@ func (tx *fakeRecordEvidenceParticipantTx) QueryRow(_ context.Context, sql strin
 	if strings.Contains(tx.querySQL, "delete from public.evidence_capture_intents") {
 		return tx.intentRow
 	}
+	if strings.Contains(tx.querySQL, "from public.comparison_result_dependency_index_completions") {
+		return fakeRecordPlatformRow{scan: func(dest ...any) error {
+			*dest[0].(*bool) = false
+			return nil
+		}}
+	}
 	if strings.Contains(tx.querySQL, "from public.evidence_snapshots") {
 		return fakeRecordEvidenceReferenceRow{reference: tx.reference}
 	}
@@ -679,12 +689,14 @@ func (tx *fakeRecordEvidenceParticipantTx) Exec(_ context.Context, sql string, a
 	case strings.Contains(compact, "pg_advisory_xact_lock"):
 		tx.capacityLockCalls++
 		return pgconn.NewCommandTag("SELECT 1"), nil
-	case strings.Contains(compact, "insert into public.evidence_payloads"):
+	case strings.Contains(compact, "select public.record_evidence_payload_insert"):
 		tx.execKinds = append(tx.execKinds, "payload")
 	case strings.Contains(compact, "insert into public.evidence_snapshots"):
 		tx.execKinds = append(tx.execKinds, "snapshot")
 	case strings.Contains(compact, "insert into public.evidence_copy_lineage"):
 		tx.execKinds = append(tx.execKinds, "lineage")
+	case strings.Contains(compact, "select public.record_comparison_index_write"):
+		tx.execKinds = append(tx.execKinds, "comparison_index")
 	case strings.Contains(compact, "insert into public.record_revision_evidence"):
 		tx.execKinds = append(tx.execKinds, "reference")
 		tx.referenceOrdinal = args[2].(int64)

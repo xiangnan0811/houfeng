@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -161,6 +163,104 @@ func TestAppWaitsForMultipleWorkerShutdownBeforeReturning(t *testing.T) {
 	case <-workerB.exited:
 	default:
 		t.Fatal("workerB did not exit before Run() returned")
+	}
+}
+
+type workerFunc func(context.Context) error
+
+func (worker workerFunc) Run(ctx context.Context) error { return worker(ctx) }
+
+func TestAppWorkerFailureDrainsWorkersAndActiveRequests(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	fail := make(chan struct{})
+	workerCanceled := make(chan struct{})
+	releaseWorker := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	requestEntered := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseWorker:
+		default:
+			close(releaseWorker)
+		}
+		select {
+		case <-releaseRequest:
+		default:
+			close(releaseRequest)
+		}
+	}()
+	wantErr := errors.New("worker failed")
+	application := centerapp.New("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestEntered)
+		<-releaseRequest
+		w.WriteHeader(http.StatusNoContent)
+	}), workerFunc(func(context.Context) error { <-fail; return wantErr }), workerFunc(func(ctx context.Context) error {
+		<-ctx.Done()
+		close(workerCanceled)
+		<-releaseWorker
+		return nil
+	}))
+	address := make(chan string, 1)
+	application.ServerForTest().BaseContext = func(listener net.Listener) context.Context { address <- listener.Addr().String(); return ctx }
+	done := make(chan error, 1)
+	go func() { done <- application.Run(ctx) }()
+	var endpoint string
+	select {
+	case endpoint = <-address:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	requestDone := make(chan error, 1)
+	go func() {
+		client := &http.Client{Timeout: 3 * time.Second}
+		response, err := client.Get("http://" + endpoint)
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode != http.StatusNoContent {
+				err = fmt.Errorf("status = %d", response.StatusCode)
+			}
+		}
+		requestDone <- err
+	}()
+	select {
+	case <-requestEntered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	close(fail)
+	select {
+	case <-workerCanceled:
+	case <-ctx.Done():
+		t.Fatal("sibling worker was not canceled")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("returned before worker drain: %v", err)
+	default:
+	}
+	close(releaseWorker)
+	select {
+	case err := <-done:
+		t.Fatalf("returned before request drain: %v", err)
+	default:
+	}
+	close(releaseRequest)
+	select {
+	case err := <-requestDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("Run() = %v, want worker error", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("application did not finish draining")
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/recordauth"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 )
 
@@ -43,8 +44,9 @@ func TestPostgresIntegrationEvidenceSources(t *testing.T) {
 	if len(hostCapture.Buckets) != 3 {
 		t.Fatalf("host buckets = %d, want recent raw plus two daily buckets: %#v", len(hostCapture.Buckets), hostCapture.Buckets)
 	}
-	assertEvidenceCaptureHasDailyBucket(t, hostCapture.Buckets, partialDay, 2, 1, 1)
-	assertEvidenceCaptureHasDailyBucket(t, hostCapture.Buckets, completeDay, 1, 0, 0)
+	assertEvidenceHostDailyBucket(t, hostCapture.Buckets, partialDay, 2, 1, 1,
+		"disk_read_bytes_per_sec", "disk_used_pct", "inode_used_pct", "net_in_bytes_per_sec")
+	assertEvidenceHostDailyBucket(t, hostCapture.Buckets, completeDay, 1, 0, 0)
 	if hostCapture.Buckets[2].SourceLayer != adapters.MonitoringSourceRaw || hostCapture.Buckets[2].SampleCount != 1 {
 		t.Fatalf("host recent bucket = %#v, want raw one-sample bucket", hostCapture.Buckets[2])
 	}
@@ -247,9 +249,12 @@ func TestPostgresIntegrationEvidenceSources(t *testing.T) {
 
 func seedEvidenceSourceFixtures(t *testing.T, ctx context.Context, db, writerDB *pgxpool.Pool, now, partialDay, completeDay time.Time) {
 	t.Helper()
-	execEvidenceSQL(t, ctx, db, `
-		insert into vps_assets (vps_id, display_name, lifecycle_status, usage_tags)
-		values ('vps_0123456789abcdef', 'Evidence Sources VPS', 'active', array['业务'])`)
+	tag, err := db.Exec(ctx, `
+		update public.vps_assets set display_name='Evidence Sources VPS', lifecycle_status='active', usage_tags=array['业务']
+		where vps_id='vps_0123456789abcdef'`)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("configure existing evidence VPS: rows=%d, error=%v", tag.RowsAffected(), err)
+	}
 	execEvidenceSQL(t, ctx, db, `
 		insert into monitoring_instances (monitoring_instance_id, vps_id, display_name, region, city, provider, lifecycle_status, binding_status, ever_connected, last_trusted_online_at)
 		values ('mi_0123456789abcdef', 'vps_0123456789abcdef', 'Evidence Sources MI', 'Tokyo', 'Tokyo', 'Evidence Provider', '已接入', '已绑定', true, $1)`, now)
@@ -262,10 +267,14 @@ func seedEvidenceSourceFixtures(t *testing.T, ctx context.Context, db, writerDB 
 	execEvidenceSQL(t, ctx, db, `
 		insert into probe_items (probe_item_id, target_id, probe_kind, frequency_tier, timeout_seconds)
 		values ('pb_evidence_sources', 'tg_evidence_sources', 'http', '5m', 10)`)
+	settingsArgs, err := settingsWriteArgs(centersettings.FreshInstallDefaults())
+	if err != nil {
+		t.Fatalf("encode default evidence settings: %v", err)
+	}
+	execEvidenceSQL(t, ctx, db, insertDefaultCenterSettingsSQL, settingsArgs...)
 	execEvidenceSQL(t, ctx, db, `
-		insert into center_settings (settings_id, ip_quality_settings)
-		values ('center', jsonb_build_object('stale_after_seconds', 3600))
-		on conflict (settings_id) do update set ip_quality_settings = excluded.ip_quality_settings`)
+		update center_settings set ip_quality_settings=jsonb_build_object('stale_after_seconds', 3600)
+		where settings_id='center'`)
 
 	seedHostSamples(t, ctx, db, now, partialDay)
 	seedProbeObservations(t, ctx, db, now, partialDay)
@@ -552,17 +561,46 @@ func seedIPQualityReports(t *testing.T, ctx context.Context, db *pgxpool.Pool, n
 			'sync-failure', '0.0.0.0', 4, 'failure', 'high', '{"token":"failure-secret"}')`, now.Add(-time.Hour))
 }
 
-func assertEvidenceCaptureHasDailyBucket(t *testing.T, buckets []adapters.MonitoringBucket, day time.Time, samples, maintenance, backfilled uint64) {
+func assertEvidenceHostDailyBucket(t *testing.T, buckets []adapters.MonitoringBucket, day time.Time, samples, maintenance, backfilled uint64, rawMetrics ...string) {
 	t.Helper()
 	for _, bucket := range buckets {
-		if bucket.SourceLayer == adapters.MonitoringSourceDailyAggregate && bucket.Start.Equal(day.UTC()) {
-			if bucket.SampleCount != samples || bucket.MaintenanceCount != maintenance || bucket.BackfilledCount != backfilled {
-				t.Fatalf("daily bucket %s counts = %d/%d/%d, want %d/%d/%d", day, bucket.SampleCount, bucket.MaintenanceCount, bucket.BackfilledCount, samples, maintenance, backfilled)
-			}
-			return
+		if !bucket.Start.Equal(day.UTC()) {
+			continue
 		}
+		wantLayer := adapters.MonitoringSourceDailyAggregate
+		if len(rawMetrics) > 0 {
+			wantLayer = adapters.MonitoringSourceMixed
+		}
+		if bucket.SourceLayer != wantLayer || bucket.SourceGranularity != 24*time.Hour ||
+			bucket.SampleCount != samples || bucket.MaintenanceCount != maintenance || bucket.BackfilledCount != backfilled {
+			t.Fatalf("host bucket %s provenance/counts = %#v, want %s/24h/%d/%d/%d", day, bucket, wantLayer, samples, maintenance, backfilled)
+		}
+		remaining := make(map[string]bool, len(rawMetrics))
+		for _, name := range rawMetrics {
+			remaining[name] = true
+		}
+		cpuFound := false
+		for _, metric := range bucket.Metrics {
+			if metric.Name == "cpu_usage_pct" {
+				if cpuFound || metric.SourceLayer != adapters.MonitoringSourceDailyAggregate || metric.SourceGranularity != 24*time.Hour ||
+					metric.SampleCount != samples || metric.MaintenanceCount != maintenance || metric.BackfilledCount != backfilled {
+					t.Fatalf("host bucket %s daily CPU provenance/counts = %#v", day, metric)
+				}
+				cpuFound = true
+				continue
+			}
+			if !remaining[metric.Name] || metric.SourceLayer != adapters.MonitoringSourceRaw || metric.SourceGranularity != 24*time.Hour ||
+				metric.SampleCount != 1 || metric.MaintenanceCount != 1 || metric.BackfilledCount != 1 {
+				t.Fatalf("host bucket %s unexpected raw metric provenance/counts = %#v", day, metric)
+			}
+			delete(remaining, metric.Name)
+		}
+		if !cpuFound || len(remaining) != 0 {
+			t.Fatalf("host bucket %s missing CPU or raw metrics: cpu=%t, remaining=%v", day, cpuFound, remaining)
+		}
+		return
 	}
-	t.Fatalf("no daily bucket at %s in %#v", day, buckets)
+	t.Fatalf("no host bucket at %s in %#v", day, buckets)
 }
 
 func assertEvidenceBucketMetrics(t *testing.T, bucket adapters.MonitoringBucket, expected ...string) {

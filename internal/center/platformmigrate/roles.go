@@ -49,6 +49,96 @@ func (roles AppRoleSetV1) names() []string {
 	return []string{roles.CenterRuntime, roles.PlatformAdmin, roles.Migrator}
 }
 
+// AppRoleSetV2 binds every current application authority, including the
+// mandatory deletion worker. V1 remains the contract of historical manifests.
+type AppRoleSetV2 struct {
+	CenterRuntime  string
+	PlatformAdmin  string
+	DeletionWorker string
+	Migrator       string
+}
+
+func (roles AppRoleSetV2) Validate() error {
+	historical := AppRoleSetV1{
+		CenterRuntime: roles.CenterRuntime, PlatformAdmin: roles.PlatformAdmin,
+		Migrator: roles.Migrator,
+	}
+	if err := historical.Validate(); err != nil {
+		return err
+	}
+	if !validAppRoleName(roles.DeletionWorker) {
+		return fmt.Errorf("invalid record deletion worker role name")
+	}
+	for _, role := range historical.names() {
+		if roles.DeletionWorker == role {
+			return fmt.Errorf("record deletion worker reuses application role %q", role)
+		}
+	}
+	return nil
+}
+
+func (roles AppRoleSetV2) names() []string {
+	return []string{roles.CenterRuntime, roles.PlatformAdmin, roles.DeletionWorker, roles.Migrator}
+}
+
+// ProvisionRolesV2InTx checks direct-login identities and the complete current
+// role boundary in the caller's transaction, without creating or granting roles.
+func ProvisionRolesV2InTx(ctx context.Context, tx pgx.Tx, roles AppRoleSetV2) error {
+	if tx == nil {
+		return fmt.Errorf("app role preflight has no PostgreSQL transaction")
+	}
+	if err := roles.Validate(); err != nil {
+		return err
+	}
+	var sessionUser, currentUser string
+	if err := tx.QueryRow(ctx, `select session_user, current_user`).Scan(&sessionUser, &currentUser); err != nil {
+		return fmt.Errorf("read app role preflight session and current user: %w", err)
+	}
+	attributes, err := readAppRoleAttributes(ctx, tx, roles.names())
+	if err != nil {
+		return err
+	}
+	memberships, err := readAppRoleMemberships(ctx, tx, roles.names())
+	if err != nil {
+		return err
+	}
+	historical := AppRoleSetV1{
+		CenterRuntime: roles.CenterRuntime, PlatformAdmin: roles.PlatformAdmin,
+		Migrator: roles.Migrator,
+	}
+	if err := validateDirectRolePreflight(historical, sessionUser, currentUser, attributes, memberships); err != nil {
+		return err
+	}
+	worker, found := attributes[roles.DeletionWorker]
+	if !found {
+		return fmt.Errorf("missing pre-created app role %q", roles.DeletionWorker)
+	}
+	if err := worker.validateConstrainedAppRole(roles.DeletionWorker); err != nil {
+		return err
+	}
+	// Ownership dependencies cover types, extensions and other catalog object
+	// classes as well as relations/functions. Do not silently allow a worker to
+	// obtain owner authority through an object outside the managed relation set.
+	var owner string
+	err = tx.QueryRow(ctx, `
+		select role.rolname
+		from pg_catalog.pg_shdepend dependency
+		join pg_catalog.pg_roles role on role.oid = dependency.refobjid
+		where dependency.refclassid = 'pg_catalog.pg_authid'::pg_catalog.regclass
+		  and dependency.deptype = 'o'
+		  and role.rolname = any($1::name[])
+		order by role.rolname
+		limit 1
+	`, []string{roles.CenterRuntime, roles.PlatformAdmin, roles.DeletionWorker}).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read current app role ownership: %w", err)
+	}
+	return fmt.Errorf("app runtime/admin/worker role %q owns a catalog object", owner)
+}
+
 func validAppRoleName(name string) bool {
 	if len(name) < 1 || len(name) > 63 || !utf8.ValidString(name) || !norm.NFC.IsNormalString(name) {
 		return false

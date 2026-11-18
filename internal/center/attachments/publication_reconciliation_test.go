@@ -120,47 +120,14 @@ func (store *publicationBlobStoreStub) Delete(_ context.Context, object ObjectVe
 	return store.receipt, nil
 }
 
-func TestBlobPublicationReconcilerResolvesExactKeyCasDeletesAndCompletes(t *testing.T) {
-	target := testBlobPublicationTarget()
-	claim := testBlobPublicationCleanupClaim("")
-	claim.Intent.Target = target
-	object := testBlobPublicationObjectVersion(claim.Intent, "published-reconcile-v1")
-	repository := &publicationReconcilerRepositoryStub{claim: &claim}
-	resolver := &publicationResolverStub{object: object}
-	blob := &publicationBlobStoreStub{}
-	reconciler, err := NewBlobPublicationReconciler(repository, resolver, blob, BlobPublicationReconcilerConfig{
-		ProjectID: "default", BackendKind: BackendKindLocal, CleanupOwnerID: "publication_reconciler_1",
-		RetryDelay: time.Minute, Now: func() time.Time { return claim.ObservedLeaseExpiresAt.Add(-time.Minute) },
-	})
-	if err != nil {
-		t.Fatalf("NewBlobPublicationReconciler() error = %v", err)
-	}
-	claimed, err := reconciler.RunOnce(context.Background())
-	if err != nil || !claimed {
-		t.Fatalf("RunOnce() = (%t, %v), want claimed success", claimed, err)
-	}
-	if len(resolver.targets) != 1 || resolver.targets[0] != target {
-		t.Fatalf("resolver targets = %#v, want one exact target", resolver.targets)
-	}
-	if len(repository.versioned) != 1 || repository.versioned[0].Object != object {
-		t.Fatalf("version CAS requests = %#v, want exact observed object", repository.versioned)
-	}
-	if len(blob.deleted) != 1 || blob.deleted[0] != object {
-		t.Fatalf("deleted objects = %#v, want exact object", blob.deleted)
-	}
-	if len(repository.completed) != 1 || repository.completed[0].Outcome != BlobPublicationCompletionOutcomeDeleted ||
-		repository.completed[0].Receipt.Version != object {
-		t.Fatalf("completion requests = %#v, want exact deleted receipt", repository.completed)
-	}
-}
-
 func TestBlobPublicationReconcilerCompletesUnresolvedAlreadyAbsentWithoutFabricatingVersion(t *testing.T) {
 	claim := testBlobPublicationCleanupClaim("")
+	claim.Intent.Target.BackendKind = BackendKindS3
 	repository := &publicationReconcilerRepositoryStub{claim: &claim}
 	resolver := &publicationResolverStub{err: ErrBlobNotFound}
 	blob := &publicationBlobStoreStub{}
 	reconciler, err := NewBlobPublicationReconciler(repository, resolver, blob, BlobPublicationReconcilerConfig{
-		ProjectID: "default", BackendKind: BackendKindLocal, CleanupOwnerID: "publication_reconciler_1",
+		ProjectID: "default", BackendKind: BackendKindS3, CleanupOwnerID: "publication_reconciler_1",
 		RetryDelay: time.Minute, Now: func() time.Time { return claim.ObservedLeaseExpiresAt.Add(-time.Minute) },
 	})
 	if err != nil {
@@ -185,10 +152,11 @@ func TestBlobPublicationReconcilerCompletesUnresolvedAlreadyAbsentWithoutFabrica
 
 func TestBlobPublicationReconcilerSchedulesRetryOnResolverFailure(t *testing.T) {
 	claim := testBlobPublicationCleanupClaim("")
+	claim.Intent.Target.BackendKind = BackendKindS3
 	repository := &publicationReconcilerRepositoryStub{claim: &claim}
 	resolver := &publicationResolverStub{err: errors.New("resolver unavailable")}
 	reconciler, err := NewBlobPublicationReconciler(repository, resolver, &publicationBlobStoreStub{}, BlobPublicationReconcilerConfig{
-		ProjectID: "default", BackendKind: BackendKindLocal, CleanupOwnerID: "publication_reconciler_1",
+		ProjectID: "default", BackendKind: BackendKindS3, CleanupOwnerID: "publication_reconciler_1",
 		RetryDelay: time.Minute, Now: func() time.Time { return claim.ObservedLeaseExpiresAt.Add(-time.Minute) },
 	})
 	if err != nil {
@@ -204,15 +172,13 @@ func TestBlobPublicationReconcilerSchedulesRetryOnResolverFailure(t *testing.T) 
 }
 
 func TestLocalBlobStoreResolvesFinalPublicationByExactDigestKey(t *testing.T) {
-	store, err := NewLocalBlobStore(filepath.Join(t.TempDir(), "blobs"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := newTestLocalBlobStore(t, filepath.Join(t.TempDir(), "blobs"), localBlobHooks{})
 	content := []byte("publication resolver local")
 	digest := sha256.Sum256(content)
-	if _, err := store.Put(context.Background(), PutRequest{
+	written, err := store.Put(context.Background(), PutRequest{
 		ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
-	}, bytesReader(content)); err != nil {
+	}, bytesReader(content))
+	if err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	target := BlobPublicationTarget{
@@ -223,8 +189,7 @@ func TestLocalBlobStoreResolvesFinalPublicationByExactDigestKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveBlobPublicationObject() error = %v", err)
 	}
-	if resolved.Key != target.Key || resolved.SHA256 != target.SHA256 || resolved.SizeBytes != target.SizeBytes ||
-		resolved.VersionID != "local-v1-"+hexDigest(digest) {
+	if resolved != written {
 		t.Fatalf("resolved object = %#v, want exact local identity", resolved)
 	}
 }
@@ -238,20 +203,14 @@ func TestLocalBlobStorePublicationResolverRejectsMissingSizeAndHashDrift(t *test
 	}
 
 	t.Run("exact key missing", func(t *testing.T) {
-		store, err := NewLocalBlobStore(filepath.Join(t.TempDir(), "blobs"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		store := newTestLocalBlobStore(t, filepath.Join(t.TempDir(), "blobs"), localBlobHooks{})
 		if _, err := store.ResolveBlobPublicationObject(context.Background(), target); !errors.Is(err, ErrBlobNotFound) {
 			t.Fatalf("ResolveBlobPublicationObject(missing) error = %v, want ErrBlobNotFound", err)
 		}
 	})
 
 	t.Run("size mismatch", func(t *testing.T) {
-		store, err := NewLocalBlobStore(filepath.Join(t.TempDir(), "blobs"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		store := newTestLocalBlobStore(t, filepath.Join(t.TempDir(), "blobs"), localBlobHooks{})
 		if _, err := store.Put(context.Background(), PutRequest{
 			ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
 		}, bytesReader(content)); err != nil {
@@ -265,20 +224,14 @@ func TestLocalBlobStorePublicationResolverRejectsMissingSizeAndHashDrift(t *test
 	})
 
 	t.Run("hash mismatch", func(t *testing.T) {
-		store, err := NewLocalBlobStore(filepath.Join(t.TempDir(), "blobs"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		store := newTestLocalBlobStore(t, filepath.Join(t.TempDir(), "blobs"), localBlobHooks{})
 		version, err := store.Put(context.Background(), PutRequest{
 			ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
 		}, bytesReader(content))
 		if err != nil {
 			t.Fatalf("Put() error = %v", err)
 		}
-		objectPath, err := store.objectPath(version)
-		if err != nil {
-			t.Fatalf("objectPath() error = %v", err)
-		}
+		objectPath := filepath.Join(store.root, version.Key)
 		corrupt := make([]byte, len(content))
 		for index := range corrupt {
 			corrupt[index] = byte(index + 1)

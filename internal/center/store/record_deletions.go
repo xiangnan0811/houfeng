@@ -4,14 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
@@ -28,22 +32,29 @@ const (
 )
 
 type PostgresRecordDeletionRepository struct {
-	platform         *PostgresRecordPlatformRepository
-	newReservationID func() (string, error)
-	newOperationID   func() (string, error)
-	newAuditID       func() (string, error)
+	platform                *PostgresRecordPlatformRepository
+	pool                    *pgxpool.Pool
+	portabilityCleanup      atomic.Pointer[attachments.LocalCleanupCoordinator]
+	portabilityBlobMu       sync.Mutex
+	portabilityBlob         attachments.BlobGCDeleter
+	portabilityBlobIdentity [sha256.Size]byte
+	newReservationID        func() (string, error)
+	newOperationID          func() (string, error)
+	newAuditID              func() (string, error)
 }
 
 var (
-	_ recorddeletion.DeletionPreviewRepository = (*PostgresRecordDeletionRepository)(nil)
-	_ recorddeletion.DeletionWorkerRepository  = (*PostgresRecordDeletionRepository)(nil)
-	_ recorddeletion.RecordCoreStore           = (*PostgresRecordDeletionRepository)(nil)
-	_ recorddeletion.RecoveryStore             = (*PostgresRecordDeletionRepository)(nil)
+	_ recorddeletion.DeletionPreviewRepository  = (*PostgresRecordDeletionRepository)(nil)
+	_ recorddeletion.DeletionWorkerRepository   = (*PostgresRecordDeletionRepository)(nil)
+	_ recorddeletion.V2DeletionWorkerRepository = (*PostgresRecordDeletionRepository)(nil)
+	_ recorddeletion.RecordCoreStore            = (*PostgresRecordDeletionRepository)(nil)
+	_ recorddeletion.RecoveryStore              = (*PostgresRecordDeletionRepository)(nil)
 )
 
 func NewPostgresRecordDeletionRepository(pool *pgxpool.Pool, gate AdmissionGate) *PostgresRecordDeletionRepository {
 	return &PostgresRecordDeletionRepository{
 		platform: NewPostgresRecordPlatformRepository(pool, gate),
+		pool:     pool,
 		newReservationID: func() (string, error) {
 			return ids.New("drs")
 		},
@@ -55,36 +66,6 @@ func NewPostgresRecordDeletionRepository(pool *pgxpool.Pool, gate AdmissionGate)
 		},
 	}
 }
-
-const createDeletionPreviewSQL = `
-	insert into public.deletion_reservations (
-		reservation_id,
-		project_id,
-		object_kind,
-		object_id,
-		deletion_token_commitment,
-		request_fingerprint,
-		state,
-		expires_at,
-		actor_scope_digest,
-		preview_binding_digest,
-		preview_current_revision_id,
-		preview_lock_version,
-		preview_authorization_epoch,
-		preview_content_delivery_epoch,
-		preview_dependency_graph_digest,
-		preview_backup_inventory_digest,
-		preview_processor_inventory_digest,
-		adapter_readiness_digest,
-		adapter_preview_digest,
-		preview_witness_sequence,
-		preview_witness_entry_hash
-	) values (
-		$1, $2, $3, $4, $5, $6, 'previewed',
-		transaction_timestamp() + ($7 * interval '1 microsecond'),
-		$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
-	)
-	returning expires_at`
 
 const resolveDeletionPreviewSQL = `
 	select reservation.reservation_id,
@@ -143,156 +124,18 @@ const resolveRecordDeletionStatusSQL = `
 	  and operation.project_id = $2
 	  and reservation.project_id = operation.project_id`
 
-const lockDeletionPreviewCASForReserveSQL = `
-	select reservation.actor_scope_digest,
-	       reservation.deletion_token_commitment,
-	       reservation.request_fingerprint,
-	       reservation.preview_binding_digest as preview_binding_digest,
-	       reservation.preview_current_revision_id,
-	       reservation.preview_lock_version,
-	       reservation.preview_authorization_epoch,
-	       reservation.preview_content_delivery_epoch,
-	       reservation.preview_dependency_graph_digest,
-	       reservation.preview_backup_inventory_digest,
-	       reservation.preview_processor_inventory_digest,
-	       reservation.preview_witness_sequence,
-	       reservation.preview_witness_entry_hash
-	from public.deletion_reservations as reservation
-	where reservation.reservation_id = $1
-	  and reservation.project_id = $2
-	  and reservation.object_kind = $3
-	  and reservation.object_id = $4
-	  and reservation.state = 'previewed'
-	  and reservation.expires_at > transaction_timestamp()
-	for update`
-
-const lockRecordCASForDeletionReserveSQL = `
-	select record.current_revision_id,
-	       record.lock_version,
-	       record.authorization_epoch
-	from public.records as record
-	where record.project_id = $1
-	  and record.record_id = $2
-	for update`
-
-const insertRecordPurgeOperationSQL = `
-	insert into public.record_purge_operations (
-		operation_id,
-		reservation_id,
-		project_id,
-		operation_state,
-		deployment_id,
-		actor_id,
-		reason_code,
-		deletion_contract_version,
-		owner_id,
-		owner_generation,
-		owner_expires_at,
-		started_at,
-		updated_at
-	) values (
-		$1, $2, $3, 'provisional_fenced', $4, $5, $6, $7, $8, $9, $10,
-		transaction_timestamp(), transaction_timestamp()
-	)
-	returning started_at`
-
-const insertRecordDeletionFencedAuditSQL = `
-	insert into public.record_deletion_audits (
-		audit_id,
-		operation_id,
-		project_id,
-		event_kind,
-		reason_code,
-		occurred_at
-	) values ($1, $2, $3, 'fenced', $4, transaction_timestamp())`
-
 func (repository *PostgresRecordDeletionRepository) CreatePreview(
 	ctx context.Context,
 	command recorddeletion.CreatePreviewCommand,
 ) (recorddeletion.StoredPreview, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || repository.newReservationID == nil {
+	if ctx == nil || repository == nil || repository.platform == nil {
 		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
 	}
 	if err := command.Validate(); err != nil {
 		return recorddeletion.StoredPreview{}, err
 	}
-	reservationID, err := repository.newReservationID()
-	if err != nil {
-		return recorddeletion.StoredPreview{}, fmt.Errorf("generate deletion reservation id: %w", err)
-	}
-	if !validStoredRecordIdentity(reservationID, "drs_") {
-		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
-	}
-	fingerprintBytes, err := command.RequestFingerprint.PersistedBytes()
-	if err != nil {
-		return recorddeletion.StoredPreview{}, err
-	}
-	lockVersion, ok := deletionStoreUint64(command.Record.LockVersion)
-	if !ok {
-		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
-	}
-	authorizationEpoch, ok := deletionStoreUint64(command.Record.AuthorizationEpoch)
-	if !ok {
-		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
-	}
-	contentDeliveryEpoch, ok := deletionStoreUint64(uint64(command.Record.ContentDeliveryEpoch))
-	if !ok {
-		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
-	}
-	witnessSequence, ok := deletionStoreUint64(command.WitnessHead.Sequence)
-	if !ok {
-		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
-	}
-
-	var expiresAt time.Time
-	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := transaction.tx.QueryRow(ctx, createDeletionPreviewSQL,
-			reservationID,
-			command.Object.ProjectID,
-			command.Object.ObjectKind,
-			command.Object.ObjectID,
-			command.TokenCommitment[:],
-			fingerprintBytes[:],
-			command.TTL.Microseconds(),
-			command.ActorScopeDigest[:],
-			command.BindingDigest[:],
-			command.Record.CurrentRevisionID,
-			lockVersion,
-			authorizationEpoch,
-			contentDeliveryEpoch,
-			command.Record.DependencyGraphDigest[:],
-			command.Record.BackupInventoryDigest[:],
-			command.Record.ProcessorInventoryDigest[:],
-			command.AdapterReadinessDigest[:],
-			command.AdapterPreviewDigest[:],
-			witnessSequence,
-			command.WitnessHead.EntryHash[:],
-		).Scan(&expiresAt); err != nil {
-			return fmt.Errorf("create deletion preview: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return recorddeletion.StoredPreview{}, err
-	}
-	persistedFingerprint, err := recordplatform.ParseTrustedPersistedRequestFingerprintV1(fingerprintBytes[:])
-	if err != nil {
-		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
-	}
-	stored := recorddeletion.StoredPreview{
-		ReservationID:      reservationID,
-		Object:             command.Object,
-		ActorScopeDigest:   command.ActorScopeDigest,
-		TokenCommitment:    command.TokenCommitment,
-		RequestFingerprint: persistedFingerprint,
-		BindingDigest:      command.BindingDigest,
-		WitnessHead:        command.WitnessHead,
-		ExpiresAt:          expiresAt.UTC(),
-	}
-	if err := stored.Validate(); err != nil {
-		return recorddeletion.StoredPreview{}, ErrRecordDeletionStoreUnavailable
-	}
-	return stored, nil
+	// New deletion issuance uses the V2 issuer. V1 is continuation-only.
+	return recorddeletion.StoredPreview{}, recorddeletion.ErrDeletionSafetyUnavailable
 }
 
 func (repository *PostgresRecordDeletionRepository) ResolvePreview(
@@ -511,275 +354,14 @@ func (repository *PostgresRecordDeletionRepository) ReservePreview(
 	ctx context.Context,
 	command recorddeletion.ReservePreviewCommand,
 ) (recorddeletion.DeletionOperation, error) {
-	if ctx == nil || repository == nil || repository.platform == nil ||
-		repository.newOperationID == nil || repository.newAuditID == nil {
+	if ctx == nil || repository == nil || repository.platform == nil {
 		return recorddeletion.DeletionOperation{}, ErrRecordDeletionStoreUnavailable
 	}
 	if err := command.Validate(); err != nil {
 		return recorddeletion.DeletionOperation{}, err
 	}
-	operationID, err := repository.newOperationID()
-	if err != nil {
-		return recorddeletion.DeletionOperation{}, fmt.Errorf("generate record purge operation id: %w", err)
-	}
-	auditID, err := repository.newAuditID()
-	if err != nil {
-		return recorddeletion.DeletionOperation{}, fmt.Errorf("generate record deletion audit id: %w", err)
-	}
-	if !validStoredRecordIdentity(operationID, "rpo_") || !validStoredRecordIdentity(auditID, "rda_") {
-		return recorddeletion.DeletionOperation{}, ErrRecordDeletionStoreUnavailable
-	}
-	lockVersion, ok := deletionStoreUint64(command.Record.LockVersion)
-	if !ok {
-		return recorddeletion.DeletionOperation{}, ErrRecordDeletionStoreUnavailable
-	}
-	authorizationEpoch, ok := deletionStoreUint64(command.Record.AuthorizationEpoch)
-	if !ok {
-		return recorddeletion.DeletionOperation{}, ErrRecordDeletionStoreUnavailable
-	}
-	contentDeliveryEpoch, ok := deletionStoreUint64(uint64(command.Record.ContentDeliveryEpoch))
-	if !ok || contentDeliveryEpoch == math.MaxInt64 {
-		return recorddeletion.DeletionOperation{}, ErrRecordDeletionStoreUnavailable
-	}
-
-	var operation recorddeletion.DeletionOperation
-	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var actorScopeDigestBytes []byte
-		var tokenCommitmentBytes []byte
-		var storedFingerprintBytes []byte
-		var bindingDigestBytes []byte
-		var currentRevisionID string
-		var storedLockVersion int64
-		var storedAuthorizationEpoch int64
-		var storedContentDeliveryEpoch int64
-		var dependencyGraphDigestBytes []byte
-		var backupInventoryDigestBytes []byte
-		var processorInventoryDigestBytes []byte
-		var witnessSequence int64
-		var witnessEntryHashBytes []byte
-		if err := transaction.tx.QueryRow(ctx, lockDeletionPreviewCASForReserveSQL,
-			command.Preview.ReservationID,
-			command.Preview.Object.ProjectID,
-			command.Preview.Object.ObjectKind,
-			command.Preview.Object.ObjectID,
-		).Scan(
-			&actorScopeDigestBytes,
-			&tokenCommitmentBytes,
-			&storedFingerprintBytes,
-			&bindingDigestBytes,
-			&currentRevisionID,
-			&storedLockVersion,
-			&storedAuthorizationEpoch,
-			&storedContentDeliveryEpoch,
-			&dependencyGraphDigestBytes,
-			&backupInventoryDigestBytes,
-			&processorInventoryDigestBytes,
-			&witnessSequence,
-			&witnessEntryHashBytes,
-		); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return recorddeletion.ErrDeletionPreviewStale
-			}
-			return fmt.Errorf("lock deletion preview CAS: %w", err)
-		}
-		storedFingerprint, err := recordplatform.ParseTrustedPersistedRequestFingerprintV1(storedFingerprintBytes)
-		if err != nil || !command.RequestFingerprint.MatchesPersisted(storedFingerprint) ||
-			!deletionStoreDigestEqual(actorScopeDigestBytes, command.Preview.ActorScopeDigest) ||
-			!deletionStoreDigestEqual(tokenCommitmentBytes, command.Preview.TokenCommitment) ||
-			!deletionStoreDigestEqual(bindingDigestBytes, command.ExpectedBindingDigest) ||
-			currentRevisionID != command.Record.CurrentRevisionID || storedLockVersion != lockVersion ||
-			storedAuthorizationEpoch != authorizationEpoch || storedContentDeliveryEpoch != contentDeliveryEpoch ||
-			!deletionStoreDigestEqual(dependencyGraphDigestBytes, command.Record.DependencyGraphDigest) ||
-			!deletionStoreDigestEqual(backupInventoryDigestBytes, command.Record.BackupInventoryDigest) ||
-			!deletionStoreDigestEqual(processorInventoryDigestBytes, command.Record.ProcessorInventoryDigest) ||
-			witnessSequence <= 0 || uint64(witnessSequence) != command.Preview.WitnessHead.Sequence ||
-			!deletionStoreDigestEqual(witnessEntryHashBytes, command.Preview.WitnessHead.EntryHash) {
-			return recorddeletion.ErrDeletionPreviewStale
-		}
-
-		var currentRootRevisionID string
-		var currentRootLockVersion int64
-		var currentRootAuthorizationEpoch int64
-		if err := transaction.tx.QueryRow(ctx, lockRecordCASForDeletionReserveSQL,
-			command.Preview.Object.ProjectID,
-			command.Preview.Object.ObjectID,
-		).Scan(&currentRootRevisionID, &currentRootLockVersion, &currentRootAuthorizationEpoch); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return recorddeletion.ErrDeletionPreviewStale
-			}
-			return fmt.Errorf("lock record deletion CAS: %w", err)
-		}
-		if currentRootRevisionID != command.Record.CurrentRevisionID || currentRootLockVersion != lockVersion ||
-			currentRootAuthorizationEpoch != authorizationEpoch {
-			return recorddeletion.ErrDeletionPreviewStale
-		}
-
-		fence, err := transaction.FenceDeletionReservation(ctx, recordplatform.ReservationFenceInputV1{
-			ReservationID:      command.Preview.ReservationID,
-			Object:             command.Preview.Object,
-			OwnerID:            command.OwnerID,
-			OwnerLeaseDuration: command.OwnerLeaseDuration,
-		})
-		if errors.Is(err, recordplatform.ErrDeletionReservationUnavailable) {
-			return recorddeletion.ErrDeletionPreviewStale
-		}
-		if err != nil {
-			return err
-		}
-		if uint64(fence.FenceEpoch) != uint64(command.Record.ContentDeliveryEpoch)+1 {
-			return recorddeletion.ErrDeletionPreviewStale
-		}
-
-		var startedAt time.Time
-		if err := transaction.tx.QueryRow(ctx, insertRecordPurgeOperationSQL,
-			operationID,
-			command.Preview.ReservationID,
-			command.Preview.Object.ProjectID,
-			command.DeploymentID,
-			command.ActorID,
-			command.ReasonCode,
-			command.DeletionContractVersion,
-			fence.Owner.OwnerID,
-			fence.Owner.Generation,
-			fence.Owner.ExpiresAt,
-		).Scan(&startedAt); err != nil {
-			return fmt.Errorf("create record purge operation: %w", err)
-		}
-		if startedAt.IsZero() {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		auditResult, err := transaction.tx.Exec(ctx, insertRecordDeletionFencedAuditSQL,
-			auditID,
-			operationID,
-			command.Preview.Object.ProjectID,
-			command.ReasonCode,
-		)
-		if err != nil {
-			return fmt.Errorf("create record deletion fenced audit: %w", err)
-		}
-		if auditResult.RowsAffected() != 1 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-
-		operation = recorddeletion.DeletionOperation{
-			OperationID:   operationID,
-			ReservationID: command.Preview.ReservationID,
-			Object:        command.Preview.Object,
-			ReasonCode:    command.ReasonCode,
-			State:         recorddeletion.DeletionStateProvisionalFenced,
-			FenceEpoch:    fence.FenceEpoch,
-		}
-		if err := operation.Validate(); err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
-	})
-	if err != nil {
-		return recorddeletion.DeletionOperation{}, err
-	}
-	return operation, nil
+	return recorddeletion.DeletionOperation{}, recorddeletion.ErrDeletionSafetyUnavailable
 }
-
-const claimRecordDeletionWorkSQL = `
-	select operation.operation_id,
-	       operation.reservation_id,
-	       operation.project_id,
-	       operation.operation_state,
-	       operation.deployment_id,
-	       operation.actor_id,
-	       operation.reason_code,
-	       operation.deletion_contract_version,
-	       coalesce(operation.ledger_entry_type, ''),
-	       coalesce(operation.ledger_sequence, 0),
-	       coalesce(operation.ledger_entry_hash, ''::bytea),
-	       operation.release_epoch,
-	       coalesce(operation.receipt_digest, ''::bytea),
-	       coalesce(operation.retry_from, ''),
-	       operation.owner_id,
-	       operation.owner_generation,
-	       operation.owner_expires_at,
-	       reservation.state,
-	       reservation.object_kind,
-	       reservation.object_id,
-	       reservation.deletion_token_commitment,
-	       reservation.request_fingerprint,
-	       reservation.fence_epoch,
-	       reservation.owner_id,
-	       reservation.owner_generation,
-	       reservation.owner_expires_at,
-	       transaction_timestamp()
-	from public.record_purge_operations as operation
-	join public.deletion_reservations as reservation
-	  on reservation.reservation_id = operation.reservation_id
-	 and reservation.project_id = operation.project_id
-	where operation.operation_state not in ('online_purged', 'not_committed')
-	  and (
-		operation.owner_id = $1
-		or operation.owner_expires_at <= transaction_timestamp()
-	  )
-	  and (
-		operation.operation_state <> 'provisional_fenced'
-		or not exists (
-			select 1
-			from public.object_content_leases as content_lease
-			where content_lease.project_id = reservation.project_id
-			  and content_lease.object_kind = reservation.object_kind
-			  and content_lease.object_id = reservation.object_id
-			  and content_lease.expires_at > transaction_timestamp()
-		)
-	  )
-	order by operation.started_at, operation.operation_id
-	for update of operation, reservation skip locked
-	limit 1`
-
-const lockRecordDeletionClaimFenceSQL = `
-	select owner_id, owner_generation, expires_at
-	from public.deletion_fence_leases
-	where project_id = $1
-	  and object_kind = $2
-	  and object_id = $3
-	for update`
-
-const takeOverRecordDeletionReservationSQL = `
-	update public.deletion_reservations
-	set owner_id = $7,
-	    owner_generation = $8,
-	    owner_expires_at = transaction_timestamp() + ($9 * interval '1 microsecond')
-	where reservation_id = $1
-	  and project_id = $2
-	  and object_kind = $3
-	  and object_id = $4
-	  and state = 'fenced'
-	  and owner_id = $5
-	  and owner_generation = $6
-	  and owner_expires_at = $10
-	returning owner_id, owner_generation, owner_expires_at`
-
-const takeOverRecordDeletionFenceSQL = `
-	update public.deletion_fence_leases
-	set owner_id = $7,
-	    owner_generation = $8,
-	    expires_at = transaction_timestamp() + ($9 * interval '1 microsecond')
-	where project_id = $1
-	  and object_kind = $2
-	  and object_id = $3
-	  and owner_id = $4
-	  and owner_generation = $5
-	  and expires_at = $6
-	returning owner_id, owner_generation, expires_at`
-
-const takeOverRecordDeletionOperationSQL = `
-	update public.record_purge_operations
-	set owner_id = $6,
-	    owner_generation = $7,
-	    owner_expires_at = transaction_timestamp() + ($8 * interval '1 microsecond'),
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $2
-	  and owner_id = $3
-	  and owner_generation = $4
-	  and owner_expires_at = $5
-	returning owner_id, owner_generation, owner_expires_at`
 
 type persistedRecordDeletionWork struct {
 	operationID             string
@@ -817,49 +399,40 @@ func (repository *PostgresRecordDeletionRepository) ClaimDeletionWork(
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
-
+	if input.OwnerLeaseDuration%time.Microsecond != 0 {
+		return nil, ErrRecordDeletionStoreUnavailable
+	}
+	body, err := encodeRecordPurgeCommand(struct {
+		OwnerID                string `json:"owner_id"`
+		OwnerLeaseMicroseconds int64  `json:"owner_lease_microseconds"`
+	}{input.OwnerID, input.OwnerLeaseDuration.Microseconds()})
+	if err != nil {
+		return nil, ErrRecordDeletionStoreUnavailable
+	}
 	var claim *recorddeletion.ClaimedDeletionWork
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		var row persistedRecordDeletionWork
-		var operationOwnerGeneration int64
-		var reservationOwnerGeneration int64
+		var operationOwnerGeneration, reservationOwnerGeneration int64
 		var reservationOwnerExpiresAt *time.Time
-		err := transaction.tx.QueryRow(ctx, claimRecordDeletionWorkSQL, input.OwnerID).Scan(
-			&row.operationID,
-			&row.reservationID,
-			&row.projectID,
-			&row.operationState,
-			&row.deploymentID,
-			&row.actorID,
-			&row.reasonCode,
-			&row.deletionContractVersion,
-			&row.ledgerEntryType,
-			&row.ledgerSequence,
-			&row.ledgerEntryHash,
-			&row.releaseEpoch,
-			&row.receiptDigest,
-			&row.retryFrom,
-			&row.operationOwner.OwnerID,
-			&operationOwnerGeneration,
-			&row.operationOwner.ExpiresAt,
-			&row.reservationState,
-			&row.objectKind,
-			&row.objectID,
-			&row.tokenCommitment,
-			&row.requestFingerprint,
-			&row.fenceEpoch,
-			&row.reservationOwner.OwnerID,
-			&reservationOwnerGeneration,
-			&reservationOwnerExpiresAt,
-			&row.observedAt,
+		err := transaction.tx.QueryRow(ctx, `select * from public.record_deletion_claim_v1($1)`, body).Scan(
+			&row.operationID, &row.reservationID, &row.projectID, &row.operationState,
+			&row.deploymentID, &row.actorID, &row.reasonCode, &row.deletionContractVersion,
+			&row.ledgerEntryType, &row.ledgerSequence, &row.ledgerEntryHash, &row.releaseEpoch,
+			&row.receiptDigest, &row.retryFrom, &row.operationOwner.OwnerID,
+			&operationOwnerGeneration, &row.operationOwner.ExpiresAt, &row.reservationState,
+			&row.objectKind, &row.objectID, &row.tokenCommitment, &row.requestFingerprint,
+			&row.fenceEpoch, &row.reservationOwner.OwnerID, &reservationOwnerGeneration,
+			&reservationOwnerExpiresAt, &row.observedAt,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("select record deletion work: %w", err)
+			return fmt.Errorf("claim restricted record deletion work: %w", err)
 		}
-		if operationOwnerGeneration <= 0 || reservationOwnerGeneration < 0 {
+		if operationOwnerGeneration <= 0 || reservationOwnerGeneration < 0 || row.observedAt.IsZero() ||
+			row.operationOwner.OwnerID != input.OwnerID || !row.operationOwner.ExpiresAt.After(row.observedAt) ||
+			row.operationOwner.ExpiresAt.Nanosecond()%1000 != 0 {
 			return recorddeletion.ErrDeletionSafetyUnavailable
 		}
 		row.operationOwner.Generation = uint64(operationOwnerGeneration)
@@ -874,87 +447,7 @@ func (repository *PostgresRecordDeletionRepository) ClaimDeletionWork(
 		if compoundFence && row.operationOwner != row.reservationOwner {
 			return recorddeletion.ErrDeletionSafetyUnavailable
 		}
-		newOwner, err := nextRecordDeletionOwner(row.operationOwner, input, row.observedAt)
-		if err != nil {
-			return err
-		}
-
-		if compoundFence {
-			var fenceOwner recordplatform.OwnerLease
-			var fenceGeneration int64
-			if err := transaction.tx.QueryRow(ctx, lockRecordDeletionClaimFenceSQL,
-				row.projectID,
-				row.objectKind,
-				row.objectID,
-			).Scan(&fenceOwner.OwnerID, &fenceGeneration, &fenceOwner.ExpiresAt); err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					return recordplatform.ErrLostOwnerLease
-				}
-				return fmt.Errorf("lock record deletion claim fence: %w", err)
-			}
-			if fenceGeneration <= 0 {
-				return recorddeletion.ErrDeletionSafetyUnavailable
-			}
-			fenceOwner.Generation = uint64(fenceGeneration)
-			if fenceOwner != row.operationOwner {
-				return recordplatform.ErrLostOwnerLease
-			}
-
-			reservationOwner, err := scanRecordDeletionOwner(transaction.tx.QueryRow(ctx,
-				takeOverRecordDeletionReservationSQL,
-				row.reservationID,
-				row.projectID,
-				row.objectKind,
-				row.objectID,
-				row.reservationOwner.OwnerID,
-				row.reservationOwner.Generation,
-				newOwner.OwnerID,
-				newOwner.Generation,
-				input.OwnerLeaseDuration.Microseconds(),
-				row.reservationOwner.ExpiresAt,
-			))
-			if err != nil {
-				return fmt.Errorf("take over record deletion reservation: %w", err)
-			}
-			fenceOwner, err = scanRecordDeletionOwner(transaction.tx.QueryRow(ctx,
-				takeOverRecordDeletionFenceSQL,
-				row.projectID,
-				row.objectKind,
-				row.objectID,
-				row.operationOwner.OwnerID,
-				row.operationOwner.Generation,
-				row.operationOwner.ExpiresAt,
-				newOwner.OwnerID,
-				newOwner.Generation,
-				input.OwnerLeaseDuration.Microseconds(),
-			))
-			if err != nil {
-				return fmt.Errorf("take over record deletion fence: %w", err)
-			}
-			if reservationOwner != fenceOwner {
-				return recorddeletion.ErrDeletionSafetyUnavailable
-			}
-			newOwner = reservationOwner
-		}
-
-		operationOwner, err := scanRecordDeletionOwner(transaction.tx.QueryRow(ctx,
-			takeOverRecordDeletionOperationSQL,
-			row.operationID,
-			row.operationState,
-			row.operationOwner.OwnerID,
-			row.operationOwner.Generation,
-			row.operationOwner.ExpiresAt,
-			newOwner.OwnerID,
-			newOwner.Generation,
-			input.OwnerLeaseDuration.Microseconds(),
-		))
-		if err != nil {
-			return fmt.Errorf("take over record deletion operation: %w", err)
-		}
-		if operationOwner != newOwner {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		built, err := row.claim(operationOwner)
+		built, err := row.claim(row.operationOwner)
 		if err != nil {
 			return err
 		}
@@ -965,6 +458,154 @@ func (repository *PostgresRecordDeletionRepository) ClaimDeletionWork(
 		return nil, err
 	}
 	return claim, nil
+}
+
+// ClaimV2DeletionWork scans the V2 projection independently of the V1 ledger projection.
+func (repository *PostgresRecordDeletionRepository) ClaimV2DeletionWork(ctx context.Context, input recorddeletion.DeletionWorkClaimInput) (*recorddeletion.ClaimedDeletionWork, error) {
+	if ctx == nil || repository == nil || repository.platform == nil {
+		return nil, ErrRecordDeletionStoreUnavailable
+	}
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+	if input.OwnerLeaseDuration%time.Microsecond != 0 {
+		return nil, ErrRecordDeletionStoreUnavailable
+	}
+	body, err := encodeRecordPurgeCommand(struct {
+		OwnerID                string `json:"owner_id"`
+		OwnerLeaseMicroseconds int64  `json:"owner_lease_microseconds"`
+	}{input.OwnerID, input.OwnerLeaseDuration.Microseconds()})
+	if err != nil {
+		return nil, ErrRecordDeletionStoreUnavailable
+	}
+	var claim *recorddeletion.ClaimedDeletionWork
+	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		var err error
+		claim, err = scanV2DeletionWork(transaction.tx.QueryRow(ctx, `select * from public.record_deletion_claim_v2($1)`, body), input.OwnerID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claim, nil
+}
+
+// scanV2DeletionWork consumes only the fixed 20-column V2 claim projection.
+func scanV2DeletionWork(row pgx.Row, expectedOwner string) (*recorddeletion.ClaimedDeletionWork, error) {
+	var operationID, reservationID, projectID, state, recordID, deploymentID, actorID, reason string
+	var epoch, version, generation, reservationGeneration, fenceGeneration int64
+	var ownerID, reservationOwnerID, fenceOwnerID string
+	var expiry, reservationExpiry, fenceExpiry, observed time.Time
+	err := row.Scan(&operationID, &reservationID, &projectID, &state, &recordID, &epoch, &deploymentID, &actorID, &reason, &version,
+		&ownerID, &generation, &expiry, &reservationOwnerID, &reservationGeneration, &reservationExpiry,
+		&fenceOwnerID, &fenceGeneration, &fenceExpiry, &observed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim restricted V2 record deletion work: %w", err)
+	}
+	if version != int64(recorddeletion.DeletionContractV2) || epoch <= 0 || generation <= 0 ||
+		ownerID != expectedOwner || ownerID != reservationOwnerID || ownerID != fenceOwnerID ||
+		generation != reservationGeneration || generation != fenceGeneration || !expiry.Equal(reservationExpiry) ||
+		!expiry.Equal(fenceExpiry) || observed.IsZero() || !expiry.After(observed) || expiry.Nanosecond()%1000 != 0 {
+		return nil, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	claim := recorddeletion.ClaimedDeletionWork{
+		Operation: recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV2, OperationID: operationID,
+			ReservationID: reservationID, Object: recordplatform.ObjectRef{ProjectID: projectID, ObjectKind: "record", ObjectID: recordID},
+			ReasonCode: recorddeletion.DeletionReasonCode(reason), State: recorddeletion.DeletionState(state), FenceEpoch: recordplatform.ContentEpoch(epoch)},
+		Owner: recordplatform.OwnerLease{OwnerID: ownerID, Generation: uint64(generation), ExpiresAt: expiry.UTC()}, Stage: recorddeletion.DeletionWorkPurgeOnline,
+	}
+	if claim.Validate() != nil {
+		return nil, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return &claim, nil
+}
+
+type deletionV2OwnerEnvelope struct {
+	OperationID            string `json:"operation_id"`
+	ReservationID          string `json:"reservation_id"`
+	RecordID               string `json:"record_id"`
+	FenceEpoch             uint64 `json:"fence_epoch"`
+	OwnerID                string `json:"owner_id"`
+	OwnerGeneration        uint64 `json:"owner_generation"`
+	ObservedOwnerExpiresAt string `json:"observed_owner_expires_at"`
+}
+
+func deletionV2Owner(claim recorddeletion.ClaimedDeletionWork) (deletionV2OwnerEnvelope, error) {
+	if claim.Operation.ContractVersion != recorddeletion.DeletionContractV2 || claim.Validate() != nil ||
+		uint64(claim.Operation.FenceEpoch) > math.MaxInt64 || claim.Owner.Generation > math.MaxInt64 || claim.Owner.ExpiresAt.Nanosecond()%1000 != 0 {
+		return deletionV2OwnerEnvelope{}, ErrRecordDeletionStoreUnavailable
+	}
+	return deletionV2OwnerEnvelope{claim.Operation.OperationID, claim.Operation.ReservationID, claim.Operation.Object.ObjectID,
+		uint64(claim.Operation.FenceEpoch), claim.Owner.OwnerID, claim.Owner.Generation, claim.Owner.ExpiresAt.UTC().Format(time.RFC3339Nano)}, nil
+}
+
+// RenewV2DeletionWork is only for a stopped owner; callers must discard the old tuple.
+func (repository *PostgresRecordDeletionRepository) RenewV2DeletionWork(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, duration time.Duration) (recorddeletion.ClaimedDeletionWork, error) {
+	if ctx == nil || repository == nil || repository.platform == nil || duration%time.Microsecond != 0 ||
+		(recorddeletion.DeletionWorkClaimInput{OwnerID: claim.Owner.OwnerID, OwnerLeaseDuration: duration}).Validate() != nil {
+		return recorddeletion.ClaimedDeletionWork{}, ErrRecordDeletionStoreUnavailable
+	}
+	owner, err := deletionV2Owner(claim)
+	if err != nil {
+		return recorddeletion.ClaimedDeletionWork{}, err
+	}
+	body, err := encodeRecordPurgeCommand(struct {
+		deletionV2OwnerEnvelope
+		OwnerLeaseMicroseconds int64 `json:"owner_lease_microseconds"`
+	}{owner, duration.Microseconds()})
+	if err != nil {
+		return recorddeletion.ClaimedDeletionWork{}, ErrRecordDeletionStoreUnavailable
+	}
+	var renewed recorddeletion.ClaimedDeletionWork
+	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		var ownerID string
+		var generation int64
+		var expiry, observed time.Time
+		if err := transaction.tx.QueryRow(ctx, `select * from public.record_deletion_renew_v2($1)`, body).Scan(&ownerID, &generation, &expiry, &observed); err != nil {
+			return fmt.Errorf("renew restricted V2 record deletion work: %w", err)
+		}
+		if ownerID != claim.Owner.OwnerID || generation <= 0 || uint64(generation) != claim.Owner.Generation ||
+			observed.IsZero() || !expiry.After(observed) || expiry.Nanosecond()%1000 != 0 {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+		renewed = claim
+		renewed.Owner.ExpiresAt = expiry.UTC()
+		return nil
+	})
+	if err != nil {
+		return recorddeletion.ClaimedDeletionWork{}, err
+	}
+	return renewed, nil
+}
+
+func (repository *PostgresRecordDeletionRepository) CompleteV2OnlinePurge(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, receipt recorddeletion.OnlinePurgeReceipt) error {
+	if ctx == nil || repository == nil || repository.platform == nil || receipt.OperationID != claim.Operation.OperationID || receipt.ReceiptDigest == ([sha256.Size]byte{}) {
+		return ErrRecordDeletionStoreUnavailable
+	}
+	owner, err := deletionV2Owner(claim)
+	if err != nil {
+		return err
+	}
+	body, err := encodeRecordPurgeCommand(struct {
+		deletionV2OwnerEnvelope
+		ReceiptDigest string `json:"receipt_digest"`
+	}{owner, hex.EncodeToString(receipt.ReceiptDigest[:])})
+	if err != nil {
+		return ErrRecordDeletionStoreUnavailable
+	}
+	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		var applied bool
+		if err := transaction.tx.QueryRow(ctx, `select public.record_deletion_finish_v2($1)`, body).Scan(&applied); err != nil {
+			return fmt.Errorf("finish restricted V2 record deletion: %w", err)
+		}
+		if !applied {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+		return nil
+	})
 }
 
 func (row persistedRecordDeletionWork) requiresCompoundFence() (bool, error) {
@@ -989,51 +630,6 @@ func (row persistedRecordDeletionWork) requiresCompoundFence() (bool, error) {
 		return false, recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	return wantFenced, nil
-}
-
-func nextRecordDeletionOwner(
-	oldOwner recordplatform.OwnerLease,
-	input recorddeletion.DeletionWorkClaimInput,
-	observedAt time.Time,
-) (recordplatform.OwnerLease, error) {
-	if oldOwner.Validate() != nil || observedAt.IsZero() || input.Validate() != nil {
-		return recordplatform.OwnerLease{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	generation := oldOwner.Generation
-	if oldOwner.OwnerID != input.OwnerID || !oldOwner.ExpiresAt.After(observedAt) {
-		if oldOwner.ExpiresAt.After(observedAt) || generation >= math.MaxInt64 {
-			return recordplatform.OwnerLease{}, recordplatform.ErrLostOwnerLease
-		}
-		generation++
-	}
-	owner := recordplatform.OwnerLease{
-		OwnerID:    input.OwnerID,
-		Generation: generation,
-		ExpiresAt:  observedAt.Add(input.OwnerLeaseDuration),
-	}
-	if owner.Validate() != nil {
-		return recordplatform.OwnerLease{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return owner, nil
-}
-
-func scanRecordDeletionOwner(row pgx.Row) (recordplatform.OwnerLease, error) {
-	var owner recordplatform.OwnerLease
-	var generation int64
-	if err := row.Scan(&owner.OwnerID, &generation, &owner.ExpiresAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return recordplatform.OwnerLease{}, recordplatform.ErrLostOwnerLease
-		}
-		return recordplatform.OwnerLease{}, err
-	}
-	if generation <= 0 {
-		return recordplatform.OwnerLease{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	owner.Generation = uint64(generation)
-	if owner.Validate() != nil {
-		return recordplatform.OwnerLease{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return owner, nil
 }
 
 func (row persistedRecordDeletionWork) claim(owner recordplatform.OwnerLease) (recorddeletion.ClaimedDeletionWork, error) {
@@ -1139,443 +735,98 @@ func (row persistedRecordDeletionWork) claim(owner recordplatform.OwnerLease) (r
 	return claim, nil
 }
 
-const markRecordDeletionCommitUnknownSQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $3
-	  and owner_id = $4
-	  and owner_generation = $5
-	  and owner_expires_at = $6`
-
-const recordDeletionDeleteEntrySQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    ledger_entry_type = $3,
-	    ledger_sequence = $4,
-	    ledger_entry_hash = $5,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $6
-	  and owner_id = $7
-	  and owner_generation = $8
-	  and owner_expires_at = $9
-	  and ledger_entry_type is null
-	  and ledger_sequence is null
-	  and ledger_entry_hash is null`
-
-const markRecordDeletionDeleteWitnessedSQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    witness_proof_digest = $3,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $4
-	  and ledger_entry_type = $5
-	  and ledger_sequence = $6
-	  and ledger_entry_hash = $7
-	  and witness_proof_digest is null
-	  and owner_id = $8
-	  and owner_generation = $9
-	  and owner_expires_at = $10`
-
-const markRecordDeletionOutcomeUnknownSQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    release_epoch = $3,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $4
-	  and release_epoch = 0
-	  and ledger_entry_type is null
-	  and ledger_sequence is null
-	  and ledger_entry_hash is null
-	  and witness_proof_digest is null
-	  and owner_id = $5
-	  and owner_generation = $6
-	  and owner_expires_at = $7`
-
-const recordDeletionOutcomeEntrySQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    ledger_entry_type = $3,
-	    ledger_sequence = $4,
-	    ledger_entry_hash = $5,
-	    release_epoch = $6,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $7
-	  and release_epoch = $8
-	  and ledger_entry_type is null
-	  and ledger_sequence is null
-	  and ledger_entry_hash is null
-	  and witness_proof_digest is null
-	  and owner_id = $9
-	  and owner_generation = $10
-	  and owner_expires_at = $11`
-
-const finalizeNotCommittedReservationSQL = `
-	update public.deletion_reservations
-	set state = $2,
-	    release_epoch = $3,
-	    owner_id = '',
-	    owner_generation = 0,
-	    owner_expires_at = null,
-	    completed_at = transaction_timestamp()
-	where reservation_id = $1
-	  and project_id = $4
-	  and object_kind = $5
-	  and object_id = $6
-	  and fence_epoch = $7
-	  and state = 'fenced'
-	  and release_epoch = 0
-	  and owner_id = $8
-	  and owner_generation = $9
-	  and owner_expires_at = $10`
-
-const finalizeNotCommittedFenceSQL = `
-	update public.deletion_fence_leases
-	set expires_at = transaction_timestamp()
-	where project_id = $1
-	  and object_kind = $2
-	  and object_id = $3
-	  and owner_id = $4
-	  and owner_generation = $5
-	  and expires_at = $6`
-
-const finalizeNotCommittedOperationSQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    witness_proof_digest = $3,
-	    owner_id = '',
-	    owner_generation = 0,
-	    owner_expires_at = null,
-	    completed_at = transaction_timestamp(),
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $4
-	  and ledger_entry_type = $5
-	  and ledger_sequence = $6
-	  and ledger_entry_hash = $7
-	  and release_epoch = $8
-	  and witness_proof_digest is null
-	  and owner_id = $9
-	  and owner_generation = $10
-	  and owner_expires_at = $11`
-
-const insertRecordDeletionNotCommittedAuditSQL = `
-	insert into public.record_deletion_audits (
-		audit_id, operation_id, project_id, event_kind, reason_code, occurred_at
-	) values ($1, $2, $3, $4, $5, transaction_timestamp())`
-
-const promotePermanentDeletionReservationSQL = `
-	update public.deletion_reservations
-	set state = $2,
-	    owner_id = '',
-	    owner_generation = 0,
-	    owner_expires_at = null,
-	    completed_at = transaction_timestamp()
-	where reservation_id = $1
-	  and project_id = $3
-	  and object_kind = $4
-	  and object_id = $5
-	  and fence_epoch = $6
-	  and state = 'fenced'
-	  and release_epoch = 0
-	  and owner_id = $7
-	  and owner_generation = $8
-	  and owner_expires_at = $9`
-
-const promotePermanentDeletionOperationSQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $3
-	  and ledger_entry_type = $4
-	  and ledger_sequence = $5
-	  and ledger_entry_hash = $6
-	  and witness_proof_digest is not null
-	  and release_epoch = 0
-	  and owner_id = $7
-	  and owner_generation = $8
-	  and owner_expires_at = $9`
-
-const insertRecordDeletionCommittedAuditSQL = `
-	insert into public.record_deletion_audits (
-		audit_id, operation_id, project_id, event_kind, reason_code, occurred_at
-	) values ($1, $2, $3, $4, $5, transaction_timestamp())`
-
-const recordDeletionPermanentFenceAppliedSQL = `
-	select exists (
-		select 1
-		from public.record_purge_operations as operation
-		join public.deletion_reservations as reservation
-		  on reservation.reservation_id = operation.reservation_id
-		 and reservation.project_id = operation.project_id
-		where operation.operation_id = $1
-		  and operation.operation_state = $2
-		  and operation.ledger_entry_type = 'delete_commit'
-		  and operation.ledger_sequence = $3
-		  and operation.ledger_entry_hash = $4
-		  and operation.witness_proof_digest is not null
-		  and operation.owner_id = $5
-		  and operation.owner_generation = $6
-		  and operation.owner_expires_at = $7
-		  and reservation.project_id = $8
-		  and reservation.object_kind = $9
-		  and reservation.object_id = $10
-		  and reservation.fence_epoch = $11
-		  and reservation.state = 'committed'
-		  and not exists (
-			select 1
-			from public.deletion_fence_leases as fence
-			where fence.project_id = reservation.project_id
-			  and fence.object_kind = reservation.object_kind
-			  and fence.object_id = reservation.object_id
-			  and fence.expires_at > transaction_timestamp()
-		  )
-		  and not exists (
-			select 1
-			from public.object_content_leases as content_lease
-			where content_lease.project_id = reservation.project_id
-			  and content_lease.object_kind = reservation.object_kind
-			  and content_lease.object_id = reservation.object_id
-			  and content_lease.expires_at > transaction_timestamp()
-		  )
-	) as permanent_fence_applied`
-
-const advanceRecordDeletionStateSQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $3
-	  and ledger_entry_type = 'delete_commit'
-	  and ledger_sequence = $4
-	  and ledger_entry_hash = $5
-	  and witness_proof_digest is not null
-	  and release_epoch = 0
-	  and owner_id = $6
-	  and owner_generation = $7
-	  and owner_expires_at = $8`
-
-const completeRecordDeletionOnlinePurgeSQL = `
-	update public.record_purge_operations as operation
-	set operation_state = $2,
-	    receipt_digest = $3,
-	    owner_id = '',
-	    owner_generation = 0,
-	    owner_expires_at = null,
-	    completed_at = transaction_timestamp(),
-	    updated_at = transaction_timestamp()
-	where operation.operation_id = $1
-	  and operation.operation_state = $4
-	  and operation.ledger_entry_type = 'delete_commit'
-	  and operation.ledger_sequence = $5
-	  and operation.ledger_entry_hash = $6
-	  and operation.witness_proof_digest is not null
-	  and operation.release_epoch = 0
-	  and operation.receipt_digest is null
-	  and operation.owner_id = $7
-	  and operation.owner_generation = $8
-	  and operation.owner_expires_at = $9
-	  and exists (
-		select 1
-		from public.deletion_reservations as reservation
-		where reservation.reservation_id = operation.reservation_id
-		  and reservation.project_id = operation.project_id
-		  and reservation.project_id = $10
-		  and reservation.object_kind = $11
-		  and reservation.object_id = $12
-		  and reservation.fence_epoch = $13
-		  and reservation.state = 'committed'
-	  )`
-
-const markRecordDeletionRetryRequiredSQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    retry_from = $3,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $4
-	  and retry_from is null
-	  and ledger_entry_type = 'delete_commit'
-	  and ledger_sequence = $5
-	  and ledger_entry_hash = $6
-	  and witness_proof_digest is not null
-	  and release_epoch = 0
-	  and owner_id = $7
-	  and owner_generation = $8
-	  and owner_expires_at = $9`
-
-const resumeRecordDeletionRetrySQL = `
-	update public.record_purge_operations
-	set operation_state = $2,
-	    retry_from = null,
-	    updated_at = transaction_timestamp()
-	where operation_id = $1
-	  and operation_state = $3
-	  and retry_from = $4
-	  and ledger_entry_type = 'delete_commit'
-	  and ledger_sequence = $5
-	  and ledger_entry_hash = $6
-	  and witness_proof_digest is not null
-	  and release_epoch = 0
-	  and owner_id = $7
-	  and owner_generation = $8
-	  and owner_expires_at = $9`
-
-func (repository *PostgresRecordDeletionRepository) MarkDeleteCommitUnknown(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkAppendDeleteCommit {
+func (repository *PostgresRecordDeletionRepository) MarkDeleteCommitUnknown(ctx context.Context, claim recorddeletion.ClaimedDeletionWork) error {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkAppendDeleteCommit {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.execDeletionWorkerTransition(ctx, markRecordDeletionCommitUnknownSQL,
-		claim.Operation.OperationID,
-		recorddeletion.DeletionStateLedgerCommitUnknown,
-		recorddeletion.DeletionStateProvisionalFenced,
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	owner, err := deletionV1Owner(claim)
+	if err != nil {
+		return err
+	}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_mark_delete_commit_unknown_v1($1)`, owner)
 }
 
-func (repository *PostgresRecordDeletionRepository) RecordDeleteEntry(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	entry recorddeletion.DeletionLedgerEntry,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		entry.Validate() != nil || !sameStoreDeletionLedgerRequest(entry.Request, claim.Request) ||
-		entry.Request.EntryType != recorddeletion.LedgerEntryDeleteCommit {
+func (repository *PostgresRecordDeletionRepository) RecordDeleteEntry(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, entry recorddeletion.DeletionLedgerEntry) error {
+	if ctx == nil || repository == nil || repository.platform == nil ||
+		(claim.Stage != recorddeletion.DeletionWorkAppendDeleteCommit && claim.Stage != recorddeletion.DeletionWorkResolveDeleteCommit) ||
+		entry.Request.EntryType != recorddeletion.LedgerEntryDeleteCommit || !sameStoreDeletionLedgerRequest(entry.Request, claim.Request) {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	var from recorddeletion.DeletionState
-	switch claim.Stage {
-	case recorddeletion.DeletionWorkAppendDeleteCommit:
-		from = recorddeletion.DeletionStateProvisionalFenced
-	case recorddeletion.DeletionWorkResolveDeleteCommit:
-		from = recorddeletion.DeletionStateLedgerCommitUnknown
-	default:
-		return ErrRecordDeletionStoreUnavailable
+	payload, err := deletionV1Ledger(claim, entry)
+	if err != nil {
+		return err
 	}
-	return repository.execDeletionWorkerTransition(ctx, recordDeletionDeleteEntrySQL,
-		claim.Operation.OperationID,
-		recorddeletion.DeletionStateWitnessPending,
-		recorddeletion.LedgerEntryDeleteCommit,
-		entry.Sequence,
-		entry.EntryHash[:],
-		from,
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_record_delete_entry_v1($1)`, payload)
 }
 
-func (repository *PostgresRecordDeletionRepository) MarkDeleteWitnessed(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	receipt recorddeletion.DeletionWitnessReceipt,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkConfirmDeleteWitness || claim.Entry == nil ||
-		receipt.Sequence != claim.Entry.Sequence || receipt.EntryHash != claim.Entry.EntryHash ||
-		receipt.ProofDigest == ([sha256.Size]byte{}) {
+func (repository *PostgresRecordDeletionRepository) MarkDeleteWitnessed(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, receipt recorddeletion.DeletionWitnessReceipt) error {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkConfirmDeleteWitness ||
+		claim.Entry == nil || receipt.Sequence != claim.Entry.Sequence || receipt.EntryHash != claim.Entry.EntryHash || receipt.ProofDigest == ([sha256.Size]byte{}) {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.execDeletionWorkerTransition(ctx, markRecordDeletionDeleteWitnessedSQL,
-		claim.Operation.OperationID,
-		recorddeletion.DeletionStateDeleteRequested,
-		receipt.ProofDigest[:],
-		recorddeletion.DeletionStateWitnessPending,
-		recorddeletion.LedgerEntryDeleteCommit,
-		claim.Entry.Sequence,
-		claim.Entry.EntryHash[:],
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	ledger, err := deletionV1Ledger(claim, *claim.Entry)
+	if err != nil {
+		return err
+	}
+	payload := deletionV1WitnessEnvelope{deletionV1LedgerEnvelope: ledger, WitnessProofDigest: hex.EncodeToString(receipt.ProofDigest[:])}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_mark_delete_witnessed_v1($1)`, payload)
 }
 
-func (repository *PostgresRecordDeletionRepository) MarkOutcomeCommitUnknown(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	releaseEpoch uint64,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkResolveDeleteCommit || releaseEpoch == 0 || releaseEpoch > math.MaxInt64 {
+func (repository *PostgresRecordDeletionRepository) MarkOutcomeCommitUnknown(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, releaseEpoch uint64) error {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkResolveDeleteCommit ||
+		releaseEpoch == 0 || releaseEpoch > math.MaxInt64 {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.execDeletionWorkerTransition(ctx, markRecordDeletionOutcomeUnknownSQL,
-		claim.Operation.OperationID,
-		recorddeletion.DeletionStateReleasePending,
-		int64(releaseEpoch),
-		recorddeletion.DeletionStateLedgerCommitUnknown,
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	owner, err := deletionV1Owner(claim)
+	if err != nil {
+		return err
+	}
+	payload := struct {
+		deletionV1OwnerEnvelope
+		ReleaseEpoch uint64 `json:"release_epoch"`
+	}{owner, releaseEpoch}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_mark_outcome_commit_unknown_v1($1)`, payload)
 }
 
-func (repository *PostgresRecordDeletionRepository) RecordOutcomeEntry(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	entry recorddeletion.DeletionLedgerEntry,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		entry.Validate() != nil || entry.Request.EntryType != recorddeletion.LedgerEntryAttemptNotCommitted ||
+func (repository *PostgresRecordDeletionRepository) RecordOutcomeEntry(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, entry recorddeletion.DeletionLedgerEntry) error {
+	if ctx == nil || repository == nil || repository.platform == nil || entry.Request.EntryType != recorddeletion.LedgerEntryAttemptNotCommitted ||
 		entry.Request.ReleaseEpoch == 0 || entry.Request.ReleaseEpoch > math.MaxInt64 {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	var from recorddeletion.DeletionState
-	var expectedReleaseEpoch uint64
-	var expectedRequest recorddeletion.LedgerAppendRequest
+	var expected recorddeletion.LedgerAppendRequest
 	switch claim.Stage {
 	case recorddeletion.DeletionWorkResolveDeleteCommit:
-		from = recorddeletion.DeletionStateLedgerCommitUnknown
-		expectedRequest = claim.Request.AttemptNotCommitted(entry.Request.ReleaseEpoch)
+		expected = claim.Request.AttemptNotCommitted(entry.Request.ReleaseEpoch)
 	case recorddeletion.DeletionWorkResolveNotCommitted:
-		from = recorddeletion.DeletionStateReleasePending
-		expectedReleaseEpoch = claim.Operation.ReleaseEpoch
-		expectedRequest = claim.Request
+		expected = claim.Request
 	default:
 		return ErrRecordDeletionStoreUnavailable
 	}
-	if !sameStoreDeletionLedgerRequest(entry.Request, expectedRequest) {
+	if !sameStoreDeletionLedgerRequest(entry.Request, expected) {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.execDeletionWorkerTransition(ctx, recordDeletionOutcomeEntrySQL,
-		claim.Operation.OperationID,
-		recorddeletion.DeletionStateReleasePending,
-		recorddeletion.LedgerEntryAttemptNotCommitted,
-		entry.Sequence,
-		entry.EntryHash[:],
-		int64(entry.Request.ReleaseEpoch),
-		from,
-		int64(expectedReleaseEpoch),
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	ledger, err := deletionV1Ledger(claim, entry)
+	if err != nil {
+		return err
+	}
+	payload := struct {
+		deletionV1LedgerEnvelope
+		ReleaseEpoch uint64 `json:"release_epoch"`
+	}{ledger, entry.Request.ReleaseEpoch}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_record_outcome_entry_v1($1)`, payload)
 }
 
-func (repository *PostgresRecordDeletionRepository) FinalizeNotCommitted(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	receipt recorddeletion.DeletionWitnessReceipt,
-) error {
+func (repository *PostgresRecordDeletionRepository) FinalizeNotCommitted(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, receipt recorddeletion.DeletionWitnessReceipt) error {
 	if ctx == nil || repository == nil || repository.platform == nil || repository.newAuditID == nil ||
-		claim.Validate() != nil || claim.Stage != recorddeletion.DeletionWorkConfirmNotCommittedWitness ||
-		claim.Entry == nil || claim.Entry.Request.EntryType != recorddeletion.LedgerEntryAttemptNotCommitted ||
+		claim.Stage != recorddeletion.DeletionWorkConfirmNotCommittedWitness || claim.Entry == nil ||
+		claim.Entry.Request.EntryType != recorddeletion.LedgerEntryAttemptNotCommitted ||
 		receipt.Sequence != claim.Entry.Sequence || receipt.EntryHash != claim.Entry.EntryHash ||
-		receipt.ProofDigest == ([sha256.Size]byte{}) || claim.Operation.ReleaseEpoch == 0 ||
-		claim.Operation.ReleaseEpoch > math.MaxInt64 {
+		receipt.ProofDigest == ([sha256.Size]byte{}) || claim.Operation.ReleaseEpoch == 0 || claim.Operation.ReleaseEpoch > math.MaxInt64 {
 		return ErrRecordDeletionStoreUnavailable
+	}
+	ledger, err := deletionV1Ledger(claim, *claim.Entry)
+	if err != nil {
+		return err
 	}
 	auditID, err := repository.newAuditID()
 	if err != nil {
@@ -1584,86 +835,22 @@ func (repository *PostgresRecordDeletionRepository) FinalizeNotCommitted(
 	if !validStoredRecordIdentity(auditID, "rda_") {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		reservationResult, err := transaction.tx.Exec(ctx, finalizeNotCommittedReservationSQL,
-			claim.Operation.ReservationID,
-			recorddeletion.DeletionStateNotCommitted,
-			int64(claim.Operation.ReleaseEpoch),
-			claim.Operation.Object.ProjectID,
-			claim.Operation.Object.ObjectKind,
-			claim.Operation.Object.ObjectID,
-			claim.Operation.FenceEpoch,
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-		)
-		if err != nil {
-			return fmt.Errorf("finalize not-committed reservation: %w", err)
-		}
-		if reservationResult.RowsAffected() != 1 {
-			return recordplatform.ErrLostOwnerLease
-		}
-
-		fenceResult, err := transaction.tx.Exec(ctx, finalizeNotCommittedFenceSQL,
-			claim.Operation.Object.ProjectID,
-			claim.Operation.Object.ObjectKind,
-			claim.Operation.Object.ObjectID,
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-		)
-		if err != nil {
-			return fmt.Errorf("finalize not-committed deletion fence: %w", err)
-		}
-		if fenceResult.RowsAffected() != 1 {
-			return recordplatform.ErrLostOwnerLease
-		}
-
-		operationResult, err := transaction.tx.Exec(ctx, finalizeNotCommittedOperationSQL,
-			claim.Operation.OperationID,
-			recorddeletion.DeletionStateNotCommitted,
-			receipt.ProofDigest[:],
-			recorddeletion.DeletionStateReleasePending,
-			recorddeletion.LedgerEntryAttemptNotCommitted,
-			claim.Entry.Sequence,
-			claim.Entry.EntryHash[:],
-			int64(claim.Operation.ReleaseEpoch),
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-		)
-		if err != nil {
-			return fmt.Errorf("finalize not-committed operation: %w", err)
-		}
-		if operationResult.RowsAffected() != 1 {
-			return recordplatform.ErrLostOwnerLease
-		}
-
-		auditResult, err := transaction.tx.Exec(ctx, insertRecordDeletionNotCommittedAuditSQL,
-			auditID,
-			claim.Operation.OperationID,
-			claim.Operation.Object.ProjectID,
-			"not_committed",
-			claim.Operation.ReasonCode,
-		)
-		if err != nil {
-			return fmt.Errorf("insert not-committed deletion audit: %w", err)
-		}
-		if auditResult.RowsAffected() != 1 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
-	})
+	payload := struct {
+		deletionV1WitnessEnvelope
+		ReleaseEpoch uint64 `json:"release_epoch"`
+		AuditID      string `json:"audit_id"`
+	}{deletionV1WitnessEnvelope{ledger, hex.EncodeToString(receipt.ProofDigest[:])}, claim.Operation.ReleaseEpoch, auditID}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_finalize_not_committed_v1($1)`, payload)
 }
 
-func (repository *PostgresRecordDeletionRepository) PromotePermanentFence(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-) error {
+func (repository *PostgresRecordDeletionRepository) PromotePermanentFence(ctx context.Context, claim recorddeletion.ClaimedDeletionWork) error {
 	if ctx == nil || repository == nil || repository.platform == nil || repository.newAuditID == nil ||
-		claim.Validate() != nil || claim.Stage != recorddeletion.DeletionWorkPromotePermanentFence ||
-		claim.Operation.LedgerSequence == 0 || claim.Operation.LedgerEntryHash == ([sha256.Size]byte{}) {
+		claim.Stage != recorddeletion.DeletionWorkPromotePermanentFence {
 		return ErrRecordDeletionStoreUnavailable
+	}
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return err
 	}
 	auditID, err := repository.newAuditID()
 	if err != nil {
@@ -1672,98 +859,31 @@ func (repository *PostgresRecordDeletionRepository) PromotePermanentFence(
 	if !validStoredRecordIdentity(auditID, "rda_") {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		reservationResult, err := transaction.tx.Exec(ctx, promotePermanentDeletionReservationSQL,
-			claim.Operation.ReservationID,
-			"committed",
-			claim.Operation.Object.ProjectID,
-			claim.Operation.Object.ObjectKind,
-			claim.Operation.Object.ObjectID,
-			claim.Operation.FenceEpoch,
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-		)
-		if err != nil {
-			return fmt.Errorf("promote permanent deletion reservation: %w", err)
-		}
-		if reservationResult.RowsAffected() != 1 {
-			return recordplatform.ErrLostOwnerLease
-		}
-
-		fenceResult, err := transaction.tx.Exec(ctx, finalizeNotCommittedFenceSQL,
-			claim.Operation.Object.ProjectID,
-			claim.Operation.Object.ObjectKind,
-			claim.Operation.Object.ObjectID,
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-		)
-		if err != nil {
-			return fmt.Errorf("expire promoted deletion fence lease: %w", err)
-		}
-		if fenceResult.RowsAffected() != 1 {
-			return recordplatform.ErrLostOwnerLease
-		}
-
-		operationResult, err := transaction.tx.Exec(ctx, promotePermanentDeletionOperationSQL,
-			claim.Operation.OperationID,
-			recorddeletion.DeletionStateFencePropagating,
-			recorddeletion.DeletionStateDeleteRequested,
-			recorddeletion.LedgerEntryDeleteCommit,
-			claim.Operation.LedgerSequence,
-			claim.Operation.LedgerEntryHash[:],
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-		)
-		if err != nil {
-			return fmt.Errorf("promote permanent deletion operation: %w", err)
-		}
-		if operationResult.RowsAffected() != 1 {
-			return recordplatform.ErrLostOwnerLease
-		}
-
-		auditResult, err := transaction.tx.Exec(ctx, insertRecordDeletionCommittedAuditSQL,
-			auditID,
-			claim.Operation.OperationID,
-			claim.Operation.Object.ProjectID,
-			"committed",
-			claim.Operation.ReasonCode,
-		)
-		if err != nil {
-			return fmt.Errorf("insert committed deletion audit: %w", err)
-		}
-		if auditResult.RowsAffected() != 1 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
-	})
+	payload := struct {
+		deletionV1LedgerEnvelope
+		AuditID string `json:"audit_id"`
+	}{ledger, auditID}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_promote_permanent_fence_v1($1)`, payload)
 }
 
 func (repository *PostgresRecordDeletionRepository) PermanentFenceApplied(
 	ctx context.Context,
 	claim recorddeletion.ClaimedDeletionWork,
 ) (bool, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkPropagatePermanentFence {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkPropagatePermanentFence {
+		return false, ErrRecordDeletionStoreUnavailable
+	}
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return false, err
+	}
+	body, err := encodeRecordPurgeCommand(ledger)
+	if err != nil {
 		return false, ErrRecordDeletionStoreUnavailable
 	}
 	var ready bool
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := transaction.tx.QueryRow(ctx, recordDeletionPermanentFenceAppliedSQL,
-			claim.Operation.OperationID,
-			recorddeletion.DeletionStateFencePropagating,
-			claim.Operation.LedgerSequence,
-			claim.Operation.LedgerEntryHash[:],
-			claim.Owner.OwnerID,
-			claim.Owner.Generation,
-			claim.Owner.ExpiresAt,
-			claim.Operation.Object.ProjectID,
-			claim.Operation.Object.ObjectKind,
-			claim.Operation.Object.ObjectID,
-			claim.Operation.FenceEpoch,
-		).Scan(&ready); err != nil {
+	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := transaction.tx.QueryRow(ctx, `select public.record_deletion_permanent_fence_applied_v1($1)`, body).Scan(&ready); err != nil {
 			return fmt.Errorf("read permanent deletion fence propagation: %w", err)
 		}
 		return nil
@@ -1774,128 +894,79 @@ func (repository *PostgresRecordDeletionRepository) PermanentFenceApplied(
 	return ready, nil
 }
 
-func (repository *PostgresRecordDeletionRepository) MarkReadFenced(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkPropagatePermanentFence {
+func (repository *PostgresRecordDeletionRepository) MarkReadFenced(ctx context.Context, claim recorddeletion.ClaimedDeletionWork) error {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkPropagatePermanentFence {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.advanceDeletionState(ctx, claim,
-		recorddeletion.DeletionStateFencePropagating,
-		recorddeletion.DeletionStateReadFenced,
-	)
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return err
+	}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_mark_read_fenced_v1($1)`, ledger)
 }
 
-func (repository *PostgresRecordDeletionRepository) BeginOnlinePurge(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkBeginOnlinePurge {
+func (repository *PostgresRecordDeletionRepository) BeginOnlinePurge(ctx context.Context, claim recorddeletion.ClaimedDeletionWork) error {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkBeginOnlinePurge {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.advanceDeletionState(ctx, claim,
-		recorddeletion.DeletionStateReadFenced,
-		recorddeletion.DeletionStateOnlinePurging,
-	)
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return err
+	}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_begin_online_purge_v1($1)`, ledger)
 }
 
-func (repository *PostgresRecordDeletionRepository) advanceDeletionState(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	from recorddeletion.DeletionState,
-	to recorddeletion.DeletionState,
-) error {
-	return repository.execDeletionWorkerTransition(ctx, advanceRecordDeletionStateSQL,
-		claim.Operation.OperationID,
-		to,
-		from,
-		claim.Operation.LedgerSequence,
-		claim.Operation.LedgerEntryHash[:],
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+func (repository *PostgresRecordDeletionRepository) CompleteOnlinePurge(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, receipt recorddeletion.OnlinePurgeReceipt) error {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkPurgeOnline ||
+		receipt.OperationID != claim.Operation.OperationID || receipt.ReceiptDigest == ([sha256.Size]byte{}) {
+		return ErrRecordDeletionStoreUnavailable
+	}
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return err
+	}
+	payload := struct {
+		deletionV1LedgerEnvelope
+		ReceiptDigest string `json:"receipt_digest"`
+	}{ledger, hex.EncodeToString(receipt.ReceiptDigest[:])}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_complete_online_purge_v1($1)`, payload)
 }
 
-func (repository *PostgresRecordDeletionRepository) CompleteOnlinePurge(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	receipt recorddeletion.OnlinePurgeReceipt,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkPurgeOnline || receipt.OperationID != claim.Operation.OperationID ||
-		receipt.ReceiptDigest == ([sha256.Size]byte{}) {
+func (repository *PostgresRecordDeletionRepository) MarkRetryRequired(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, retryStage recorddeletion.DeletionWorkStage) error {
+	if ctx == nil || repository == nil || repository.platform == nil {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.execDeletionWorkerTransition(ctx, completeRecordDeletionOnlinePurgeSQL,
-		claim.Operation.OperationID,
-		recorddeletion.DeletionStateOnlinePurged,
-		receipt.ReceiptDigest[:],
-		recorddeletion.DeletionStateOnlinePurging,
-		claim.Operation.LedgerSequence,
-		claim.Operation.LedgerEntryHash[:],
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-		claim.Operation.Object.ProjectID,
-		claim.Operation.Object.ObjectKind,
-		claim.Operation.Object.ObjectID,
-		claim.Operation.FenceEpoch,
-	)
+	from, expectedStage, ok := recordDeletionRetryState(retryStage)
+	if !ok || claim.Stage != expectedStage || claim.Operation.State != from {
+		return ErrRecordDeletionStoreUnavailable
+	}
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return err
+	}
+	payload := struct {
+		deletionV1LedgerEnvelope
+		RetryStage recorddeletion.DeletionWorkStage `json:"retry_stage"`
+	}{ledger, retryStage}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_mark_retry_required_v1($1)`, payload)
 }
 
-func (repository *PostgresRecordDeletionRepository) MarkRetryRequired(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	retryStage recorddeletion.DeletionWorkStage,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil {
+func (repository *PostgresRecordDeletionRepository) ResumeRetry(ctx context.Context, claim recorddeletion.ClaimedDeletionWork, retryStage recorddeletion.DeletionWorkStage) error {
+	if ctx == nil || repository == nil || repository.platform == nil || claim.Stage != recorddeletion.DeletionWorkResolveRetry || claim.RetryStage != retryStage {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	from, expectedClaimStage, ok := recordDeletionRetryState(retryStage)
-	if !ok || claim.Stage != expectedClaimStage || claim.Operation.State != from {
+	if _, _, ok := recordDeletionRetryState(retryStage); !ok {
 		return ErrRecordDeletionStoreUnavailable
 	}
-	return repository.execDeletionWorkerTransition(ctx, markRecordDeletionRetryRequiredSQL,
-		claim.Operation.OperationID,
-		recorddeletion.DeletionStateRetryRequired,
-		retryStage,
-		from,
-		claim.Operation.LedgerSequence,
-		claim.Operation.LedgerEntryHash[:],
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
-}
-
-func (repository *PostgresRecordDeletionRepository) ResumeRetry(
-	ctx context.Context,
-	claim recorddeletion.ClaimedDeletionWork,
-	retryStage recorddeletion.DeletionWorkStage,
-) error {
-	if ctx == nil || repository == nil || repository.platform == nil || claim.Validate() != nil ||
-		claim.Stage != recorddeletion.DeletionWorkResolveRetry || claim.RetryStage != retryStage {
-		return ErrRecordDeletionStoreUnavailable
+	ledger, err := deletionV1OperationLedger(claim)
+	if err != nil {
+		return err
 	}
-	to, _, ok := recordDeletionRetryState(retryStage)
-	if !ok {
-		return ErrRecordDeletionStoreUnavailable
-	}
-	return repository.execDeletionWorkerTransition(ctx, resumeRecordDeletionRetrySQL,
-		claim.Operation.OperationID,
-		to,
-		recorddeletion.DeletionStateRetryRequired,
-		retryStage,
-		claim.Operation.LedgerSequence,
-		claim.Operation.LedgerEntryHash[:],
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	payload := struct {
+		deletionV1LedgerEnvelope
+		RetryStage recorddeletion.DeletionWorkStage `json:"retry_stage"`
+	}{ledger, retryStage}
+	return repository.runV1DeletionCommand(ctx, `select public.record_deletion_resume_retry_v1($1)`, payload)
 }
 
 func recordDeletionRetryState(stage recorddeletion.DeletionWorkStage) (
@@ -1915,23 +986,6 @@ func recordDeletionRetryState(stage recorddeletion.DeletionWorkStage) (
 	default:
 		return "", "", false
 	}
-}
-
-func (repository *PostgresRecordDeletionRepository) execDeletionWorkerTransition(
-	ctx context.Context,
-	statement string,
-	arguments ...any,
-) error {
-	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		result, err := transaction.tx.Exec(ctx, statement, arguments...)
-		if err != nil {
-			return fmt.Errorf("persist record deletion worker transition: %w", err)
-		}
-		if result.RowsAffected() != 1 {
-			return recordplatform.ErrLostOwnerLease
-		}
-		return nil
-	})
 }
 
 func sameStoreDeletionLedgerRequest(left, right recorddeletion.LedgerAppendRequest) bool {
@@ -2066,126 +1120,6 @@ const previewRecordCoreSQL = `
 	cross join activity_material
 	cross join receipt_material`
 
-const lockRecordCorePurgeSQL = `
-	select operation.operation_state,
-	       reservation.state,
-	       reservation.object_id,
-	       reservation.fence_epoch
-	from public.record_purge_operations as operation
-	join public.deletion_reservations as reservation
-	  on reservation.reservation_id = operation.reservation_id
-	where operation.operation_id = $1
-	  and operation.reservation_id = $2
-	  and operation.project_id = $3
-	  and reservation.project_id = $3
-	  and reservation.object_kind = 'record'
-	  and reservation.object_id = $4
-	for update of operation, reservation`
-
-const loadRecordCorePurgeReceiptSQL = `
-	select removed_surface_digest,
-	       receipt_digest,
-	       removed_row_count,
-	       verified_absent_at
-	from public.record_core_purge_receipts
-	where operation_id = $1
-	  and adapter_name = 'record_core'`
-
-const clearRecordCoreCurrentProjectionSQL = `
-	update public.records
-	set current_revision_id = null,
-	    current_title = null,
-	    current_record_type = null,
-	    current_business_status = null,
-	    current_status_group = null,
-	    current_impact_level = null,
-	    current_occurred_at = null,
-	    current_completed_at = null,
-	    current_visibility_scope = null,
-	    current_visibility_digest = null,
-	    current_owner_id = null,
-	    current_follow_up_at = null,
-	    updated_at = transaction_timestamp()
-	where record_id = $1
-	  and project_id = $2`
-
-var deleteRecordCoreSurfaceSQL = []string{
-	`delete from public.record_draft_checkpoints
-	 where draft_id in (
-		select draft_id from public.record_drafts where record_id = $1
-	 )`,
-	`delete from public.record_drafts where record_id = $1`,
-	`delete from public.record_domain_activities where record_id = $1`,
-	`delete from public.record_revision_participants
-	 where revision_id in (
-		select revision_id from public.record_revisions where record_id = $1
-	 )`,
-	`delete from public.record_revision_tags
-	 where revision_id in (
-		select revision_id from public.record_revisions where record_id = $1
-	 )`,
-	`delete from public.record_revision_subjects
-	 where revision_id in (
-		select revision_id from public.record_revisions where record_id = $1
-	 )`,
-	`delete from public.record_revisions where record_id = $1`,
-	`delete from public.records where record_id = $1`,
-}
-
-const deleteRecordCoreDeliveryEpochSQL = `
-	delete from public.content_delivery_epochs
-	where object_id = $1
-	  and project_id = $2
-	  and object_kind = 'record'`
-
-const recordCoreContentPresentSQL = `
-	select exists (
-		select 1 from public.records where record_id = $1
-		union all
-		select 1 from public.record_revisions where record_id = $1
-		union all
-		select 1
-		from public.record_revision_subjects subject
-		join public.record_revisions revision on revision.revision_id = subject.revision_id
-		where revision.record_id = $1
-		union all
-		select 1
-		from public.record_revision_tags tag
-		join public.record_revisions revision on revision.revision_id = tag.revision_id
-		where revision.record_id = $1
-		union all
-		select 1
-		from public.record_revision_participants participant
-		join public.record_revisions revision on revision.revision_id = participant.revision_id
-		where revision.record_id = $1
-		union all
-		select 1 from public.record_drafts where record_id = $1
-		union all
-		select 1
-		from public.record_draft_checkpoints checkpoint
-		join public.record_drafts draft on draft.draft_id = checkpoint.draft_id
-		where draft.record_id = $1
-		union all
-		select 1 from public.record_domain_activities where record_id = $1
-		union all
-		select 1
-		from public.content_delivery_epochs
-		where object_id = $1
-		  and project_id = $2
-		  and object_kind = 'record'
-	) as content_present`
-
-const insertRecordCorePurgeReceiptSQL = `
-	insert into public.record_core_purge_receipts (
-		operation_id,
-		adapter_name,
-		removed_surface_digest,
-		receipt_digest,
-		removed_row_count,
-		verified_absent_at
-	) values ($1, 'record_core', $2, $3, $4, transaction_timestamp())
-	returning verified_absent_at`
-
 func (repository *PostgresRecordDeletionRepository) RecordCoreHealth(
 	ctx context.Context,
 ) (recorddeletion.AdapterHealthSnapshot, error) {
@@ -2194,28 +1128,46 @@ func (repository *PostgresRecordDeletionRepository) RecordCoreHealth(
 	}
 	var health recorddeletion.AdapterHealthSnapshot
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		surfaces := recorddeletion.RecordCoreSurfaceNames()
-		names := make([]string, len(surfaces))
-		for index, surface := range surfaces {
-			names[index] = string(surface)
-		}
-		var count int64
-		if err := transaction.tx.QueryRow(ctx, recordCoreHealthSQL, names).Scan(&count); err != nil {
-			return fmt.Errorf("read record core health: %w", err)
-		}
-		if count != int64(len(names)) {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		proof := digestRecordCoreHealth(names)
-		observed, err := recorddeletion.NewAdapterHealthSnapshot(true, 1, proof)
-		if err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		health = observed
-		return nil
+		var err error
+		health, err = recordCoreHealthInTransaction(ctx, transaction.tx)
+		return err
 	})
 	if err != nil {
 		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	return health, nil
+}
+
+func recordCoreHealthInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+) (recorddeletion.AdapterHealthSnapshot, error) {
+	if ctx == nil || tx == nil {
+		return recorddeletion.AdapterHealthSnapshot{}, ErrRecordDeletionStoreUnavailable
+	}
+	surfaces := recorddeletion.RecordCoreSurfaceNames()
+	names := make([]string, len(surfaces))
+	for index, surface := range surfaces {
+		names[index] = string(surface)
+	}
+	var count int64
+	if err := tx.QueryRow(ctx, recordCoreHealthSQL, names).Scan(&count); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, fmt.Errorf("read record core health: %w", err)
+	}
+	if count != int64(len(names)) {
+		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	if err := requireClientComparisonPurgeFunctions(ctx, tx,
+		"public.record_core_purge_v1(bytea)", "public.record_core_purge_verify_v1(bytea)"); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	if err := requireClientComparisonPurgeFunctions(ctx, tx,
+		"public.record_core_purge_v2(bytea)", "public.record_core_purge_verify_v2(bytea)"); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	health, err := recorddeletion.NewAdapterHealthSnapshot(true, 1, digestRecordCoreHealth(names))
+	if err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	return health, nil
 }
@@ -2229,36 +1181,49 @@ func (repository *PostgresRecordDeletionRepository) PreviewRecordCore(
 	}
 	var preview recorddeletion.AdapterPreviewSnapshot
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var dependencyMaterial []byte
-		var impactMaterial []byte
-		if err := transaction.tx.QueryRow(ctx, previewRecordCoreSQL,
-			target.Object.ProjectID,
-			target.CurrentRevisionID,
-			int64(target.LockVersion),
-			int64(target.AuthorizationEpoch),
-			int64(target.ContentDeliveryEpoch),
-			target.Object.ObjectID,
-		).Scan(&dependencyMaterial, &impactMaterial); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return recorddeletion.ErrDeletionPreviewStale
-			}
-			return fmt.Errorf("preview record core: %w", err)
-		}
-		if len(dependencyMaterial) == 0 || len(impactMaterial) == 0 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		preview = recorddeletion.AdapterPreviewSnapshot{
-			DependencyDigest: digestRecordCorePreview(target.DependencyGraphDigest, dependencyMaterial),
-			ImpactDigest:     digestRecordCoreImpact(impactMaterial),
-			SurvivingCopies:  []recorddeletion.AdapterSurvivingCopy{},
-		}
-		if err := preview.Validate(); err != nil {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
+		var err error
+		preview, err = previewRecordCoreInTransaction(ctx, transaction.tx, target)
+		return err
 	})
 	if err != nil {
 		return recorddeletion.AdapterPreviewSnapshot{}, err
+	}
+	return preview, nil
+}
+
+func previewRecordCoreInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	target recorddeletion.PreviewTarget,
+) (recorddeletion.AdapterPreviewSnapshot, error) {
+	if ctx == nil || tx == nil || target.Validate() != nil {
+		return recorddeletion.AdapterPreviewSnapshot{}, ErrRecordDeletionStoreUnavailable
+	}
+	var dependencyMaterial []byte
+	var impactMaterial []byte
+	if err := tx.QueryRow(ctx, previewRecordCoreSQL,
+		target.Object.ProjectID,
+		target.CurrentRevisionID,
+		int64(target.LockVersion),
+		int64(target.AuthorizationEpoch),
+		int64(target.ContentDeliveryEpoch),
+		target.Object.ObjectID,
+	).Scan(&dependencyMaterial, &impactMaterial); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionPreviewStale
+		}
+		return recorddeletion.AdapterPreviewSnapshot{}, fmt.Errorf("preview record core: %w", err)
+	}
+	if len(dependencyMaterial) == 0 || len(impactMaterial) == 0 {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	preview := recorddeletion.AdapterPreviewSnapshot{
+		DependencyDigest: digestRecordCorePreview(target.DependencyGraphDigest, dependencyMaterial),
+		ImpactDigest:     digestRecordCoreImpact(impactMaterial),
+		SurvivingCopies:  []recorddeletion.AdapterSurvivingCopy{},
+	}
+	if err := preview.Validate(); err != nil {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	return preview, nil
 }
@@ -2270,112 +1235,11 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordCore(
 	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, ErrRecordDeletionStoreUnavailable
 	}
-
 	var receipt recorddeletion.AdapterPurgeReceipt
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		operation := command.Operation
-		var operationState string
-		var reservationState string
-		var recordID string
-		var fenceEpoch int64
-		if err := transaction.tx.QueryRow(ctx, lockRecordCorePurgeSQL,
-			operation.OperationID,
-			operation.ReservationID,
-			operation.Object.ProjectID,
-			operation.Object.ObjectID,
-		).Scan(&operationState, &reservationState, &recordID, &fenceEpoch); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return recorddeletion.ErrDeletionSafetyUnavailable
-			}
-			return fmt.Errorf("lock record core purge: %w", err)
-		}
-		if operationState != string(recorddeletion.DeletionStateOnlinePurging) || reservationState != "committed" ||
-			recordID != operation.Object.ObjectID || fenceEpoch < 1 || uint64(fenceEpoch) != uint64(operation.FenceEpoch) {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-
-		existing, err := loadRecordCorePurgeReceipt(ctx, transaction.tx, operation)
-		if err == nil {
-			if existing.SurfaceDigest != command.SurfaceDigest ||
-				existing.ReceiptDigest != digestRecordCorePurgeReceipt(operation, command.SurfaceDigest, existing.RemovedRowCount) {
-				return recorddeletion.ErrDeletionSafetyUnavailable
-			}
-			receipt = existing
-			return nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-
-		projectionResult, err := transaction.tx.Exec(ctx, clearRecordCoreCurrentProjectionSQL,
-			operation.Object.ObjectID,
-			operation.Object.ProjectID,
-		)
-		if err != nil {
-			return fmt.Errorf("clear record core current projection: %w", err)
-		}
-		if projectionResult.RowsAffected() != 1 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-
-		var removedRowCount uint64
-		for _, statement := range deleteRecordCoreSurfaceSQL {
-			result, err := transaction.tx.Exec(ctx, statement, operation.Object.ObjectID)
-			if err != nil {
-				return fmt.Errorf("purge record core surface: %w", err)
-			}
-			rows := result.RowsAffected()
-			if rows < 0 || uint64(rows) > math.MaxUint64-removedRowCount {
-				return recorddeletion.ErrDeletionSafetyUnavailable
-			}
-			removedRowCount += uint64(rows)
-		}
-		result, err := transaction.tx.Exec(ctx, deleteRecordCoreDeliveryEpochSQL,
-			operation.Object.ObjectID,
-			operation.Object.ProjectID,
-		)
-		if err != nil {
-			return fmt.Errorf("purge record core delivery epoch: %w", err)
-		}
-		rows := result.RowsAffected()
-		if rows < 0 || uint64(rows) > math.MaxUint64-removedRowCount {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		removedRowCount += uint64(rows)
-
-		var contentPresent bool
-		if err := transaction.tx.QueryRow(ctx, recordCoreContentPresentSQL,
-			operation.Object.ObjectID,
-			operation.Object.ProjectID,
-		).Scan(&contentPresent); err != nil {
-			return fmt.Errorf("verify record core absence: %w", err)
-		}
-		if contentPresent {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-
-		receiptDigest := digestRecordCorePurgeReceipt(operation, command.SurfaceDigest, removedRowCount)
-		var verifiedAbsentAt time.Time
-		if err := transaction.tx.QueryRow(ctx, insertRecordCorePurgeReceiptSQL,
-			operation.OperationID,
-			command.SurfaceDigest[:],
-			receiptDigest[:],
-			int64(removedRowCount),
-		).Scan(&verifiedAbsentAt); err != nil {
-			return fmt.Errorf("insert record core purge receipt: %w", err)
-		}
-		if verifiedAbsentAt.IsZero() {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		receipt = recorddeletion.AdapterPurgeReceipt{
-			AdapterName:      recorddeletion.AdapterNameRecordCore,
-			OperationID:      operation.OperationID,
-			SurfaceDigest:    command.SurfaceDigest,
-			ReceiptDigest:    receiptDigest,
-			RemovedRowCount:  removedRowCount,
-			VerifiedAbsentAt: verifiedAbsentAt,
-		}
-		return nil
+		var err error
+		receipt, err = runRestrictedCorePurge(ctx, transaction.tx, command, false)
+		return err
 	})
 	if err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
@@ -2390,67 +1254,18 @@ func (repository *PostgresRecordDeletionRepository) VerifyRecordCorePurge(
 ) error {
 	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil ||
 		receipt.AdapterName != recorddeletion.AdapterNameRecordCore ||
-		receipt.OperationID != command.Operation.OperationID ||
-		receipt.SurfaceDigest != command.SurfaceDigest || receipt.VerifiedAbsentAt.IsZero() ||
+		receipt.OperationID != command.Operation.OperationID || receipt.SurfaceDigest != command.SurfaceDigest ||
+		receipt.VerifiedAbsentAt.IsZero() ||
 		receipt.ReceiptDigest != digestRecordCorePurgeReceipt(command.Operation, command.SurfaceDigest, receipt.RemovedRowCount) {
 		return ErrRecordDeletionStoreUnavailable
 	}
 	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		stored, err := loadRecordCorePurgeReceipt(ctx, transaction.tx, command.Operation)
+		stored, err := runRestrictedCorePurge(ctx, transaction.tx, command, true)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return recorddeletion.ErrDeletionSafetyUnavailable
-			}
 			return err
 		}
-		if stored.AdapterName != receipt.AdapterName || stored.OperationID != receipt.OperationID ||
-			stored.SurfaceDigest != receipt.SurfaceDigest || stored.ReceiptDigest != receipt.ReceiptDigest ||
-			stored.RemovedRowCount != receipt.RemovedRowCount || !stored.VerifiedAbsentAt.Equal(receipt.VerifiedAbsentAt) {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		var contentPresent bool
-		if err := transaction.tx.QueryRow(ctx, recordCoreContentPresentSQL,
-			command.Operation.Object.ObjectID,
-			command.Operation.Object.ProjectID,
-		).Scan(&contentPresent); err != nil {
-			return fmt.Errorf("verify persisted record core absence: %w", err)
-		}
-		if contentPresent {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
+		return matchClientComparisonPurgeReceipt(receipt, stored)
 	})
-}
-
-func loadRecordCorePurgeReceipt(
-	ctx context.Context,
-	tx pgx.Tx,
-	operation recorddeletion.DeletionOperation,
-) (recorddeletion.AdapterPurgeReceipt, error) {
-	var surfaceDigestBytes []byte
-	var receiptDigestBytes []byte
-	var removedRowCount int64
-	var verifiedAbsentAt time.Time
-	if err := tx.QueryRow(ctx, loadRecordCorePurgeReceiptSQL,
-		operation.OperationID,
-	).Scan(&surfaceDigestBytes, &receiptDigestBytes, &removedRowCount, &verifiedAbsentAt); err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, err
-	}
-	if len(surfaceDigestBytes) != sha256.Size || len(receiptDigestBytes) != sha256.Size || removedRowCount < 0 || verifiedAbsentAt.IsZero() {
-		return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	var surfaceDigest [sha256.Size]byte
-	var receiptDigest [sha256.Size]byte
-	copy(surfaceDigest[:], surfaceDigestBytes)
-	copy(receiptDigest[:], receiptDigestBytes)
-	return recorddeletion.AdapterPurgeReceipt{
-		AdapterName:      recorddeletion.AdapterNameRecordCore,
-		OperationID:      operation.OperationID,
-		SurfaceDigest:    surfaceDigest,
-		ReceiptDigest:    receiptDigest,
-		RemovedRowCount:  uint64(removedRowCount),
-		VerifiedAbsentAt: verifiedAbsentAt,
-	}, nil
 }
 
 func digestRecordCorePurgeReceipt(
@@ -2547,15 +1362,12 @@ func scanDeletionOperation(
 	if fenceEpoch <= 0 || ledgerSequence < 0 || releaseEpoch < 0 {
 		return recorddeletion.DeletionOperation{}, recorddeletion.ErrDeletionSafetyUnavailable
 	}
-	operation := recorddeletion.DeletionOperation{
-		OperationID:   operationID,
-		ReservationID: reservationID,
-		Object:        object,
-		ReasonCode:    recorddeletion.DeletionReasonCode(reasonCode),
-		State:         recorddeletion.DeletionState(operationState),
-		FenceEpoch:    recordplatform.ContentEpoch(fenceEpoch),
-		ReleaseEpoch:  uint64(releaseEpoch),
-	}
+	operation := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1, OperationID: operationID, ReservationID: reservationID,
+		Object:       object,
+		ReasonCode:   recorddeletion.DeletionReasonCode(reasonCode),
+		State:        recorddeletion.DeletionState(operationState),
+		FenceEpoch:   recordplatform.ContentEpoch(fenceEpoch),
+		ReleaseEpoch: uint64(releaseEpoch)}
 	if ledgerSequence > 0 {
 		ledgerEntryHash, ok := deletionStoreDigest(ledgerEntryHashBytes)
 		if !ok {

@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -18,12 +20,15 @@ const evidenceCapacityWarningReason = "project evidence quota warning threshold 
 
 func TestPostgresIntegrationEvidenceCapacityExactBoundaryAndAccounting(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-capacity-boundary", 4)
-	repository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture, runtimePool := signed.platform, signed.Runtime
+	repository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-capacity-boundary", recordbirth.PurposeEvidence)
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
 	capture := storePreparedEvidenceCaptureWithQuota(
-		t, "rec_pgcapacityboundary", "evs_pgcapacityboundary", "evi_a1a1a1a1a1a1a1a1a1a1a1a1", now,
+		t, allocation.RecordID, "evs_pgcapacityboundary", "evi_a1a1a1a1a1a1a1a1a1a1a1a1", now,
 		evidence.QuotaOutcome{Status: evidence.QuotaWarning, Reason: evidenceCapacityWarningReason},
 	)
 	policy := evidence.CapacityPolicy{ProjectLimitBytes: capture.Snapshot().Size(), WarningPercent: 80}
@@ -31,18 +36,14 @@ func TestPostgresIntegrationEvidenceCapacityExactBoundaryAndAccounting(t *testin
 	if err != nil {
 		t.Fatalf("NewRecordEvidenceRevisionParticipantWithCapacityPolicy() error = %v", err)
 	}
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, participant)
-	payload, err := repository.PersistPayload(ctx, capture.Snapshot())
-	if err != nil {
-		t.Fatalf("PersistPayload() error = %v", err)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, participant)
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, capture, allocation.AllocationID)
+	var canonicalSize, compressedSize int64
+	digest := capture.Snapshot().Hash()
+	if err := runtimePool.QueryRow(ctx, `select canonical_size_bytes,compressed_size_bytes from public.evidence_payloads where payload_digest=$1`, digest[:]).Scan(&canonicalSize, &compressedSize); err != nil {
+		t.Fatal(err)
 	}
-	intent := capture.Intent()
-	preview := capture.Preview()
-	if err := repository.PersistCaptureIntent(
-		ctx, capture.RecordID(), capture.SnapshotID(), intent, preview,
-	); err != nil {
-		t.Fatalf("PersistCaptureIntent() error = %v", err)
-	}
+	payload := EvidencePayloadMetadata{CanonicalSizeBytes: uint64(canonicalSize), CompressedSizeBytes: uint64(compressedSize)}
 	preparation := storeEvidenceRevisionPreparation(
 		t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
 	)
@@ -50,6 +51,7 @@ func TestPostgresIntegrationEvidenceCapacityExactBoundaryAndAccounting(t *testin
 		t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 		"Exact evidence capacity", "evidence-capacity-boundary", preparation,
 	)
+	command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
 	if _, err := recordRepository.CommitRevision(ctx, command); err != nil {
 		t.Fatalf("CommitRevision(exact boundary) error = %v", err)
 	}
@@ -86,16 +88,20 @@ func TestPostgresIntegrationEvidenceCapacityExactBoundaryAndAccounting(t *testin
 
 func TestPostgresIntegrationEvidenceCapacityOverBoundaryRollsBackAndPreservesIntent(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-capacity-rollback", 4)
-	repository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture, runtimePool := signed.platform, signed.Runtime
+	repository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	firstAllocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-capacity-first", recordbirth.PurposeEvidence)
+	staleAllocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-capacity-stale", recordbirth.PurposeEvidence)
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
 	quota := evidence.QuotaOutcome{Status: evidence.QuotaWarning, Reason: evidenceCapacityWarningReason}
 	first := storePreparedEvidenceCaptureWithQuota(
-		t, "rec_pgcapacityfirst", "evs_pgcapacityfirst", "evi_b1b1b1b1b1b1b1b1b1b1b1b1", now, quota,
+		t, firstAllocation.RecordID, "evs_pgcapacityfirst", "evi_b1b1b1b1b1b1b1b1b1b1b1b1", now, quota,
 	)
 	stale := storePreparedEvidenceCaptureWithQuota(
-		t, "rec_pgcapacitystale", "evs_pgcapacitystale", "evi_b2b2b2b2b2b2b2b2b2b2b2b2", now, quota,
+		t, staleAllocation.RecordID, "evs_pgcapacitystale", "evi_b2b2b2b2b2b2b2b2b2b2b2b2", now, quota,
 	)
 	policy := evidence.CapacityPolicy{
 		ProjectLimitBytes: first.Snapshot().Size() + stale.Snapshot().Size() - 1,
@@ -105,26 +111,25 @@ func TestPostgresIntegrationEvidenceCapacityOverBoundaryRollsBackAndPreservesInt
 	if err != nil {
 		t.Fatalf("NewRecordEvidenceRevisionParticipantWithCapacityPolicy() error = %v", err)
 	}
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, participant)
-	for _, capture := range []evidence.PreparedCapture{first, stale} {
-		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, capture)
-	}
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, participant)
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, first, firstAllocation.AllocationID)
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, stale, staleAllocation.AllocationID)
 	firstPreparation := storeEvidenceRevisionPreparation(
 		t, first.RecordID(), []evidence.PreparedCapture{first}, nil, []string{first.SnapshotID()},
 	)
-	if _, err := recordRepository.CommitRevision(ctx, recordEvidenceParticipantCommand(
-		t, recordplatform.OperationKindRecordCreate, first.RecordID(), "", 0, 0,
-		"First quota use", "evidence-capacity-first", firstPreparation,
-	)); err != nil {
+	firstCommand := recordEvidenceParticipantCommand(t, recordplatform.OperationKindRecordCreate, first.RecordID(), "", 0, 0,
+		"First quota use", "evidence-capacity-first", firstPreparation)
+	firstCommand = prepareRevisionBirthCommand(t, ctx, signed, firstAllocation, firstCommand)
+	if _, err := recordRepository.CommitRevision(ctx, firstCommand); err != nil {
 		t.Fatalf("CommitRevision(first) error = %v", err)
 	}
 	stalePreparation := storeEvidenceRevisionPreparation(
 		t, stale.RecordID(), []evidence.PreparedCapture{stale}, nil, []string{stale.SnapshotID()},
 	)
-	_, err = recordRepository.CommitRevision(ctx, recordEvidenceParticipantCommand(
-		t, recordplatform.OperationKindRecordCreate, stale.RecordID(), "", 0, 0,
-		"Stale quota use", "evidence-capacity-stale", stalePreparation,
-	))
+	staleCommand := recordEvidenceParticipantCommand(t, recordplatform.OperationKindRecordCreate, stale.RecordID(), "", 0, 0,
+		"Stale quota use", "evidence-capacity-stale", stalePreparation)
+	staleCommand = prepareRevisionBirthCommand(t, ctx, signed, staleAllocation, staleCommand)
+	_, err = recordRepository.CommitRevision(ctx, staleCommand)
 	if !errors.Is(err, evidence.ErrPreviewStale) || !errors.Is(err, ErrEvidencePersistenceConflict) {
 		t.Fatalf("CommitRevision(over boundary) error = %v, want stale capacity conflict", err)
 	}
@@ -133,17 +138,20 @@ func TestPostgresIntegrationEvidenceCapacityOverBoundaryRollsBackAndPreservesInt
 
 func TestPostgresIntegrationEvidenceCapacityCumulativelyAccountsMultiCaptureRevision(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-capacity-multi-capture", 4)
-	repository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture, runtimePool := signed.platform, signed.Runtime
+	repository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-capacity-multi-capture", recordbirth.PurposeEvidence)
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
 	quota := evidence.QuotaOutcome{Status: evidence.QuotaWarning, Reason: evidenceCapacityWarningReason}
 	captures := []evidence.PreparedCapture{
 		storePreparedEvidenceCaptureWithQuota(
-			t, "rec_pgcapacitymulti", "evs_pgcapacitymultia", "evi_d1d1d1d1d1d1d1d1d1d1d1d1", now, quota,
+			t, allocation.RecordID, "evs_pgcapacitymultia", "evi_d1d1d1d1d1d1d1d1d1d1d1d1", now, quota,
 		),
 		storePreparedEvidenceCaptureWithQuota(
-			t, "rec_pgcapacitymulti", "evs_pgcapacitymultib", "evi_d2d2d2d2d2d2d2d2d2d2d2d2", now, quota,
+			t, allocation.RecordID, "evs_pgcapacitymultib", "evi_d2d2d2d2d2d2d2d2d2d2d2d2", now, quota,
 		),
 	}
 	limit := captures[0].Snapshot().Size() + captures[1].Snapshot().Size()
@@ -154,19 +162,19 @@ func TestPostgresIntegrationEvidenceCapacityCumulativelyAccountsMultiCaptureRevi
 	if err != nil {
 		t.Fatalf("NewRecordEvidenceRevisionParticipantWithCapacityPolicy() error = %v", err)
 	}
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, participant)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, participant)
 	orderedSnapshotIDs := make([]string, 0, len(captures))
 	for _, capture := range captures {
-		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, capture)
+		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, capture, allocation.AllocationID)
 		orderedSnapshotIDs = append(orderedSnapshotIDs, capture.SnapshotID())
 	}
 	preparation := storeEvidenceRevisionPreparation(
 		t, captures[0].RecordID(), captures, nil, orderedSnapshotIDs,
 	)
-	if _, err := recordRepository.CommitRevision(ctx, recordEvidenceParticipantCommand(
-		t, recordplatform.OperationKindRecordCreate, captures[0].RecordID(), "", 0, 0,
-		"Cumulative evidence capacity", "evidence-capacity-multi-capture", preparation,
-	)); err != nil {
+	command := recordEvidenceParticipantCommand(t, recordplatform.OperationKindRecordCreate, captures[0].RecordID(), "", 0, 0,
+		"Cumulative evidence capacity", "evidence-capacity-multi-capture", preparation)
+	command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
+	if _, err := recordRepository.CommitRevision(ctx, command); err != nil {
 		t.Fatalf("CommitRevision(multi capture) error = %v", err)
 	}
 	usage, err := repository.ReadProjectEvidenceCapacity(ctx, string(recordauth.ProjectIDDefault))
@@ -181,17 +189,23 @@ func TestPostgresIntegrationEvidenceCapacityCumulativelyAccountsMultiCaptureRevi
 
 func TestPostgresIntegrationEvidenceCapacityConcurrentCapturesCannotOversubscribeProject(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-capacity-concurrent", 8)
-	repository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture, runtimePool := signed.platform, signed.Runtime
+	repository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	allocations := []recordbirth.Allocation{
+		reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-capacity-race-a", recordbirth.PurposeEvidence),
+		reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-capacity-race-b", recordbirth.PurposeEvidence),
+	}
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
 	quota := evidence.QuotaOutcome{Status: evidence.QuotaWarning, Reason: evidenceCapacityWarningReason}
 	captures := []evidence.PreparedCapture{
 		storePreparedEvidenceCaptureWithQuota(
-			t, "rec_pgcapacityracea", "evs_pgcapacityracea", "evi_c1c1c1c1c1c1c1c1c1c1c1c1", now, quota,
+			t, allocations[0].RecordID, "evs_pgcapacityracea", "evi_c1c1c1c1c1c1c1c1c1c1c1c1", now, quota,
 		),
 		storePreparedEvidenceCaptureWithQuota(
-			t, "rec_pgcapacityraceb", "evs_pgcapacityraceb", "evi_c2c2c2c2c2c2c2c2c2c2c2c2", now, quota,
+			t, allocations[1].RecordID, "evs_pgcapacityraceb", "evi_c2c2c2c2c2c2c2c2c2c2c2c2", now, quota,
 		),
 	}
 	limit := max(captures[0].Snapshot().Size(), captures[1].Snapshot().Size())
@@ -200,17 +214,16 @@ func TestPostgresIntegrationEvidenceCapacityConcurrentCapturesCannotOversubscrib
 	if err != nil {
 		t.Fatalf("NewRecordEvidenceRevisionParticipantWithCapacityPolicy() error = %v", err)
 	}
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, participant)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, participant)
 	commands := make([]records.RevisionCommitCommand, 0, len(captures))
 	for index, capture := range captures {
-		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, capture)
+		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, capture, allocations[index].AllocationID)
 		preparation := storeEvidenceRevisionPreparation(
 			t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
 		)
-		commands = append(commands, recordEvidenceParticipantCommand(
-			t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
-			"Concurrent quota", "evidence-capacity-race-"+string(rune('a'+index)), preparation,
-		))
+		command := recordEvidenceParticipantCommand(t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
+			"Concurrent quota", "evidence-capacity-race-"+string(rune('a'+index)), preparation)
+		commands = append(commands, prepareRevisionBirthCommand(t, ctx, signed, allocations[index], command))
 	}
 	type result struct{ err error }
 	start := make(chan struct{})

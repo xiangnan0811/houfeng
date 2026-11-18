@@ -124,7 +124,7 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.wantError {
-				tc.transition.successor.names = append(append([]string(nil), tc.transition.successor.names...), appACLCurrentP80Migration)
+				tc.transition.successor.names = append(append([]string(nil), tc.transition.successor.names...), appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 			}
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(tc.transition)
 			if tc.wantError {
@@ -338,6 +338,7 @@ func TestAppACLCurrentTransitionDeploymentOverrideSuffixClassification(t *testin
 				"0075_add_settings_deployment_overrides.sql",
 				"0076_future.sql",
 				appACLCurrentP80Migration,
+				recordDeletionSuccessorMigration,
 			}},
 		}
 		if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err == nil {
@@ -438,7 +439,7 @@ func TestAppACLCurrentTransitionAddressFamiliesSuffixClassification(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.wantError {
-				tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
+				tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 			}
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile:   tc.profile,
@@ -468,7 +469,7 @@ func TestAppACLCurrentTransitionProductSuffixClassification(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.wantError {
-				tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
+				tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 			}
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile: tc.profile, successor: migrationSourceSnapshot{names: tc.names},
@@ -497,7 +498,7 @@ func TestAppACLCurrentTransitionCollectionScopeSuffixClassification(t *testing.T
 		{name: "reordered", names: []string{"0078_ip_quality_collection_scope.sql", "0077_ip_quality_product.sql"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
+			tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile: appACLCurrentProfileP77, successor: migrationSourceSnapshot{names: tc.names},
 			})
@@ -523,7 +524,7 @@ func TestAppACLCurrentTransitionCacheExpirySuffixClassification(t *testing.T) {
 		{name: "reordered", names: []string{"0079_ip_quality_cache_expiry.sql", "0078_ip_quality_collection_scope.sql"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
+			tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile: appACLCurrentProfileP78, successor: migrationSourceSnapshot{names: tc.names},
 			})
@@ -546,7 +547,7 @@ func TestAppACLCurrentRegisteredSuffixesPreservePolicyClassification(t *testing.
 }
 
 // Keep handcrafted current-suffix consumers independent of the production
-// registry while including every migration through the current C80 target.
+// registry while including every migration through the current C81 target.
 func appACLCurrentTransitionTestSuffix(t *testing.T, firstMigration string) []string {
 	t.Helper()
 	names := []string{
@@ -568,6 +569,7 @@ func appACLCurrentTransitionTestSuffix(t *testing.T, firstMigration string) []st
 		"0078_ip_quality_collection_scope.sql",
 		"0079_ip_quality_cache_expiry.sql",
 		"0080_bound_agent_sync_replay.sql",
+		"0081_record_deletion_successor.sql",
 	}
 	for i, name := range names {
 		if name == firstMigration {

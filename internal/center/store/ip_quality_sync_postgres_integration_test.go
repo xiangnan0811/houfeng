@@ -697,6 +697,10 @@ func (tx *ipQualityReadSnapshotTx) Query(ctx context.Context, sql string, args .
 	return tx.barrier.query(ctx, rows, err)
 }
 
+func (tx *ipQualityReadSnapshotTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return tx.tx.QueryRow(ctx, sql, args...)
+}
+
 func (tx *ipQualityReadSnapshotTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	return tx.tx.Exec(ctx, sql, args...)
 }

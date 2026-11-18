@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -17,14 +17,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/attachments"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/sourceretirement"
 )
 
 type processorTestDB struct {
-	pool   *pgxpool.Pool
-	closed bool
+	pool       *pgxpool.Pool
+	closed     bool
+	closeCalls int
 }
 
-func (db *processorTestDB) Close()              { db.closed = true }
+func (db *processorTestDB) Close() {
+	db.closed = true
+	db.closeCalls++
+}
+
 func (db *processorTestDB) Pool() *pgxpool.Pool { return db.pool }
 
 type processorTestWorker struct {
@@ -81,20 +88,21 @@ func (reconciler *processorTestReconciler) RunOnce(ctx context.Context) (bool, e
 	return reconciler.claim, reconciler.err
 }
 
-func TestProcessorReconcilerGroupRunsSeriallyUntilClaim(t *testing.T) {
-	first := &processorTestReconciler{}
+func TestProcessorReconcilerGroupDoesNotStarveLaterCleanup(t *testing.T) {
+	first := &processorTestReconciler{claim: true}
 	second := &processorTestReconciler{claim: true}
 	third := &processorTestReconciler{claim: true}
-	group, err := newProcessorReconcilerGroup(first, nil, second, third)
+	group, err := newProcessorReconcilerGroup(first, second, third)
 	if err != nil {
-		t.Fatalf("newProcessorReconcilerGroup() error = %v", err)
+		t.Fatal(err)
 	}
-	claimed, err := group.RunOnce(context.Background())
-	if err != nil || !claimed {
-		t.Fatalf("RunOnce() = (%t, %v), want claimed success", claimed, err)
+	for range 6 {
+		if claimed, err := group.RunOnce(context.Background()); err != nil || !claimed {
+			t.Fatalf("cleanup progress: claimed=%t error=%v", claimed, err)
+		}
 	}
-	if first.calls != 1 || second.calls != 1 || third.calls != 0 {
-		t.Fatalf("reconciler calls = first:%d second:%d third:%d", first.calls, second.calls, third.calls)
+	if first.calls != 2 || second.calls != 2 || third.calls != 2 {
+		t.Fatalf("busy cleanup starved another owner: %d/%d/%d", first.calls, second.calls, third.calls)
 	}
 }
 
@@ -169,7 +177,23 @@ func (processorTestBlob) ResolveBlobPublicationObject(context.Context, attachmen
 	return attachments.ObjectVersion{}, attachments.ErrBlobNotFound
 }
 
-type processorTestTemporaryStore struct{ processorTestBlob }
+type processorTestTemporaryStore struct {
+	processorTestBlob
+	attachments.BlobGCStorageIdentity
+}
+
+func newProcessorTestTemporaryStore(t *testing.T, config contentProcessorConfig) processorTestTemporaryStore {
+	t.Helper()
+	blob, err := newProcessorBlobStore(context.Background(), config, nil)
+	if err != nil {
+		t.Fatalf("create S3 route identity: %v", err)
+	}
+	identity, ok := blob.(attachments.BlobGCStorageIdentity)
+	if !ok {
+		t.Fatal("configured Blob store does not provide S3 route identity")
+	}
+	return processorTestTemporaryStore{BlobGCStorageIdentity: identity}
+}
 
 func (processorTestTemporaryStore) ResolveTemporaryVersion(context.Context, string) (attachments.TemporaryObjectVersion, error) {
 	return attachments.TemporaryObjectVersion{}, attachments.ErrBlobNotFound
@@ -323,18 +347,6 @@ func (blob *processorPublicationFactoryBlob) ResolveBlobPublicationObject(
 	return attachments.ObjectVersion{}, blob.resolveErr
 }
 
-// processorBootstrapCutpointRepository is deliberately small but durable in
-// shape: the default factories below must be usable with the same repository
-// contract that production wiring receives.  Its workspace methods return
-// deterministic states so the test can reach the first filesystem cutpoint
-// without depending on PostgreSQL.
-type processorBootstrapCutpointRepository struct {
-	processorTestRepository
-	claim                     attachments.ProcessorClaim
-	workspaceCleanupCandidate *attachments.ProcessorWorkspaceCleanupCandidate
-	temporaryCleanupCandidate attachments.TemporaryObjectCleanupCandidate
-}
-
 type processorRestartReconciliationRepository struct {
 	processorTestRepository
 	candidate   *attachments.TemporaryObjectCleanupCandidate
@@ -408,219 +420,6 @@ func (store *processorRestartTemporaryStore) DeleteTemporaryVersion(
 	return nil
 }
 
-func (repository *processorBootstrapCutpointRepository) RegisterProcessorWorkspace(
-	_ context.Context,
-	registration attachments.ProcessorWorkspaceRegistration,
-) (attachments.ProcessorWorkspace, error) {
-	return attachments.ProcessorWorkspace{
-		WorkspaceID: registration.WorkspaceID, ProcessorJobID: registration.Claim.ProcessorJobID,
-		Attempt: registration.Claim.Attempt, State: attachments.ProcessorWorkspaceStateRegistered,
-		WorkspacePathDigest: registration.WorkspacePathDigest, ExpiresAt: registration.ExpiresAt,
-	}, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) MaterializeProcessorWorkspace(
-	_ context.Context,
-	transition attachments.ProcessorWorkspaceTransition,
-) (attachments.ProcessorWorkspace, error) {
-	claim := transition.Authorization.Claim
-	return attachments.ProcessorWorkspace{
-		WorkspaceID: transition.WorkspaceID, ProcessorJobID: claim.ProcessorJobID,
-		Attempt: claim.Attempt, State: attachments.ProcessorWorkspaceStateMaterialized,
-		WorkspacePathDigest: transition.WorkspacePathDigest, ExpiresAt: claim.LeaseExpiresAt,
-	}, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) BeginProcessorWorkspacePurge(
-	_ context.Context,
-	transition attachments.ProcessorWorkspaceTransition,
-) (attachments.ProcessorWorkspacePurgePlan, error) {
-	if transition.Authorization.Mode == attachments.ProcessorWorkspaceAuthorizationReconciliation {
-		return attachments.ProcessorWorkspacePurgePlan{
-			Workspace: attachments.ProcessorWorkspace{
-				WorkspaceID: transition.WorkspaceID, ProcessorJobID: "apj_bootstrapcleanup",
-				Attempt: 1, State: attachments.ProcessorWorkspaceStatePurging,
-				WorkspacePathDigest: transition.WorkspacePathDigest, ExpiresAt: time.Now().UTC().Add(time.Minute),
-			},
-		}, nil
-	}
-	claim := transition.Authorization.Claim
-	receipt, err := attachments.NewProcessorWorkspacePurgeReceipt(
-		transition.WorkspaceID, 0, time.Unix(1, 0),
-	)
-	if err != nil {
-		return attachments.ProcessorWorkspacePurgePlan{}, err
-	}
-	return attachments.ProcessorWorkspacePurgePlan{
-		Workspace: attachments.ProcessorWorkspace{
-			WorkspaceID: transition.WorkspaceID, ProcessorJobID: claim.ProcessorJobID,
-			Attempt: claim.Attempt, State: attachments.ProcessorWorkspaceStatePurged,
-			WorkspacePathDigest: transition.WorkspacePathDigest, ExpiresAt: claim.LeaseExpiresAt,
-		},
-		Receipt: &receipt,
-	}, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) CompleteProcessorWorkspacePurge(
-	_ context.Context,
-	completion attachments.ProcessorWorkspacePurgeCompletion,
-) (attachments.ProcessorWorkspacePurgeReceipt, error) {
-	return completion.Receipt, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) ClaimProcessorJob(
-	_ context.Context,
-	_ attachments.ProcessorClaimInput,
-) (*attachments.ProcessorClaim, error) {
-	claim := repository.claim
-	return &claim, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) RenewProcessorClaim(
-	_ context.Context,
-	input attachments.ProcessorRenewInput,
-) (attachments.ProcessorClaim, error) {
-	return input.Claim, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) CompleteProcessorJob(
-	_ context.Context,
-	_ attachments.ProcessorCompletionInput,
-) (attachments.ProcessorCompletionResult, error) {
-	return attachments.ProcessorCompletionResult{}, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) ClaimProcessorWorkspaceCleanup(
-	_ context.Context,
-	_ attachments.ProcessorWorkspaceCleanupClaimInput,
-) (*attachments.ProcessorWorkspaceCleanupCandidate, error) {
-	candidate := repository.workspaceCleanupCandidate
-	repository.workspaceCleanupCandidate = nil
-	return candidate, nil
-}
-
-func (repository *processorBootstrapCutpointRepository) ClaimTemporaryObjectCleanup(
-	_ context.Context,
-	_ attachments.TemporaryObjectCleanupClaimInput,
-) (*attachments.TemporaryObjectCleanupCandidate, error) {
-	candidate := repository.temporaryCleanupCandidate
-	return &candidate, nil
-}
-
-func processorBootstrapCutpointClaim() attachments.ProcessorClaim {
-	content := []byte("bootstrap cutpoint source")
-	digest := sha256.Sum256(content)
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	return attachments.ProcessorClaim{
-		ProjectID: "default", ProcessorJobID: "apj_bootstrapcutpoint",
-		UploadID: "aup_bootstrapcutpoint", AttachmentID: "att_bootstrapcutpoint",
-		DisplayName: "notes.txt", DeclaredMediaType: "text/plain",
-		Source: attachments.BlobObject{
-			Key: "sha256/" + hex.EncodeToString(digest[:]), SHA256: digest,
-			ObjectVersion: "source-v1", SizeBytes: int64(len(content)), BackendKind: attachments.BackendKindS3,
-		},
-		Profile: attachments.ProcessorProfileText, Attempt: 1, MaxAttempts: 3,
-		OwnerID: "content-processor", OwnerGeneration: 1,
-		LeaseExpiresAt: now.Add(time.Minute), ExpiresAt: now.Add(time.Hour),
-	}
-}
-
-func TestContentProcessorDefaultFactoriesPropagateCutpointObserver(t *testing.T) {
-	config := testProcessorConfig()
-	config.WorkspaceRoot = filepath.Join(t.TempDir(), "processor-root")
-	claim := processorBootstrapCutpointClaim()
-	cleanupWorkspaceID := "cpw_bootstrapcleanup"
-	cleanupWorkspacePath := filepath.Join(config.WorkspaceRoot, cleanupWorkspaceID)
-	if err := os.MkdirAll(cleanupWorkspacePath, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	cleanupWorkspaceDigest := sha256.Sum256([]byte(cleanupWorkspacePath))
-	repository := &processorBootstrapCutpointRepository{
-		claim: claim,
-		workspaceCleanupCandidate: &attachments.ProcessorWorkspaceCleanupCandidate{
-			WorkspaceID: cleanupWorkspaceID, WorkspacePathDigest: cleanupWorkspaceDigest,
-		},
-		temporaryCleanupCandidate: attachments.TemporaryObjectCleanupCandidate{
-			ProjectID: "default", UploadID: "aup_bootstrapcleanup", AuthorID: "usr_bootstrapcleanup",
-			TemporaryObjectKey: "temporary/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-			State:              attachments.UploadStateExpired, ExpiresAt: time.Now().UTC().Add(-time.Minute),
-		},
-	}
-	var got []string
-	cutpoint := func(name string) error {
-		got = append(got, name)
-		return errors.New("injected bootstrap cutpoint")
-	}
-	dependencies := (processorBootstrapDeps{
-		cutpoint: cutpoint,
-		newAttachmentRepository: func(*pgxpool.Pool) attachments.ProcessorRepository {
-			return repository
-		},
-		newBlobStore: func(contentProcessorConfig) (attachments.BlobStore, error) {
-			return processorTestTemporaryStore{}, nil
-		},
-		newScanner: func(contentProcessorConfig) (attachments.ProcessorScanner, error) {
-			return nil, nil
-		},
-		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
-			return testPreviewProcessor(), nil
-		},
-	}).withDefaults()
-
-	workspace, err := dependencies.newWorkspace(config, repository, testPreviewProcessor())
-	if err != nil {
-		t.Fatalf("default workspace factory error = %v", err)
-	}
-	if _, _, err := workspace.Process(context.Background(), attachments.ProcessorWorkspaceProcessRequest{
-		Claim: claim, WorkspaceID: "cpw_bootstrapcutpoint", ExpiresAt: claim.LeaseExpiresAt,
-		Source: bytes.NewReader([]byte("bootstrap cutpoint source")),
-	}); err == nil {
-		t.Fatal("workspace.Process() unexpectedly succeeded through injected cutpoint")
-	}
-
-	worker, err := dependencies.newWorker(
-		repository, processorTestTemporaryStore{}, processorTestWorkspace{}, config, nil,
-	)
-	if err != nil {
-		t.Fatalf("default worker factory error = %v", err)
-	}
-	if err := worker.(*attachments.ProcessorWorker).RunOnce(context.Background()); err == nil {
-		t.Fatal("worker.RunOnce() unexpectedly succeeded through injected cutpoint")
-	}
-
-	workspaceReconciler, err := dependencies.newWorkspaceReconciler(repository, config)
-	if err != nil {
-		t.Fatalf("default workspace reconciler factory error = %v", err)
-	}
-	if _, err := workspaceReconciler.RunOnce(context.Background()); err == nil {
-		t.Fatal("workspace reconciler RunOnce() unexpectedly succeeded through injected cutpoint")
-	}
-
-	reconciler, err := dependencies.newReconciler(repository, processorTestTemporaryStore{}, config)
-	if err != nil {
-		t.Fatalf("default reconciler factory error = %v", err)
-	}
-	if _, err := reconciler.RunOnce(context.Background()); err == nil {
-		t.Fatal("reconciler.RunOnce() unexpectedly succeeded through injected cutpoint")
-	}
-
-	want := []string{
-		string(attachments.ProcessorWorkspaceCutpointAfterMkdir),
-		string(attachments.ProcessorWorkerCutpointAfterClaim),
-		string(attachments.ProcessorWorkspaceCutpointAfterPhysicalPurge),
-		string(attachments.TemporaryObjectReconcilerCutpointAfterClaim),
-	}
-	next := 0
-	for _, name := range got {
-		if next < len(want) && name == want[next] {
-			next++
-		}
-	}
-	if next != len(want) {
-		t.Fatalf("default factory cutpoints = %#v, want ordered observer calls containing %#v", got, want)
-	}
-}
-
 func TestContentProcessorDefaultPublicationReconcilerFactoryFailsClosedWithoutContracts(t *testing.T) {
 	config := testProcessorConfig()
 	config.S3SecretKey = "content-that-must-not-appear"
@@ -647,7 +446,7 @@ func TestContentProcessorDefaultPublicationReconcilerFactoryFailsClosedWithoutCo
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := dependencies.newPublicationReconciler(tt.repository, tt.blob, config)
+			_, err := dependencies.newPublicationReconciler(tt.repository, tt.blob, nil, config)
 			if err == nil || err.Error() != tt.wantError {
 				t.Fatalf("newPublicationReconciler() error = %v, want %q", err, tt.wantError)
 			}
@@ -672,7 +471,7 @@ func TestContentProcessorDefaultPublicationReconcilerFactoryUsesDurableCleanupCo
 		},
 	}).withDefaults()
 
-	reconciler, err := dependencies.newPublicationReconciler(repository, blob, config)
+	reconciler, err := dependencies.newPublicationReconciler(repository, blob, nil, config)
 	if err != nil {
 		t.Fatalf("newPublicationReconciler() error = %v", err)
 	}
@@ -705,18 +504,23 @@ func TestContentProcessorRestartReconciliationResolvesUncommittedS3Version(t *te
 		State:              attachments.UploadStateExpired, ExpiresAt: time.Now().UTC().Add(-time.Minute),
 	}
 	repository := &processorRestartReconciliationRepository{candidate: &candidate}
-	store := &processorRestartTemporaryStore{resolved: attachments.TemporaryObjectVersion{
-		Key: candidate.TemporaryObjectKey, VersionID: "restart-observed-v1",
-	}}
+	store := &processorRestartTemporaryStore{
+		processorTestTemporaryStore: newProcessorTestTemporaryStore(t, config),
+		resolved: attachments.TemporaryObjectVersion{
+			Key: candidate.TemporaryObjectKey, VersionID: "restart-observed-v1",
+		},
+	}
 	newDependencies := func(cutpoint func(string) error) processorBootstrapDeps {
 		return processorBootstrapDeps{
+			loadRuntimeLaunch:   processorTestLaunch,
+			verifyRuntimeLaunch: processorTestVerifyLaunch,
 			openPostgres: func(context.Context, string) (processorPostgresDB, error) {
 				return &processorTestDB{}, nil
 			},
-			newAttachmentRepository: func(*pgxpool.Pool) attachments.ProcessorRepository {
-				return repository
+			newAttachmentRepository: func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error) {
+				return repository, func() {}, nil
 			},
-			newBlobStore: func(contentProcessorConfig) (attachments.BlobStore, error) {
+			newBlobStore: func(context.Context, contentProcessorConfig, attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
 				return store, nil
 			},
 			newScanner: func(contentProcessorConfig) (attachments.ProcessorScanner, error) {
@@ -728,7 +532,7 @@ func TestContentProcessorRestartReconciliationResolvesUncommittedS3Version(t *te
 			newWorkspace: func(contentProcessorConfig, attachments.ProcessorRepository, *attachments.PreviewProcessor) (processorWorkspace, error) {
 				return processorTestWorkspace{}, nil
 			},
-			newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
+			newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, attachments.BlobWriter, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
 				return &processorTestWorker{}, nil
 			},
 			logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -785,9 +589,23 @@ func TestContentProcessorRestartReconciliationResolvesUncommittedS3Version(t *te
 	}
 }
 
+var processorTestDeployment = "dp-" + strings.Repeat("c", 64)
+
+func processorTestLaunch(_ string, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+	return recordbirth.LaunchBinding{ProcessKind: kind, DeploymentID: processorTestDeployment}, sha256.Sum256([]byte("processor test launch")), nil
+}
+
+func processorTestVerifyLaunch(context.Context, *pgxpool.Pool, *recordbirth.PostgresAuthority, recordbirth.LaunchBinding) error {
+	return nil
+}
+
 func testProcessorConfig() contentProcessorConfig {
 	return contentProcessorConfig{
 		DatabaseURL:              "postgres://processor",
+		RecordDeploymentID:       processorTestDeployment,
+		RecordInstanceID:         "processor-test",
+		RecordInstanceKind:       "worker",
+		RecordInstanceCapability: "records.runtime",
 		BlobBackend:              attachments.BackendKindS3,
 		S3Endpoint:               "127.0.0.1:9000",
 		S3AccessKey:              "access",
@@ -808,125 +626,32 @@ func testProcessorConfig() contentProcessorConfig {
 	}
 }
 
-func TestContentProcessorBootstrapRunsReconciliationBeforeWorker(t *testing.T) {
-	config := testProcessorConfig()
-	db := &processorTestDB{}
-	workspaceReconciler := &processorTestReconciler{claim: false}
-	publicationReconciler := &processorTestReconciler{claim: false}
-	temporaryReconciler := &processorTestReconciler{claim: false}
-	worker := &processorTestWorker{}
-	var order []string
-	deps := processorBootstrapDeps{
-		openPostgres: func(context.Context, string) (processorPostgresDB, error) {
-			order = append(order, "postgres")
-			return db, nil
-		},
-		newAttachmentRepository: func(*pgxpool.Pool) attachments.ProcessorRepository {
-			order = append(order, "repository")
-			return processorTestRepository{}
-		},
-		newBlobStore: func(contentProcessorConfig) (attachments.BlobStore, error) {
-			order = append(order, "blob")
-			return processorTestTemporaryStore{}, nil
-		},
-		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
-			order = append(order, "preview")
-			return testPreviewProcessor(), nil
-		},
-		newWorkspace: func(contentProcessorConfig, attachments.ProcessorRepository, *attachments.PreviewProcessor) (processorWorkspace, error) {
-			order = append(order, "workspace")
-			return processorTestWorkspace{}, nil
-		},
-		newWorkspaceReconciler: func(attachments.ProcessorRepository, contentProcessorConfig) (processorReconciler, error) {
-			order = append(order, "workspace_reconciler")
-			return workspaceReconciler, nil
-		},
-		newPublicationReconciler: func(attachments.ProcessorRepository, attachments.BlobStore, contentProcessorConfig) (processorReconciler, error) {
-			order = append(order, "publication_reconciler")
-			return publicationReconciler, nil
-		},
-		newReconciler: func(attachments.ProcessorRepository, attachments.TemporaryObjectStore, contentProcessorConfig) (processorReconciler, error) {
-			order = append(order, "reconciler")
-			return temporaryReconciler, nil
-		},
-		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
-			order = append(order, "worker")
-			return worker, nil
-		},
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+func TestProcessorRecordAdmissionRequiresCompleteWorkerIdentity(t *testing.T) {
+	valid := testProcessorConfig()
+	if gate, err := processorRecordAdmissionGate(valid); err != nil || gate == nil {
+		t.Fatalf("valid worker identity: gate=%v error=%v", gate, err)
 	}
-	runner, cleanup, err := bootstrapContentProcessor(context.Background(), config, deps)
-	if err != nil {
-		t.Fatalf("bootstrapContentProcessor() error = %v", err)
-	}
-	if err := runner.Run(context.Background()); err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if worker.calls != 1 {
-		t.Fatalf("worker calls = %d, want 1", worker.calls)
-	}
-	if got := strings.Join(order, ","); got != "postgres,repository,blob,preview,workspace,workspace_reconciler,publication_reconciler,reconciler,worker" {
-		t.Fatalf("construction order = %q", got)
-	}
-	if workspaceReconciler.calls != 1 || publicationReconciler.calls != 1 || temporaryReconciler.calls != 1 {
-		t.Fatalf("startup reconciliation calls = workspace:%d publication:%d temporary:%d, want 1 each",
-			workspaceReconciler.calls, publicationReconciler.calls, temporaryReconciler.calls)
-	}
-	cleanup()
-	if !db.closed {
-		t.Fatal("cleanup did not close database")
-	}
-}
-
-func TestContentProcessorBootstrapIncludesPublicationReconciliationForLocalBackend(t *testing.T) {
-	config := testProcessorConfig()
-	config.BlobBackend = attachments.BackendKindLocal
-	config.BlobRoot = "/var/lib/houfeng-test/blob-root"
-	publicationReconciler := &processorTestReconciler{}
-	worker := &processorTestWorker{}
-	publicationFactoryCalls := 0
-	temporaryFactoryCalls := 0
-	runner, cleanup, err := bootstrapContentProcessor(context.Background(), config, processorBootstrapDeps{
-		openPostgres: func(context.Context, string) (processorPostgresDB, error) {
-			return &processorTestDB{}, nil
-		},
-		newAttachmentRepository: func(*pgxpool.Pool) attachments.ProcessorRepository {
-			return processorTestRepository{}
-		},
-		newBlobStore: func(contentProcessorConfig) (attachments.BlobStore, error) {
-			return processorTestBlob{}, nil
-		},
-		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
-			return testPreviewProcessor(), nil
-		},
-		newWorkspace: func(contentProcessorConfig, attachments.ProcessorRepository, *attachments.PreviewProcessor) (processorWorkspace, error) {
-			return processorTestWorkspace{}, nil
-		},
-		newWorkspaceReconciler: func(attachments.ProcessorRepository, contentProcessorConfig) (processorReconciler, error) {
-			return &processorTestReconciler{}, nil
-		},
-		newPublicationReconciler: func(attachments.ProcessorRepository, attachments.BlobStore, contentProcessorConfig) (processorReconciler, error) {
-			publicationFactoryCalls++
-			return publicationReconciler, nil
-		},
-		newReconciler: func(attachments.ProcessorRepository, attachments.TemporaryObjectStore, contentProcessorConfig) (processorReconciler, error) {
-			temporaryFactoryCalls++
-			return &processorTestReconciler{}, nil
-		},
-		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
-			return worker, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("bootstrapContentProcessor() error = %v", err)
-	}
-	defer cleanup()
-	if err := runner.Run(context.Background()); err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if publicationFactoryCalls != 1 || publicationReconciler.calls != 1 || temporaryFactoryCalls != 0 || worker.calls != 1 {
-		t.Fatalf("local bootstrap calls = publication factory:%d run:%d temporary factory:%d worker:%d",
-			publicationFactoryCalls, publicationReconciler.calls, temporaryFactoryCalls, worker.calls)
+	for _, test := range []struct {
+		name   string
+		change func(*contentProcessorConfig)
+	}{
+		{"empty", func(c *contentProcessorConfig) {
+			c.RecordDeploymentID, c.RecordInstanceID, c.RecordInstanceKind, c.RecordInstanceCapability = "", "", "", ""
+		}},
+		{"deployment", func(c *contentProcessorConfig) { c.RecordDeploymentID = "" }},
+		{"instance", func(c *contentProcessorConfig) { c.RecordInstanceID = "" }},
+		{"kind", func(c *contentProcessorConfig) { c.RecordInstanceKind = "" }},
+		{"api", func(c *contentProcessorConfig) { c.RecordInstanceKind = "api" }},
+		{"recovery", func(c *contentProcessorConfig) { c.RecordInstanceKind = "recovery" }},
+		{"capability", func(c *contentProcessorConfig) { c.RecordInstanceCapability = "" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := valid
+			test.change(&config)
+			if gate, err := processorRecordAdmissionGate(config); err == nil || gate != nil {
+				t.Fatalf("invalid identity admitted: gate=%v error=%v", gate, err)
+			}
+		})
 	}
 }
 
@@ -938,11 +663,17 @@ func TestContentProcessorBootstrapCancellationStopsBeforeClaimAndWorker(t *testi
 	temporaryReconciler := &processorTestReconciler{}
 	worker := &processorTestWorker{}
 	runner, cleanup, err := bootstrapContentProcessor(context.Background(), config, processorBootstrapDeps{
+		loadRuntimeLaunch:   processorTestLaunch,
+		verifyRuntimeLaunch: processorTestVerifyLaunch,
 		openPostgres: func(context.Context, string) (processorPostgresDB, error) {
 			return &processorTestDB{}, nil
 		},
-		newAttachmentRepository: func(*pgxpool.Pool) attachments.ProcessorRepository { return processorTestRepository{} },
-		newBlobStore:            func(contentProcessorConfig) (attachments.BlobStore, error) { return processorTestTemporaryStore{}, nil },
+		newAttachmentRepository: func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error) {
+			return processorTestRepository{}, func() {}, nil
+		},
+		newBlobStore: func(_ context.Context, config contentProcessorConfig, _ attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
+			return newProcessorTestTemporaryStore(t, config), nil
+		},
 		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
 			return testPreviewProcessor(), nil
 		},
@@ -955,7 +686,7 @@ func TestContentProcessorBootstrapCancellationStopsBeforeClaimAndWorker(t *testi
 		newReconciler: func(attachments.ProcessorRepository, attachments.TemporaryObjectStore, contentProcessorConfig) (processorReconciler, error) {
 			return temporaryReconciler, nil
 		},
-		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
+		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, attachments.BlobWriter, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
 			return worker, nil
 		},
 	})
@@ -979,9 +710,15 @@ func TestContentProcessorBootstrapBoundsReconciliationFailures(t *testing.T) {
 	worker := &processorTestWorker{}
 	sleepCalls := 0
 	runner, cleanup, err := bootstrapContentProcessor(context.Background(), config, processorBootstrapDeps{
-		openPostgres:            func(context.Context, string) (processorPostgresDB, error) { return &processorTestDB{}, nil },
-		newAttachmentRepository: func(*pgxpool.Pool) attachments.ProcessorRepository { return processorTestRepository{} },
-		newBlobStore:            func(contentProcessorConfig) (attachments.BlobStore, error) { return processorTestTemporaryStore{}, nil },
+		loadRuntimeLaunch:   processorTestLaunch,
+		verifyRuntimeLaunch: processorTestVerifyLaunch,
+		openPostgres:        func(context.Context, string) (processorPostgresDB, error) { return &processorTestDB{}, nil },
+		newAttachmentRepository: func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error) {
+			return processorTestRepository{}, func() {}, nil
+		},
+		newBlobStore: func(_ context.Context, config contentProcessorConfig, _ attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
+			return newProcessorTestTemporaryStore(t, config), nil
+		},
 		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
 			return testPreviewProcessor(), nil
 		},
@@ -994,7 +731,7 @@ func TestContentProcessorBootstrapBoundsReconciliationFailures(t *testing.T) {
 		newReconciler: func(attachments.ProcessorRepository, attachments.TemporaryObjectStore, contentProcessorConfig) (processorReconciler, error) {
 			return temporaryReconciler, nil
 		},
-		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
+		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, attachments.BlobWriter, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
 			return worker, nil
 		},
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -1167,6 +904,87 @@ func TestLoadContentProcessorConfigUsesSharedAttachmentBounds(t *testing.T) {
 	}
 }
 
+func TestLoadContentProcessorConfigReadsDeploymentIDFile(t *testing.T) {
+	clearProcessorEnv(t)
+	path := filepath.Join(t.TempDir(), "deployment-id")
+	setProcessorEnv(t, map[string]string{
+		"HOUFENG_DATABASE_URL":                     "postgres://processor",
+		"HOUFENG_ATTACHMENT_BLOB_BACKEND":          "local",
+		"HOUFENG_ATTACHMENT_BLOB_ROOT":             "/var/lib/houfeng-test/attachments",
+		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT": "/var/lib/houfeng-test/processor-workdir",
+		"HOUFENG_RECORD_DEPLOYMENT_ID":             "different-environment-value",
+		"HOUFENG_RECORD_DEPLOYMENT_ID_FILE":        path,
+		"HOUFENG_RECORD_INSTANCE_ID":               "compose-processor",
+		"HOUFENG_RECORD_INSTANCE_KIND":             "worker",
+		"HOUFENG_RECORD_INSTANCE_CAPABILITY":       "records.runtime",
+	})
+
+	if _, err := loadContentProcessorConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_RECORD_DEPLOYMENT_ID_FILE") {
+		t.Fatalf("missing deployment ID file error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(" \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadContentProcessorConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_RECORD_DEPLOYMENT_ID_FILE") {
+		t.Fatalf("empty deployment ID file error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(processorTestDeployment+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadContentProcessorConfig()
+	if err != nil {
+		t.Fatalf("load deployment ID file: %v", err)
+	}
+	if cfg.RecordDeploymentID != processorTestDeployment {
+		t.Fatalf("deployment ID = %q, want published ID %q", cfg.RecordDeploymentID, processorTestDeployment)
+	}
+	if cfg.RecordInstanceID != "compose-processor" || cfg.RecordInstanceKind != "worker" || cfg.RecordInstanceCapability != "records.runtime" {
+		t.Fatalf("processor worker identity = %q/%q/%q", cfg.RecordInstanceID, cfg.RecordInstanceKind, cfg.RecordInstanceCapability)
+	}
+	if gate, err := processorRecordAdmissionGate(cfg); err != nil || gate == nil {
+		t.Fatalf("file-backed processor identity gate = %v, %v", gate, err)
+	}
+}
+
+func TestLoadContentProcessorConfigReadsBirthReaderAndLaunch(t *testing.T) {
+	clearProcessorEnv(t)
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(name, "PG") || name == "SSL_CERT_FILE" || name == "SSL_CERT_DIR" {
+			unsetProcessorEnv(t, name)
+		}
+	}
+	credential := filepath.Join(t.TempDir(), "reader-credential")
+	if err := os.WriteFile(credential, []byte("fixture-password\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	identity := filepath.Join(t.TempDir(), "reader-identity.json")
+	launch := filepath.Join(t.TempDir(), "processor-launch.json")
+	setProcessorEnv(t, map[string]string{
+		"HOUFENG_DATABASE_URL":                        "postgres://processor",
+		"HOUFENG_ATTACHMENT_BLOB_BACKEND":             "local",
+		"HOUFENG_ATTACHMENT_BLOB_ROOT":                "/var/lib/houfeng-test/attachments",
+		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT":    "/var/lib/houfeng-test/processor-workdir",
+		"HOUFENG_RECORD_BIRTH_READER_DATABASE_URL":    "postgres://birth_reader@127.0.0.1:5432/witness?sslmode=disable",
+		"HOUFENG_RECORD_BIRTH_READER_IDENTITY_FILE":   identity,
+		"HOUFENG_RECORD_BIRTH_READER_CREDENTIAL_FILE": credential,
+		"HOUFENG_RECORD_BIRTH_LAUNCH_FILE":            launch,
+	})
+	cfg, err := loadContentProcessorConfig()
+	if err != nil {
+		t.Fatalf("load processor birth configuration: %v", err)
+	}
+	if cfg.BirthLaunchFile != launch || cfg.BirthReader.IdentityFile != identity || cfg.BirthReader.CredentialFile != credential ||
+		cfg.BirthReader.Connection == nil || cfg.BirthReader.Connection.ConnConfig.User != "birth_reader" ||
+		cfg.BirthReader.Connection.ConnConfig.Password != "fixture-password" {
+		t.Fatal("processor did not load the independent reader and launch configuration")
+	}
+	unsetProcessorEnv(t, "HOUFENG_RECORD_BIRTH_READER_CREDENTIAL_FILE")
+	if _, err := loadContentProcessorConfig(); err == nil {
+		t.Fatal("processor accepted an incomplete independent reader configuration")
+	}
+}
+
 func TestProcessorErrorClassDoesNotExposeDetails(t *testing.T) {
 	secret := "super-secret-value"
 	wrapped := errors.New(secret)
@@ -1176,15 +994,208 @@ func TestProcessorErrorClassDoesNotExposeDetails(t *testing.T) {
 	}
 }
 
+func TestContentProcessorRejectsUntrustedLaunchBeforeOpeningAPP(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		dsn    string
+		loader func(string, string) (recordbirth.LaunchBinding, [32]byte, error)
+	}{
+		{"missing launch", "postgres://processor", func(string, string) (recordbirth.LaunchBinding, [32]byte, error) {
+			return recordbirth.LaunchBinding{}, [32]byte{}, errors.New("missing")
+		}},
+		{"different deployment", "postgres://processor", func(path, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+			launch, digest, err := processorTestLaunch(path, kind)
+			launch.DeploymentID = "dp-" + strings.Repeat("d", 64)
+			return launch, digest, err
+		}},
+		{"different process", "postgres://processor", func(path, _ string) (recordbirth.LaunchBinding, [32]byte, error) {
+			return processorTestLaunch(path, "center")
+		}},
+		{"preloaded digest", "postgres://processor?houfeng.birth_launch_digest=old", processorTestLaunch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testProcessorConfig()
+			cfg.DatabaseURL = tc.dsn
+			opened := false
+			_, _, err := bootstrapContentProcessor(context.Background(), cfg, processorBootstrapDeps{
+				loadRuntimeLaunch: tc.loader,
+				openPostgres: func(context.Context, string) (processorPostgresDB, error) {
+					opened = true
+					return nil, errors.New("unexpected APP connection")
+				},
+			})
+			if err == nil || opened {
+				t.Fatalf("launch rejection = %v, APP opened = %t", err, opened)
+			}
+		})
+	}
+}
+
+func TestContentProcessorDefaultLaunchLoaderRejectsMissingFile(t *testing.T) {
+	cfg := testProcessorConfig()
+	cfg.BirthLaunchFile = filepath.Join(t.TempDir(), "missing-launch.json")
+	opened := false
+	_, _, err := bootstrapContentProcessor(context.Background(), cfg, processorBootstrapDeps{
+		openPostgres: func(context.Context, string) (processorPostgresDB, error) {
+			opened = true
+			return nil, errors.New("unexpected APP connection")
+		},
+	})
+	if err == nil || opened {
+		t.Fatalf("missing launch error = %v, APP opened = %t", err, opened)
+	}
+}
+
+func TestContentProcessorClosesAPPWhenLaunchContinuityFails(t *testing.T) {
+	database := &processorTestDB{}
+	wantErr := errors.New("checkpoint ancestry unavailable")
+	cfg := testProcessorConfig()
+	cfg.BirthLaunchFile = "/protected/processor-launch.json"
+	cfg.BirthReader.IdentityFile = "/not-read-for-never-installed"
+	_, _, err := bootstrapContentProcessor(context.Background(), cfg, processorBootstrapDeps{
+		loadRuntimeLaunch: func(path, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+			if path != cfg.BirthLaunchFile || kind != "content-processor" {
+				t.Fatalf("launch request = %q %q", path, kind)
+			}
+			return processorTestLaunch(path, kind)
+		},
+		openPostgres: func(_ context.Context, dsn string) (processorPostgresDB, error) {
+			connection, parseErr := pgxpool.ParseConfig(dsn)
+			if parseErr != nil {
+				t.Fatalf("parse APP connection: %v", parseErr)
+			}
+			_, digest, _ := processorTestLaunch("", "content-processor")
+			if got := connection.ConnConfig.RuntimeParams["houfeng.birth_launch_digest"]; got != hex.EncodeToString(digest[:]) {
+				t.Fatalf("APP launch digest = %q", got)
+			}
+			return database, nil
+		},
+		verifyRuntimeLaunch: func(_ context.Context, _ *pgxpool.Pool, reader *recordbirth.PostgresAuthority, launch recordbirth.LaunchBinding) error {
+			if reader != nil || launch.BirthInstalled {
+				t.Fatal("never-installed startup unexpectedly opened W2")
+			}
+			return wantErr
+		},
+	})
+	if !errors.Is(err, wantErr) || database.closeCalls != 1 {
+		t.Fatalf("verification failure = %v, APP closes = %d", err, database.closeCalls)
+	}
+}
+
+func TestContentProcessorInstalledBirthRequiresReader(t *testing.T) {
+	database := &processorTestDB{}
+	verified := false
+	_, _, err := bootstrapContentProcessor(context.Background(), testProcessorConfig(), processorBootstrapDeps{
+		loadRuntimeLaunch: func(path, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+			launch, digest, err := processorTestLaunch(path, kind)
+			launch.BirthInstalled = true
+			return launch, digest, err
+		},
+		openPostgres: func(context.Context, string) (processorPostgresDB, error) { return database, nil },
+		verifyRuntimeLaunch: func(context.Context, *pgxpool.Pool, *recordbirth.PostgresAuthority, recordbirth.LaunchBinding) error {
+			verified = true
+			return nil
+		},
+	})
+	if err == nil || verified || database.closeCalls != 1 {
+		t.Fatalf("missing reader error = %v, verified = %t, APP closes = %d", err, verified, database.closeCalls)
+	}
+}
+
+func TestOpenProcessorBirthReaderUsesDistinctPrincipal(t *testing.T) {
+	identity := sourceretirement.DomainIdentity{ID: "rd-" + strings.Repeat("a", 64), SystemIdentifier: "12345", DatabaseOID: 16384, DatabaseName: "fixture", Epoch: 1}
+	raw, err := json.Marshal(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityFile := filepath.Join(t.TempDir(), "identity.json")
+	if err := os.WriteFile(identityFile, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appConfig, err := pgxpool.ParseConfig("postgres://app_runtime@127.0.0.1:1/fixture?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := pgxpool.NewWithConfig(context.Background(), appConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	for _, tc := range []struct {
+		name string
+		user string
+		bad  bool
+	}{
+		{"independent", "birth_reader", false},
+		{"APP principal", "app_runtime", true},
+		{"source principal", "source_reader", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testProcessorConfig()
+			cfg.SourceWitnessDatabaseURL = "postgres://source_reader@127.0.0.1:1/fixture?sslmode=disable"
+			cfg.BirthReader.Connection, err = pgxpool.ParseConfig("postgres://" + tc.user + "@127.0.0.1:1/fixture?sslmode=disable")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.BirthReader.IdentityFile, cfg.BirthReader.CredentialFile = identityFile, "fixture-credential"
+			reader, pool, err := openProcessorBirthReader(context.Background(), cfg, app)
+			if tc.bad {
+				if err == nil || reader != nil || pool != nil {
+					t.Fatal("accepted reused reader principal")
+				}
+				return
+			}
+			if err != nil || reader == nil || pool == nil {
+				t.Fatalf("open independent reader: %v", err)
+			}
+			pool.Close()
+		})
+	}
+	t.Run("installed startup passes the independent reader to verification", func(t *testing.T) {
+		cfg := testProcessorConfig()
+		cfg.SourceWitnessDatabaseURL = "postgres://source_reader@127.0.0.1:1/fixture?sslmode=disable"
+		cfg.BirthReader.Connection, err = pgxpool.ParseConfig("postgres://birth_reader@127.0.0.1:1/fixture?sslmode=disable")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.BirthReader.IdentityFile, cfg.BirthReader.CredentialFile = identityFile, "fixture-credential"
+		database := &processorTestDB{pool: app}
+		wantErr := errors.New("stop after reader verification")
+		verified := false
+		_, _, err := bootstrapContentProcessor(context.Background(), cfg, processorBootstrapDeps{
+			loadRuntimeLaunch: func(path, kind string) (recordbirth.LaunchBinding, [32]byte, error) {
+				launch, digest, err := processorTestLaunch(path, kind)
+				launch.BirthInstalled = true
+				return launch, digest, err
+			},
+			openPostgres: func(context.Context, string) (processorPostgresDB, error) { return database, nil },
+			verifyRuntimeLaunch: func(_ context.Context, _ *pgxpool.Pool, reader *recordbirth.PostgresAuthority, _ recordbirth.LaunchBinding) error {
+				verified = reader != nil
+				return wantErr
+			},
+		})
+		if !errors.Is(err, wantErr) || !verified || database.closeCalls != 1 {
+			t.Fatalf("reader verification = %v, verified = %t, APP closes = %d", err, verified, database.closeCalls)
+		}
+	})
+}
+
 func TestContentProcessorRunClosesDatabaseAfterWorkerFailure(t *testing.T) {
 	config := testProcessorConfig()
 	database := &processorTestDB{}
+	authorityCloses := 0
 	wantErr := errors.New("worker stopped")
 	worker := &processorTestWorker{err: wantErr}
 	err := runContentProcessor(context.Background(), config, processorBootstrapDeps{
-		openPostgres:            func(context.Context, string) (processorPostgresDB, error) { return database, nil },
-		newAttachmentRepository: func(*pgxpool.Pool) attachments.ProcessorRepository { return processorTestRepository{} },
-		newBlobStore:            func(contentProcessorConfig) (attachments.BlobStore, error) { return processorTestTemporaryStore{}, nil },
+		loadRuntimeLaunch:   processorTestLaunch,
+		verifyRuntimeLaunch: processorTestVerifyLaunch,
+		openPostgres:        func(context.Context, string) (processorPostgresDB, error) { return database, nil },
+		newAttachmentRepository: func(context.Context, contentProcessorConfig, *pgxpool.Pool) (attachments.ProcessorRepository, func(), error) {
+			return processorTestRepository{}, func() { authorityCloses++ }, nil
+		},
+		newBlobStore: func(_ context.Context, config contentProcessorConfig, _ attachments.LocalNamespaceRepository) (attachments.BlobStore, error) {
+			return newProcessorTestTemporaryStore(t, config), nil
+		},
 		newPreviewProcessor: func(contentProcessorConfig) (*attachments.PreviewProcessor, error) {
 			return testPreviewProcessor(), nil
 		},
@@ -1197,7 +1208,7 @@ func TestContentProcessorRunClosesDatabaseAfterWorkerFailure(t *testing.T) {
 		newReconciler: func(attachments.ProcessorRepository, attachments.TemporaryObjectStore, contentProcessorConfig) (processorReconciler, error) {
 			return &processorTestReconciler{}, nil
 		},
-		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
+		newWorker: func(attachments.ProcessorRepository, attachments.BlobStore, attachments.BlobWriter, processorWorkspace, contentProcessorConfig, attachments.ProcessorScanner) (processorWorker, error) {
 			return worker, nil
 		},
 	})
@@ -1206,6 +1217,9 @@ func TestContentProcessorRunClosesDatabaseAfterWorkerFailure(t *testing.T) {
 	}
 	if !database.closed {
 		t.Fatal("runContentProcessor() did not close database")
+	}
+	if authorityCloses != 1 {
+		t.Fatalf("runContentProcessor() authority closes = %d, want 1", authorityCloses)
 	}
 }
 
@@ -1233,8 +1247,13 @@ func clearProcessorEnv(t *testing.T) {
 		"HOUFENG_CLAMAV_NETWORK", "HOUFENG_CLAMAV_ADDRESS",
 		"HOUFENG_CLAMAV_DIAL_TIMEOUT", "HOUFENG_CLAMAV_OPERATION_TIMEOUT", "HOUFENG_CLAMAV_CHUNK_SIZE",
 		"HOUFENG_CLAMAV_RESPONSE_LIMIT",
+		"HOUFENG_RECORD_DEPLOYMENT_ID", "HOUFENG_RECORD_DEPLOYMENT_ID_FILE",
+		"HOUFENG_RECORD_INSTANCE_ID", "HOUFENG_RECORD_INSTANCE_KIND", "HOUFENG_RECORD_INSTANCE_CAPABILITY",
 	} {
 		t.Setenv(key, "")
+	}
+	for _, key := range []string{"HOUFENG_RECORD_BIRTH_LAUNCH_FILE", "HOUFENG_RECORD_BIRTH_READER_DATABASE_URL", "HOUFENG_RECORD_BIRTH_READER_IDENTITY_FILE", "HOUFENG_RECORD_BIRTH_READER_CREDENTIAL_FILE"} {
+		unsetProcessorEnv(t, key)
 	}
 }
 

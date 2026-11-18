@@ -43,7 +43,7 @@ func TestNewPostgresEvidenceRepositoryWithReadSourcesRejectsClosedDependencies(t
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if repository, err := NewPostgresEvidenceRepositoryWithReadSources(test.pool, test.gate, test.registry, test.current, test.subjects); repository != nil || !errors.Is(err, evidence.ErrEvidenceServiceUnavailable) {
+			if repository, err := NewPostgresEvidenceRepositoryWithReadSources(test.pool, test.gate, test.registry, test.current, test.subjects, nil); repository != nil || !errors.Is(err, evidence.ErrEvidenceServiceUnavailable) {
 				t.Fatalf("NewPostgresEvidenceRepositoryWithReadSources() = (%T, %v), want nil/unavailable", repository, err)
 			}
 		})
@@ -259,7 +259,7 @@ func evidenceReadRestrictedSubject(t *testing.T, capture recordauth.SourceAuthor
 
 func storeEvidenceReadRegistry(t *testing.T) evidence.Registry {
 	t.Helper()
-	registry, err := evidence.NewRegistry([]evidence.Kind{task5RecoveryEvidenceKind{descriptor: storeEvidenceDescriptor()}})
+	registry, err := evidence.NewRegistry([]evidence.Kind{evidenceBirthTestKind{descriptor: storeEvidenceDescriptor()}})
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
@@ -270,7 +270,7 @@ func storeEvidenceReadOtherRegistry(t *testing.T) evidence.Registry {
 	t.Helper()
 	descriptor := storeEvidenceDescriptor()
 	descriptor.Key = evidence.IPQualityReportV1Key()
-	registry, err := evidence.NewRegistry([]evidence.Kind{task5RecoveryEvidenceKind{descriptor: descriptor}})
+	registry, err := evidence.NewRegistry([]evidence.Kind{evidenceBirthTestKind{descriptor: descriptor}})
 	if err != nil {
 		t.Fatalf("NewRegistry(other kind) error = %v", err)
 	}

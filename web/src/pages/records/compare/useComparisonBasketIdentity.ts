@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { formatDateTime } from '../../../lib/format'
 import { getEvidenceSnapshot, getRecordRevision } from '../../../lib/recordsApi'
+import { useAuth } from '../../../lib/auth-context'
+import { createRecordReadCleanupScope, type RecordReadCleanupScope } from '../../../lib/recordReadCleanup'
 import type { RecordRevision } from '../../../lib/types'
 import { evidenceChoiceMeta, factsFromSnapshot, isAbortError, subjectFactLabel } from './comparisonEvidenceCopy'
 import { comparisonFixedItemKey, type ComparisonURLFixedItem } from './comparisonQueryState'
@@ -28,11 +30,13 @@ function revisionMeta(revision: RecordRevision, snapshotCount: number): string {
   ].filter(Boolean).join(' · ')
 }
 
-async function readIdentity(item: ComparisonURLFixedItem, signal: AbortSignal): Promise<BasketIdentity> {
+async function readIdentity(item: ComparisonURLFixedItem, cleanup: RecordReadCleanupScope): Promise<BasketIdentity> {
+  const signal = cleanup.signal
   const technical = technicalFor(item)
   try {
     if ('snapshot_id' in item) {
       const snapshot = await getEvidenceSnapshot(item.snapshot_id, signal)
+      await cleanup.include(snapshot.record_id)
       if (signal.aborted) return { status: 'loading' }
       const facts = factsFromSnapshot(snapshot)
       return {
@@ -46,6 +50,7 @@ async function readIdentity(item: ComparisonURLFixedItem, signal: AbortSignal): 
         technical: [snapshot.snapshot_id, snapshot.subject.id].filter(Boolean),
       }
     }
+    await cleanup.include(item.record_id)
     const revision = await getRecordRevision(item.record_id, item.revision_id)
     if (signal.aborted) return { status: 'loading' }
     return {
@@ -69,11 +74,12 @@ function loadingIdentities(items: readonly ComparisonURLFixedItem[]): ReadonlyMa
 export function useComparisonBasketIdentity(
   items: readonly ComparisonURLFixedItem[],
 ): ReadonlyMap<string, BasketIdentity> {
-  const signature = items.map((item) => {
+  const userId = useAuth().user?.user_id ?? ''
+  const signature = `${userId}\0${items.map((item) => {
     const key = comparisonFixedItemKey(item)
     if ('snapshot_id' in item) return key
     return `${key}:${(item.snapshot_ids ?? []).join(',')}`
-  }).join('\n')
+  }).join('\n')}`
   const itemsRef = useRef(items)
   const signatureRef = useRef(signature)
   const generationRef = useRef(0)
@@ -92,11 +98,17 @@ export function useComparisonBasketIdentity(
     const generation = generationRef.current
     const current = itemsRef.current
     const requestSignature = signature
-    const controller = new AbortController()
     let active = true
+    const cleanup = createRecordReadCleanupScope(userId, () => {
+      active = false
+      generationRef.current += 1
+      setStored({ signature: requestSignature, map: new Map(current.map((item) => [
+        comparisonFixedItemKey(item), { status: 'unreadable' as const, technical: technicalFor(item) },
+      ])) })
+    })
     void Promise.all(current.map(async (item) => {
       const key = comparisonFixedItemKey(item)
-      const identity = await readIdentity(item, controller.signal)
+      const identity = await readIdentity(item, cleanup)
       return [key, identity] as const
     })).then((entries) => {
       if (!active || generation !== generationRef.current) return
@@ -104,9 +116,9 @@ export function useComparisonBasketIdentity(
     })
     return () => {
       active = false
-      controller.abort()
+      cleanup.dispose()
     }
-  }, [signature])
+  }, [signature, userId])
 
   return identities
 }

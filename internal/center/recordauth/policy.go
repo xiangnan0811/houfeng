@@ -89,7 +89,8 @@ func (Policy) Authorize(actor ActorScope, capability Capability, resource Resour
 			}
 			continue
 		}
-		if source.FinalFloor == nil || !scopeAllowsActor(*source.FinalFloor, normalizedActor) {
+		if source.LastLiveScope == nil || !scopeAllowsActor(*source.LastLiveScope, normalizedActor) ||
+			source.FinalFloor == nil || !scopeAllowsActor(*source.FinalFloor, normalizedActor) {
 			return denied(DenialReasonSource)
 		}
 	}

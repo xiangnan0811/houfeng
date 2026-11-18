@@ -269,6 +269,10 @@ type CandidateEvent struct {
 	AuthScope     recordauth.ResourceScope
 	CanonicalHash [32]byte
 
+	// SourceRecordID is the authoritative owner route used for mutation fencing.
+	// It is not a presentation reference and is excluded from canonical bytes.
+	SourceRecordID string
+
 	// RevisionNo orders a record's revisions. It is carried so publication can
 	// tell a newer revision from an older one that arrived late, which arrival
 	// order alone cannot answer.

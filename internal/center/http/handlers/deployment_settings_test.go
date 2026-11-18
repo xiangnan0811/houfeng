@@ -93,6 +93,22 @@ func TestDeploymentSettingsDoesNotReturnSensitiveValues(t *testing.T) {
 		Key: "HOUFENG_DATABASE_URL", Group: centerconfig.DeploymentSettingGroupDatabase,
 		Source: centerconfig.DeploymentSettingSourceEnvironment, Value: new(sentinel), Configured: true, Sensitive: true,
 		Application: centerconfig.DeploymentSettingApplicationStartup,
+	}, {
+		Key: "HOUFENG_RECORD_BIRTH_READER_DATABASE_URL", Group: centerconfig.DeploymentSettingGroupRecords,
+		Source: centerconfig.DeploymentSettingSourceEnvironment, Value: new(sentinel), Configured: true,
+		Application: centerconfig.DeploymentSettingApplicationStartup,
+	}, {
+		Key: "HOUFENG_RECORD_BIRTH_READER_IDENTITY_FILE", Group: centerconfig.DeploymentSettingGroupRecords,
+		Source: centerconfig.DeploymentSettingSourceEnvironment, Value: new(sentinel), Configured: true,
+		Application: centerconfig.DeploymentSettingApplicationStartup,
+	}, {
+		Key: "HOUFENG_RECORD_BIRTH_READER_CREDENTIAL_FILE", Group: centerconfig.DeploymentSettingGroupRecords,
+		Source: centerconfig.DeploymentSettingSourceEnvironment, Value: new(sentinel), Configured: true,
+		Application: centerconfig.DeploymentSettingApplicationStartup,
+	}, {
+		Key: "HOUFENG_RECORD_BIRTH_LAUNCH_FILE", Group: centerconfig.DeploymentSettingGroupRecords,
+		Source: centerconfig.DeploymentSettingSourceEnvironment, Value: new(sentinel), Configured: true,
+		Application: centerconfig.DeploymentSettingApplicationStartup,
 	}}}
 	service := accessadmin.New(&accessAdminHandlerRepository{}, accessadmin.Options{})
 	req := httptest.NewRequest(http.MethodGet, "/api/settings/deployment", nil)
@@ -105,5 +121,13 @@ func TestDeploymentSettingsDoesNotReturnSensitiveValues(t *testing.T) {
 	}
 	if strings.Contains(response.Body.String(), sentinel) {
 		t.Fatalf("response contains sensitive sentinel: %s", response.Body.String())
+	}
+	for _, key := range []string{
+		"HOUFENG_RECORD_BIRTH_READER_DATABASE_URL", "HOUFENG_RECORD_BIRTH_READER_IDENTITY_FILE",
+		"HOUFENG_RECORD_BIRTH_READER_CREDENTIAL_FILE", "HOUFENG_RECORD_BIRTH_LAUNCH_FILE",
+	} {
+		if !strings.Contains(response.Body.String(), `"key":"`+key+`"`) {
+			t.Fatalf("response omitted configured setting %q", key)
+		}
 	}
 }

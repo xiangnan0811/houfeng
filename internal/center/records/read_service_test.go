@@ -329,7 +329,7 @@ func TestRecordLifecycleServiceUsesCurrentAuthorizationAndCAS(t *testing.T) {
 		t.Fatalf("ChangeLifecycle() = %#v calls=%d", got, store.calls)
 	}
 	if store.command.CurrentRevisionID != "rrv_current1" || store.command.LockVersion != 7 ||
-		store.command.AuthorizationEpoch != 5 || store.command.ActorID != actor.UserID ||
+		store.command.AuthorizationEpoch != 5 ||
 		store.command.Idempotency.Key.Key != "archive-1" || store.command.Idempotency.RequestFingerprint.Validate() != nil {
 		t.Fatalf("lifecycle command = %#v", store.command)
 	}

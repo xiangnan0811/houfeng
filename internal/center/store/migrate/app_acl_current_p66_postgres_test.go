@@ -37,7 +37,7 @@ func TestPostgresIntegrationAppACLCurrentP66ReleaseProfile(t *testing.T) {
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() P66 genesis upgrade: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestPostgresIntegrationAppACLCurrentP66ReleaseProfile(t *testing.T) {
 	}
 
 	beforeRepeat := afterUpgrade.Base
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() P66 successor repeat: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestPostgresIntegrationAppACLCurrentP66ChainedReleaseProfile(t *testing.T) 
 	runtimeDB := state.fixture.openRolePool(t, ctx, state.fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-	successor, err := ConvergeAppACLCurrent(ctx, state.migratorDB, state.fixture.runtimeRole, state.fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, state.migratorDB, state.fixture.runtimeRole, state.fixture.adminRole, state.fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() P62 to P63 to P66 chain: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestPostgresIntegrationAppACLCurrentP66ChainedReleaseProfile(t *testing.T) 
 	}
 
 	beforeRepeat := afterUpgrade.Base
-	repeated, err := ConvergeAppACLCurrent(ctx, state.migratorDB, state.fixture.runtimeRole, state.fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, state.migratorDB, state.fixture.runtimeRole, state.fixture.adminRole, state.fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() P62 to P63 to P66 exact repeat: %v", err)
 	}

@@ -11,7 +11,7 @@ AGENT_RELEASE_ARM64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_arm64
 AGENT_RELEASE_SOURCE := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_source.tar.gz
 AGENT_RELEASE_LICENSES := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_licenses.txt
 
-.PHONY: fmt-go check-fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain test-ci-tools verify-web verify-docs verify verify-ci
+.PHONY: fmt-go check-fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain test-ci-tools test-g2-layout verify-web verify-docs verify verify-ci
 
 fmt-go:
 	@if ! command -v $(GO) >/dev/null 2>&1; then \
@@ -151,6 +151,12 @@ verify:
 
 test-ci-tools:
 	node --test scripts/ci-scope.test.mjs scripts/verify-ci.test.mjs scripts/verify-candidate.test.mjs scripts/check-ci-results.test.mjs
+	$(MAKE) --no-print-directory test-g2-layout
+
+test-g2-layout:
+	@command -v python3 >/dev/null 2>&1 || { echo 'python3 not found' >&2; exit 1; }
+	PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s scripts/g2/source -p source_layout_test.py -v
+	PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s scripts/g2/http_smoke -p http_smoke_layout_test.py -v
 
 verify-ci:
 	node scripts/verify-ci.mjs

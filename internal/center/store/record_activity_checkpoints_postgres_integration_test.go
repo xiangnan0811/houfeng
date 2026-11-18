@@ -18,6 +18,16 @@ func newActivityCheckpointRepository(t *testing.T, ctx context.Context) *Activit
 	return repository
 }
 
+func mustActivitySourceLease(t *testing.T, ctx context.Context, repository *ActivityProjectionRepository, generation uint64, kind activity.SourceKind) activity.SourceLease {
+	t.Helper()
+	lease, acquired, err := repository.AcquireSourceLease(ctx, generation, kind, "activity-test", time.Hour)
+	if err != nil || !acquired {
+		t.Fatalf("acquire activity source lease: acquired=%t err=%v", acquired, err)
+	}
+	t.Cleanup(func() { _ = repository.ReleaseSourceLease(context.Background(), lease) })
+	return lease
+}
+
 // An unseen source must come back with no position at all. Returning "now" or an
 // error instead would make the first pass skip every event that already exists.
 func TestPostgresIntegrationActivityCheckpointStartsWithNoPosition(t *testing.T) {
@@ -48,8 +58,9 @@ func TestPostgresIntegrationActivityCheckpointRoundTripsAPosition(t *testing.T) 
 	ctx := context.Background()
 	repository := newActivityCheckpointRepository(t, ctx)
 	position := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	lease := mustActivitySourceLease(t, ctx, repository, 1, activity.SourceKindRecordDomain)
 
-	if err := repository.SaveCheckpoint(ctx, 1, activity.SourceCheckpoint{
+	if err := repository.SaveCheckpoint(ctx, lease, activity.SourceCheckpoint{
 		Kind:            activity.SourceKindRecordDomain,
 		RecordedThrough: position,
 		CaughtUp:        true,
@@ -76,15 +87,16 @@ func TestPostgresIntegrationActivityCheckpointRefusesToMoveBackwards(t *testing.
 	repository := newActivityCheckpointRepository(t, ctx)
 	ahead := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	behind := ahead.Add(-time.Hour)
+	lease := mustActivitySourceLease(t, ctx, repository, 1, activity.SourceKindRecordDomain)
 
-	if err := repository.SaveCheckpoint(ctx, 1, activity.SourceCheckpoint{
+	if err := repository.SaveCheckpoint(ctx, lease, activity.SourceCheckpoint{
 		Kind:            activity.SourceKindRecordDomain,
 		RecordedThrough: ahead,
 		CaughtUp:        true,
 	}); err != nil {
 		t.Fatalf("save leading checkpoint: %v", err)
 	}
-	if err := repository.SaveCheckpoint(ctx, 1, activity.SourceCheckpoint{
+	if err := repository.SaveCheckpoint(ctx, lease, activity.SourceCheckpoint{
 		Kind:            activity.SourceKindRecordDomain,
 		RecordedThrough: behind,
 	}); err != nil {
@@ -106,15 +118,16 @@ func TestPostgresIntegrationActivityCheckpointFailureKeepsThePosition(t *testing
 	ctx := context.Background()
 	repository := newActivityCheckpointRepository(t, ctx)
 	position := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	lease := mustActivitySourceLease(t, ctx, repository, 1, activity.SourceKindRecordDomain)
 
-	if err := repository.SaveCheckpoint(ctx, 1, activity.SourceCheckpoint{
+	if err := repository.SaveCheckpoint(ctx, lease, activity.SourceCheckpoint{
 		Kind:            activity.SourceKindRecordDomain,
 		RecordedThrough: position,
 		CaughtUp:        true,
 	}); err != nil {
 		t.Fatalf("save initial checkpoint: %v", err)
 	}
-	if err := repository.SaveCheckpoint(ctx, 1, activity.SourceCheckpoint{
+	if err := repository.SaveCheckpoint(ctx, lease, activity.SourceCheckpoint{
 		Kind:          activity.SourceKindRecordDomain,
 		Attempt:       3,
 		LastErrorCode: "source_unavailable",
@@ -147,7 +160,8 @@ func TestPostgresIntegrationActivityCheckpointKeepsSourcesIndependent(t *testing
 		activity.SourceKindRecordDomain: recordPosition,
 		activity.SourceKindAssetHistory: assetPosition,
 	} {
-		if err := repository.SaveCheckpoint(ctx, 1, activity.SourceCheckpoint{
+		lease := mustActivitySourceLease(t, ctx, repository, 1, kind)
+		if err := repository.SaveCheckpoint(ctx, lease, activity.SourceCheckpoint{
 			Kind:            kind,
 			RecordedThrough: position,
 			CaughtUp:        true,

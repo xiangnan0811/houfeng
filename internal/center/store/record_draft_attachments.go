@@ -2,12 +2,12 @@ package store
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/records"
@@ -32,9 +32,9 @@ type draftOwnedUpload struct {
 // releaseDraftOwnedAttachments 在删除草稿行之前释放草稿名下的附件：record_attachments.draft_id
 // 是不可延迟的 on delete restrict 外键，不先释放，丢弃、发布清理或过期清理都会被外键拦住。
 //
-// 调用方必须已持有草稿行锁，因此不会有新的上传预留挂到这份草稿上。锁顺序与处理器、
-// 放弃上传过期一致：先锁配额账户，再锁附件、上传与处理任务行；登记 Blob 时先锁
-// blob_objects 再删上传分片，与 Blob GC 的 blob_objects -> parts 顺序一致。
+// 调用方已按 namespace → record → draft → quota/Blob 顺序取得并重验锁。
+// 这里复用同一 strong fence，随后才取得附件、上传、工作区与任务行锁；
+// 分片移交和 owner 删除触发器不得在这些行锁之后升级 Blob fence。
 //
 // 仍有工作在进行时返回 ErrDraftAttachmentsBusy 且不改动任何行：处理器持有未过期租约、
 // 处理工作区尚未清除，或 S3 临时对象尚未删除——这些清理都依赖要删除的行。
@@ -47,6 +47,9 @@ func releaseDraftOwnedAttachments(ctx context.Context, tx pgx.Tx, draftID string
 		return err
 	}
 
+	if _, err := tx.Exec(ctx, `select public.record_revision_blob_fence()`); err != nil {
+		return fmt.Errorf("lock draft attachment Blob fence: %w", err)
+	}
 	usage, quotaVersion, err := lockAttachmentQuotaAccount(ctx, tx, projectID)
 	if err != nil {
 		return err
@@ -71,7 +74,7 @@ func releaseDraftOwnedAttachments(ctx context.Context, tx pgx.Tx, draftID string
 	if err != nil {
 		return err
 	}
-	registeredPhysical, err := registerDraftUploadPartBlobs(ctx, tx, owned, uploadIDs)
+	registeredPhysical, err := registerDraftUploadPartBlobs(ctx, tx, draftID)
 	if err != nil {
 		return err
 	}
@@ -288,86 +291,18 @@ func releasedDraftAttachmentUsage(
 	return next, nil
 }
 
-// registerDraftUploadPartBlobs 把只被上传分片引用的对象登记进 blob_objects，返回新增的物理字节。
-// 已登记的对象（例如可用附件的原件）保持不变。即使没有分片也先锁 blob_objects，
-// 保证随后删除分片时与 Blob GC 的加锁顺序一致。
-func registerDraftUploadPartBlobs(
-	ctx context.Context,
-	tx pgx.Tx,
-	owned []draftOwnedAttachment,
-	uploadIDs []string,
-) (int64, error) {
-	if _, err := tx.Exec(ctx, `lock table public.blob_objects in row exclusive mode`); err != nil {
-		return 0, fmt.Errorf("lock Blob metadata for draft attachment release: %w", err)
-	}
-	if len(uploadIDs) == 0 {
-		return 0, nil
-	}
-	transports := make(map[string]attachments.TransportKind, len(owned))
-	for _, attachment := range owned {
-		if attachment.upload != nil {
-			transports[attachment.upload.uploadID] = attachment.upload.transport
-		}
-	}
-	rows, err := tx.Query(ctx, `
-		select upload_id, size_bytes, sha256_digest, object_version
-		from public.attachment_upload_parts
-		where upload_id = any($1::text[])
-		order by upload_id, part_number`, uploadIDs)
-	if err != nil {
-		return 0, fmt.Errorf("load draft attachment upload parts: %w", err)
-	}
-	objects := make([]attachments.BlobObject, 0)
-	for rows.Next() {
-		var uploadID string
-		var digest []byte
-		var object attachments.BlobObject
-		if err := rows.Scan(&uploadID, &object.SizeBytes, &digest, &object.ObjectVersion); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("scan draft attachment upload part: %w", err)
-		}
-		if len(digest) != len(object.SHA256) {
-			rows.Close()
-			return 0, attachments.ErrAttachmentConflict
-		}
-		copy(object.SHA256[:], digest)
-		object.Key = "sha256/" + hex.EncodeToString(digest)
-		switch transports[uploadID] {
-		case attachments.TransportKindLocal:
-			object.BackendKind = attachments.BackendKindLocal
-		case attachments.TransportKindS3:
-			object.BackendKind = attachments.BackendKindS3
-		default:
-			rows.Close()
-			return 0, attachments.ErrAttachmentConflict
-		}
-		if object.Validate() != nil {
-			rows.Close()
-			return 0, attachments.ErrAttachmentConflict
-		}
-		objects = append(objects, object)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate draft attachment upload parts: %w", err)
-	}
-
+// registerDraftUploadPartBlobs preserves consumed parts before the enclosing
+// transaction removes their owners and transfers the durable responsibilities.
+func registerDraftUploadPartBlobs(ctx context.Context, tx pgx.Tx, draftID string) (int64, error) {
 	var physical int64
-	for _, object := range objects {
-		inserted, err := ensureAttachmentBlob(ctx, tx, object)
-		if errors.Is(err, attachments.ErrBlobGCProtected) {
-			// 同一对象正被 GC 删除：等删除完成后再释放，避免登记一个即将消失的对象。
+	err := tx.QueryRow(ctx, `select public.record_draft_upload_parts_handoff(
+		convert_to(jsonb_build_object('draft_id',$1::text)::text,'UTF8'))`, draftID).Scan(&physical)
+	if err != nil {
+		var postgresError *pgconn.PgError
+		if errors.As(err, &postgresError) && postgresError.Code == "55000" && postgresError.Message == "blob key has active cleanup responsibility" {
 			return 0, records.ErrDraftAttachmentsBusy
 		}
-		if err != nil {
-			return 0, err
-		}
-		if inserted {
-			if physical > math.MaxInt64-object.SizeBytes {
-				return 0, attachments.ErrQuotaOverflow
-			}
-			physical += object.SizeBytes
-		}
+		return 0, mapAttachmentWriteError("handoff draft upload parts", err)
 	}
 	return physical, nil
 }

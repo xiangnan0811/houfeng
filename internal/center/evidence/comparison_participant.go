@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 const (
@@ -20,10 +21,11 @@ const (
 )
 
 type ComparisonSaveRequest struct {
-	Actor    ActorScope
-	RecordID string
-	Token    string
-	Now      time.Time
+	Actor        ActorScope
+	AllocationID string
+	RecordID     string
+	Token        string
+	Now          time.Time
 	// AllowExpiredReplay reconstructs the deterministic save plan for an
 	// already-completed Idempotency-Key. The HTTP handler may set this only
 	// after peeking a completed claim; expired tokens are not live credentials.
@@ -62,7 +64,7 @@ func NewPreparedComparisonCopy(
 }
 
 func (copy PreparedComparisonCopy) Validate() error {
-	if !validClosedPreparedID(copy.recordID, "rec_") || !ValidSnapshotID(copy.snapshotID) ||
+	if !recordidentity.IsValid(copy.recordID) || !ValidSnapshotID(copy.snapshotID) ||
 		!ValidSnapshotID(copy.copiedFromSnapshotID) || copy.snapshotID == copy.copiedFromSnapshotID ||
 		copy.snapshot.Hash() == [sha256.Size]byte{} || copy.snapshot.Size() == 0 {
 		return fmt.Errorf("%w: comparison copy", ErrInvalidRevisionPreparation)
@@ -95,7 +97,7 @@ func (result PreparedComparisonResult) Empty() bool {
 }
 
 func (result PreparedComparisonResult) Validate() error {
-	if !validClosedPreparedID(result.recordID, "rec_") || !ValidSnapshotID(result.snapshotID) ||
+	if !recordidentity.IsValid(result.recordID) || !ValidSnapshotID(result.snapshotID) ||
 		result.snapshot.Envelope().Key != ComparisonResultV1Key() ||
 		result.snapshot.Hash() == [sha256.Size]byte{} || result.snapshot.Size() == 0 {
 		return fmt.Errorf("%w: comparison result", ErrInvalidRevisionPreparation)
@@ -125,7 +127,7 @@ func PrepareComparisonSave(
 	if ctx == nil || source == nil || signer == nil || len(registry.Keys()) == 0 {
 		return ComparisonSavePreparation{}, ErrInvalidComparisonSelection
 	}
-	if !validClosedPreparedID(request.RecordID, "rec_") || request.Token == "" {
+	if !recordidentity.IsValid(request.RecordID) || request.Token == "" {
 		return ComparisonSavePreparation{}, ErrComparisonIntentInvalid
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
@@ -193,11 +195,6 @@ func PrepareComparisonSave(
 	if err != nil {
 		return ComparisonSavePreparation{}, err
 	}
-	if payloads != nil {
-		if err := payloads.PersistCapturePayload(ctx, resultSnapshot); err != nil {
-			return ComparisonSavePreparation{}, fmt.Errorf("persist comparison result payload: %w", err)
-		}
-	}
 	result := PreparedComparisonResult{
 		recordID:   request.RecordID,
 		snapshotID: DeriveComparisonResultSnapshotID(request.RecordID, claims.Digest),
@@ -205,6 +202,14 @@ func PrepareComparisonSave(
 	}
 	if err := result.Validate(); err != nil {
 		return ComparisonSavePreparation{}, err
+	}
+	if payloads != nil {
+		if err := payloads.PersistCapturePayload(ctx, CapturePayloadRoute{
+			Actor: actor.Clone(), AllocationID: request.AllocationID, RecordID: result.recordID, SnapshotID: result.snapshotID,
+			ComparisonClaims: &claims,
+		}, resultSnapshot); err != nil {
+			return ComparisonSavePreparation{}, fmt.Errorf("persist comparison result payload: %w", err)
+		}
 	}
 	return ComparisonSavePreparation{
 		Token:  request.Token,
@@ -268,6 +273,14 @@ func reevaluateComparisonClaims(
 		}
 		return comparisonSaveEvaluation{}, err
 	}
+	if len(evaluated.Items) != len(claims.Items) {
+		return comparisonSaveEvaluation{}, ErrComparisonIntentStale
+	}
+	for index, item := range evaluated.Items {
+		if item.SourceRecordID != claims.Items[index].SourceRecordID {
+			return comparisonSaveEvaluation{}, ErrComparisonIntentStale
+		}
+	}
 	snapshotIDs := make([]string, 0, len(evaluated.Items))
 	for _, item := range evaluated.Items {
 		if item.SnapshotID == "" {
@@ -299,8 +312,11 @@ func reevaluateComparisonClaims(
 func comparisonFixedItemsFromClaims(claims ComparisonIntentClaims) ([]ComparisonFixedItem, error) {
 	items := make([]ComparisonFixedItem, 0, len(claims.Items))
 	for _, item := range claims.Items {
+		if !recordidentity.IsValid(item.SourceRecordID) {
+			return nil, ErrComparisonIntentStale
+		}
 		if item.RecordID != "" || item.RevisionID != "" {
-			if !validClosedPreparedID(item.RecordID, "rec_") || !validClosedPreparedID(item.RevisionID, "rrv_") {
+			if !recordidentity.IsValid(item.RecordID) || !validClosedPreparedID(item.RevisionID, "rrv_") {
 				return nil, ErrComparisonIntentStale
 			}
 			revision := ComparisonFixedRevision{RecordID: item.RecordID, RevisionID: item.RevisionID}

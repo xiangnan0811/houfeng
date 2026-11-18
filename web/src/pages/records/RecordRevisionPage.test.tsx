@@ -4,6 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { recordDetailFixture, recordRevisionFixture } from './testFixtures'
 import { RecordRevisionPage } from './RecordRevisionPage'
+import type * as DraftBuffers from './draftBuffer'
+
+vi.mock('./draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof DraftBuffers>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 vi.mock('../../lib/auth-context', () => {
   const auth = {

@@ -11,6 +11,13 @@ import type {
 } from '../../../lib/types'
 import { targetObservationFixture } from '../../../lib/targetObservationFixture'
 import { useComparisonObjectPicker } from './useComparisonObjectPicker'
+import { broadcastRecordCleanup } from '../../../lib/recordSecurity'
+
+vi.mock('../../../lib/auth-context', () => ({ useAuth: () => ({ user: { user_id: 'usr_compare' } }) }))
+vi.mock('../draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../draftBuffer')>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 const api = vi.hoisted(() => ({
   vps: vi.fn(),
@@ -103,6 +110,7 @@ function activity(ids: string[], nextCursor?: string): SubjectActivityListRespon
 function snapshot(id: string, status: 'complete' | 'partial' = 'complete'): EvidenceSnapshotRead {
   return {
     snapshot_id: id,
+    record_id: 'rec_1',
     title: `快照 ${id}`,
     kind: 'monitoring.host',
     observed_at: '2026-07-01T12:30:00Z',
@@ -511,5 +519,27 @@ describe('useComparisonObjectPicker', () => {
       await laterAdd
     })
     expect(onAdd).not.toHaveBeenCalled()
+  })
+
+  it('clears hydrated copies and prevents a late add after source cleanup', async () => {
+    const onAdd = vi.fn()
+    const { result } = renderHook(() => useComparisonObjectPicker({ open: true, from: FROM, to: TO, onAdd }))
+    await waitFor(() => expect(result.current.state.subjectsStatus).toBe('ready'))
+    act(() => result.current.commands.selectSubject(result.current.state.subjects[0]!))
+    await waitFor(() => expect(result.current.state.rows[0]?.pending).toBe(false))
+    const late = deferred<EvidenceSnapshotRead>()
+    api.snapshot.mockImplementationOnce(() => late.promise)
+    let adding!: Promise<void>
+    act(() => { adding = result.current.commands.addSnapshot('evs_a') })
+    act(() => broadcastRecordCleanup('usr_compare', {
+      version: 1, cursor: '9007199254740993', operation_id: 'rpo_picker', record_id: 'rec_1',
+      cleanup_epoch: '9007199254740995', scopes: ['comparison_workbench'],
+    }))
+    expect(result.current.state.rows).toEqual([])
+    expect(result.current.state.evidenceStatus).toBe('unreadable')
+    await act(async () => { late.resolve(snapshot('evs_a')); await adding })
+    expect(onAdd).not.toHaveBeenCalled()
+    expect(result.current.state.rows).toEqual([])
+    expect(result.current.state.addingSnapshotId).toBeNull()
   })
 })

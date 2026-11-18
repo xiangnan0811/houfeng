@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ type S3BlobStore struct {
 
 var _ BlobStore = (*S3BlobStore)(nil)
 var _ BlobGCDeleter = (*S3BlobStore)(nil)
+var _ BlobGCStorageIdentity = (*S3BlobStore)(nil)
 var _ TemporaryObjectStore = (*S3BlobStore)(nil)
 var _ TemporaryUploadPresigner = (*S3BlobStore)(nil)
 var _ BlobPublicationResolver = (*S3BlobStore)(nil)
@@ -44,6 +46,28 @@ func NewS3BlobStore(client *minio.Client, bucket string) (*S3BlobStore, error) {
 		core:   minio.Core{Client: client},
 		bucket: bucket,
 	}, nil
+}
+
+// GCStorageIdentity binds an exact-version deletion claim to this client's
+// endpoint and bucket. It does not identify the provider's bucket incarnation.
+func (store *S3BlobStore) GCStorageIdentity() ([sha256.Size]byte, error) {
+	if store == nil || store.client == nil || strings.TrimSpace(store.bucket) != store.bucket || s3utils.CheckValidBucketNameStrict(store.bucket) != nil {
+		return [sha256.Size]byte{}, ErrInvalidBlobStoreConfig
+	}
+	endpoint := store.client.EndpointURL()
+	if endpoint == nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.User != nil {
+		return [sha256.Size]byte{}, ErrInvalidBlobStoreConfig
+	}
+	hash := sha256.New()
+	var length [8]byte
+	for _, value := range [...]string{"houfeng.s3-gc-storage-route.v1", endpoint.String(), store.bucket} {
+		binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+		_, _ = hash.Write(length[:])
+		_, _ = io.WriteString(hash, value)
+	}
+	var identity [sha256.Size]byte
+	hash.Sum(identity[:0])
+	return identity, nil
 }
 
 func (store *S3BlobStore) PresignTemporaryUpload(

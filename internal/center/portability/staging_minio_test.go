@@ -35,10 +35,11 @@ func TestPortabilityImportStagingMinIOConformance(t *testing.T) {
 	writer := &importWriterStub{}
 	imports := newMemoryImportRepository()
 	base.imports = imports
+	attachImportBirth(t, base, imports)
 	base.importer = writer
 	base.rebuilder = &importRebuildStub{}
 	base.backendKind = "s3"
-	base.staging = NewLeasedBlobStore(blob)
+	base.staging = NewLeasedBlobStore(blob, &portabilityMemoryWriter{blob: blob})
 
 	archive := mustImportArchive(t, []ArchiveEntry{{
 		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
@@ -79,17 +80,17 @@ func TestPortabilityLeasedBlobStoreStageImportMinIORoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewS3BlobStore() error = %v", err)
 	}
-	store := NewLeasedBlobStore(inner)
+	store := NewLeasedBlobStore(inner, &portabilityMemoryWriter{blob: inner})
 	payload := []byte("minio-import-bytes")
-	version, err := store.StageImport(context.Background(), "rij_minio1", payload)
+	version, err := store.StageImport(context.Background(), portabilityStageRequest("import_archive", "rij_minio1"), payload)
 	if err != nil {
 		t.Fatalf("StageImport() error = %v", err)
 	}
-	if version.VersionID == "" {
+	if version.Version.VersionID == "" {
 		t.Fatal("MinIO StageImport returned empty object version")
 	}
 	store.dropLease("rij_minio1")
-	reader, _, err := store.OpenPublished(context.Background(), "rij_minio1", version)
+	reader, _, err := store.OpenPublished(context.Background(), "rij_minio1", version.Version, version.NamespaceID)
 	if err != nil {
 		t.Fatalf("OpenPublished() error = %v", err)
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
-	"houfeng/internal/center/records"
+	"houfeng/internal/center/recordidentity"
 )
 
 var (
@@ -57,7 +57,7 @@ func NormalizeRecordSelection(input RecordSelection) (RecordSelection, error) {
 	unique := make(map[string]bool, len(input.RecordIDs))
 	ordered := make([]string, 0, len(input.RecordIDs))
 	for _, recordID := range input.RecordIDs {
-		if !records.ValidRecordRootID(recordID) {
+		if !recordidentity.IsValid(recordID) {
 			return RecordSelection{}, fmt.Errorf("%w: record id %q", ErrInvalidRecordSelection, recordID)
 		}
 		if unique[recordID] {

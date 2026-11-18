@@ -5,6 +5,8 @@ import { listMonitoringInstances, listTargets, listVPSAssets } from '../../../li
 import { ApiError } from '../../../lib/apiRequest'
 import { formatDateTime } from '../../../lib/format'
 import { getEvidenceSnapshot, listSubjectActivity } from '../../../lib/recordsApi'
+import { useAuth } from '../../../lib/auth-context'
+import { createRecordReadCleanupScope, type RecordReadCleanupScope } from '../../../lib/recordReadCleanup'
 import type {
   MonitoringInstanceRecord,
   RecordSubjectKind,
@@ -259,6 +261,8 @@ export function useComparisonObjectPicker(options: Options): {
   }
 } {
   const { open, from: initialFrom, to: initialTo, onAdd } = options
+  const userId = useAuth().user?.user_id ?? ''
+  const [sessionUserId, setSessionUserId] = useState(userId)
   const [sessionOpen, setSessionOpen] = useState(open)
   const [openCycle, setOpenCycle] = useState(0)
   const [subjectKind, setSubjectKindState] = useState<RecordSubjectKind>('vps')
@@ -276,6 +280,10 @@ export function useComparisonObjectPicker(options: Options): {
   if (sessionOpen !== open) {
     setSessionOpen(open)
     if (open) setOpenCycle((value) => value + 1)
+  }
+  if (sessionUserId !== userId) {
+    setSessionUserId(userId)
+    setOpenCycle((value) => value + 1)
   }
 
   const selected = picked
@@ -327,6 +335,7 @@ export function useComparisonObjectPicker(options: Options): {
   const loadingMoreRef = useRef(false)
   const evidenceAbortRef = useRef<AbortController | null>(null)
   const addAbortRef = useRef<AbortController | null>(null)
+  const cleanupRef = useRef<RecordReadCleanupScope | null>(null)
   const openRef = useRef(open)
   const onAddRef = useRef(onAdd)
   const selectedRef = useRef<ComparisonPickerSubject | null>(null)
@@ -341,6 +350,8 @@ export function useComparisonObjectPicker(options: Options): {
 
   const invalidateInFlight = useCallback(() => {
     evidenceRequestRef.current += 1
+    cleanupRef.current?.dispose()
+    cleanupRef.current = null
     evidenceAbortRef.current?.abort()
     evidenceAbortRef.current = null
     addAbortRef.current?.abort()
@@ -369,9 +380,12 @@ export function useComparisonObjectPicker(options: Options): {
     signal: AbortSignal,
     key: string,
   ) => {
+    const cleanup = cleanupRef.current
     for (const snapshotId of ids) {
       void getEvidenceSnapshot(snapshotId, signal)
-        .then((snapshot) => {
+        .then(async (snapshot) => {
+          if (!cleanup) throw new Error('证据读取工作区已关闭')
+          await cleanup.include(snapshot.record_id)
           if (requestId !== evidenceRequestRef.current || signal.aborted || !openRef.current) return
           const facts = factsFromSnapshot(snapshot)
           patchRow(key, snapshotId, (row) => ({
@@ -389,6 +403,9 @@ export function useComparisonObjectPicker(options: Options): {
           patchRow(key, snapshotId, (row) => ({
             ...row,
             qualityLabel: null,
+            title: '不可读取证据',
+            timeLabel: '',
+            kindLabel: '证据快照',
             pending: false,
             unreadable: true,
           }))
@@ -485,6 +502,15 @@ export function useComparisonObjectPicker(options: Options): {
     const key = evidenceKey
     const from = windowFrom
     const to = windowTo
+    const cleanup = createRecordReadCleanupScope(userId, () => {
+      invalidateInFlight()
+      setAdding(null)
+      setEvidencePage({
+        key, status: 'unreadable', message: '证据来源访问已撤销。',
+        rows: [], hasMore: false, loadingMore: false, moreError: null, notice: null,
+      })
+    })
+    cleanupRef.current = cleanup
     nextCursorRef.current = null
     rowsRef.current = []
     loadingMoreRef.current = false
@@ -542,14 +568,18 @@ export function useComparisonObjectPicker(options: Options): {
     return () => {
       evidenceRequestRef.current += 1
       controller.abort()
+      cleanup.dispose()
+      if (cleanupRef.current === cleanup) cleanupRef.current = null
     }
-  }, [evidenceKey, open, selected, verifySnapshots, windowFrom, windowTo])
+  }, [evidenceKey, invalidateInFlight, open, selected, userId, verifySnapshots, windowFrom, windowTo])
 
   useEffect(() => () => {
     addAbortRef.current?.abort()
     addAbortRef.current = null
     evidenceAbortRef.current?.abort()
     evidenceAbortRef.current = null
+    cleanupRef.current?.dispose()
+    cleanupRef.current = null
   }, [])
 
   const appendEvidence = useCallback(() => {
@@ -618,9 +648,12 @@ export function useComparisonObjectPicker(options: Options): {
     addAbortRef.current = controller
     const key = evidenceKeyRef.current
     const cycle = openCycleRef.current
+    const cleanup = cleanupRef.current
     setAdding({ cycle, snapshotId: id })
     try {
+      if (!cleanup) throw new Error('证据读取工作区已关闭')
       const snapshot = await getEvidenceSnapshot(id, controller.signal)
+      await cleanup.include(snapshot.record_id)
       if (controller.signal.aborted || !openRef.current) return
       const facts = factsFromSnapshot(snapshot)
       patchRow(key, id, (row) => ({
@@ -638,6 +671,9 @@ export function useComparisonObjectPicker(options: Options): {
       patchRow(key, id, (row) => ({
         ...row,
         qualityLabel: null,
+        title: '不可读取证据',
+        timeLabel: '',
+        kindLabel: '证据快照',
         pending: false,
         unreadable: true,
       }))

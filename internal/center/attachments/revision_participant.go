@@ -2,10 +2,14 @@ package attachments
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"houfeng/internal/center/recordidentity"
 )
 
 // RevisionAttachmentCommit contains the Records identities needed to publish
@@ -23,7 +27,7 @@ type RevisionAttachmentCommit struct {
 // only through tx and never calls a Blob backend or processor.
 func ApplyRevisionAttachments(ctx context.Context, tx pgx.Tx, commit RevisionAttachmentCommit) error {
 	if ctx == nil || tx == nil || commit.ProjectID != "default" ||
-		!validPrefixedID(commit.RecordID, "rec_") || !validPrefixedID(commit.RevisionID, "rrv_") ||
+		!recordidentity.IsValid(commit.RecordID) || !validPrefixedID(commit.RevisionID, "rrv_") ||
 		(commit.DraftID != "" && !validPrefixedID(commit.DraftID, "rdf_")) {
 		return ErrInvalidAttachmentCommand
 	}
@@ -32,49 +36,23 @@ func ApplyRevisionAttachments(ctx context.Context, tx pgx.Tx, commit RevisionAtt
 		return err
 	}
 	for ordinal, attachmentID := range references {
-		var recordID, draftID *string
-		var state string
-		err := tx.QueryRow(ctx, `
-			select record_id, draft_id, attachment_state
-			from public.record_attachments
-			where project_id = $1 and attachment_id = $2
-			for update`, commit.ProjectID, attachmentID).Scan(&recordID, &draftID, &state)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrAttachmentConflict
-		}
+		body, err := json.Marshal(struct {
+			ProjectID    string `json:"project_id"`
+			RecordID     string `json:"record_id"`
+			RevisionID   string `json:"revision_id"`
+			DraftID      string `json:"draft_id"`
+			AttachmentID string `json:"attachment_id"`
+			Ordinal      int    `json:"ordinal"`
+		}{commit.ProjectID, commit.RecordID, commit.RevisionID, commit.DraftID, attachmentID, ordinal})
 		if err != nil {
-			return fmt.Errorf("lock revision attachment: %w", err)
+			return err
 		}
-		if UploadState(state) != UploadStateAvailable {
-			return ErrAttachmentConflict
-		}
-		switch {
-		case recordID != nil && *recordID == commit.RecordID && draftID == nil:
-			// Existing logical attachment already belongs to this record.
-		case recordID == nil && draftID != nil && commit.DraftID != "" && *draftID == commit.DraftID:
-			tag, err := tx.Exec(ctx, `
-				update public.record_attachments
-				set record_id = $3, draft_id = null, updated_at = transaction_timestamp()
-				where project_id = $1 and attachment_id = $2
-				  and record_id is null and draft_id = $4 and attachment_state = $5`,
-				commit.ProjectID, attachmentID, commit.RecordID, commit.DraftID, UploadStateAvailable,
-			)
-			if err != nil {
-				return fmt.Errorf("transfer revision attachment: %w", err)
+		if _, err := tx.Exec(ctx, `select public.record_revision_attachment_publish($1)`, body); err != nil {
+			var databaseError *pgconn.PgError
+			if errors.As(err, &databaseError) && (databaseError.Code == "55000" || databaseError.Code == "P0002") {
+				return fmt.Errorf("%w: %w", ErrAttachmentConflict, err)
 			}
-			if tag.RowsAffected() != 1 {
-				return ErrAttachmentConflict
-			}
-		default:
-			return ErrAttachmentConflict
-		}
-		if _, err := tx.Exec(ctx, `
-			insert into public.record_revision_attachments (
-				record_id, revision_id, ordinal, attachment_id
-			) values ($1, $2, $3, $4)`,
-			commit.RecordID, commit.RevisionID, int64(ordinal), attachmentID,
-		); err != nil {
-			return fmt.Errorf("insert record revision attachment: %w", err)
+			return fmt.Errorf("publish revision attachment: %w", err)
 		}
 	}
 	return nil

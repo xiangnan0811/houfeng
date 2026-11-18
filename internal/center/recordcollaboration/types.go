@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -124,23 +125,11 @@ func (binding RecordFenceBinding) Epoch() recordplatform.ContentEpoch {
 
 func (binding RecordFenceBinding) Validate() error {
 	if !binding.sealed || recordplatform.ValidateProjectID(binding.projectID) != nil ||
-		!validRecordID(binding.recordID) ||
+		!recordidentity.IsValid(binding.recordID) ||
 		binding.epoch > recordplatform.ContentEpoch(math.MaxInt64) {
 		return ErrInvalidRecordFenceBinding
 	}
 	return nil
-}
-
-func validRecordID(value string) bool {
-	if len(value) <= len("rec_") || len(value) > len("rec_")+64 || value[:len("rec_")] != "rec_" {
-		return false
-	}
-	for _, character := range value[len("rec_"):] {
-		if (character < 'a' || character > 'z') && (character < '0' || character > '9') {
-			return false
-		}
-	}
-	return true
 }
 
 type ActionStatus string

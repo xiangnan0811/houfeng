@@ -16,7 +16,7 @@ func TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets(t *test
 	ctx := context.Background()
 	fixture := newRecordPlatformPostgresBaseFixture(t, ctx)
 	migrator := fixture.openDirectRolePool(t, ctx, fixture.migrator, "retention-migrator", 1)
-	if _, err := storemigrate.ConvergeAppACLCurrent(ctx, migrator, fixture.runtime, fixture.admin); err != nil {
+	if _, err := storemigrate.ConvergeAppACLCurrent(ctx, migrator, fixture.runtime, fixture.admin, fixture.deletionWorker); err != nil {
 		t.Fatalf("converge current retention schema: %v", err)
 	}
 	runtime := fixture.openDirectRuntimePool(t, ctx, "retention-runtime", 1)

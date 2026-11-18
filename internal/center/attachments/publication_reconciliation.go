@@ -55,19 +55,22 @@ type BlobPublicationReconcilerConfig struct {
 	RetryDelay         time.Duration
 	Now                func() time.Time
 	Cutpoint           func(BlobPublicationReconcilerCutpoint) error
+	LocalCleanup       *LocalCleanupCoordinator
 }
 
 type BlobPublicationReconciler struct {
-	repository BlobPublicationCleanupRepository
-	resolver   BlobPublicationResolver
-	blob       BlobStore
-	projectID  string
-	backend    BackendKind
-	ownerID    string
-	lease      time.Duration
-	retryDelay time.Duration
-	now        func() time.Time
-	cutpoint   func(BlobPublicationReconcilerCutpoint) error
+	repository     BlobPublicationCleanupRepository
+	resolver       BlobPublicationResolver
+	blob           BlobStore
+	projectID      string
+	backend        BackendKind
+	ownerID        string
+	lease          time.Duration
+	retryDelay     time.Duration
+	now            func() time.Time
+	cutpoint       func(BlobPublicationReconcilerCutpoint) error
+	localCleanup   *LocalCleanupCoordinator
+	localDiscovery LocalPublicationCleanupDiscovery
 }
 
 func NewBlobPublicationReconciler(
@@ -101,7 +104,15 @@ func NewBlobPublicationReconciler(
 		config.RetryDelay < time.Microsecond || config.RetryDelay > maxBlobPublicationReconciliationRetry {
 		return nil, ErrInvalidBlobPublicationRequest
 	}
+	var localDiscovery LocalPublicationCleanupDiscovery
+	if config.BackendKind == BackendKindLocal {
+		localDiscovery, _ = repository.(LocalPublicationCleanupDiscovery)
+		if config.LocalCleanup == nil || nilUploadServiceDependency(localDiscovery) {
+			return nil, ErrInvalidBlobPublicationRequest
+		}
+	}
 	return &BlobPublicationReconciler{
+		localCleanup: config.LocalCleanup, localDiscovery: localDiscovery,
 		repository: repository, resolver: resolver, blob: blob,
 		projectID: config.ProjectID, backend: config.BackendKind, ownerID: config.CleanupOwnerID,
 		lease: config.OwnerLeaseDuration, retryDelay: config.RetryDelay,
@@ -109,9 +120,8 @@ func NewBlobPublicationReconciler(
 	}, nil
 }
 
-// RunOnce claims at most one intent and never discovers work through object
-// listing.  A missing exact final key is terminal only when the resolver
-// returns ErrBlobNotFound for that one key.
+// RunOnce discovers at most one cleanup key. Local cleanup claims and proves
+// the complete target set under its key guard; S3 retains exact-version cleanup.
 func (reconciler *BlobPublicationReconciler) RunOnce(ctx context.Context) (bool, error) {
 	if err := reconciler.validate(ctx); err != nil {
 		return false, err
@@ -119,6 +129,17 @@ func (reconciler *BlobPublicationReconciler) RunOnce(ctx context.Context) (bool,
 	now := reconciler.now().UTC()
 	if now.IsZero() {
 		return false, ErrInvalidBlobPublicationRequest
+	}
+	if reconciler.backend == BackendKindLocal {
+		request, err := reconciler.localDiscovery.DiscoverLocalPublicationCleanup(ctx, BlobPublicationCleanupClaimRequest{
+			ProjectID: reconciler.projectID, BackendKind: reconciler.backend,
+			CleanupOwnerID: reconciler.ownerID, OwnerLeaseDuration: reconciler.lease,
+		}, reconciler.localCleanup.NamespaceID())
+		if err != nil || request == nil {
+			return false, err
+		}
+		_, err = reconciler.localCleanup.Cleanup(ctx, *request, reconciler.ownerID)
+		return true, err
 	}
 	claim, err := reconciler.repository.ClaimBlobPublicationCleanup(ctx, BlobPublicationCleanupClaimRequest{
 		ProjectID: reconciler.projectID, BackendKind: reconciler.backend,

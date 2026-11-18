@@ -10,11 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/evidence/adapters"
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/contracts/agentapi"
@@ -24,15 +26,16 @@ func TestPostgresIntegrationIPQualityProductEvidenceBoundary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	fixture := newRecordsPostgresFixture(t, ctx)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	fixture := signed.platform
 	// Records source IDs require the production 16-character lowercase-hex
 	// suffix; seed helpers derive both VPS and monitoring IDs from this prefix.
 	const prefix = "0123456789abcde1"
-	const recordID = "rec_ipqproductevidence"
 	const snapshotID = "evs_ipqproductevidence"
 	const credential = "ip-quality-evidence-fixture-key"
 	seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-product-evidence", 4)
+	runtimePool := signed.Runtime
 	repository := NewPostgresIPQualityRepository(runtimePool)
 	settingsRepository := NewPostgresSettingsRepository(runtimePool, centersettings.DeploymentDefaults{})
 	if _, err := settingsRepository.MutateSettings(ctx, func(settings centersettings.CenterSettings) (centersettings.CenterSettings, error) {
@@ -70,6 +73,8 @@ func TestPostgresIntegrationIPQualityProductEvidenceBoundary(t *testing.T) {
 	}
 
 	actor := storeEvidenceParticipantActor(t)
+	allocation := reserveRevisionBirth(t, ctx, signed, actor, "ip-quality-product-evidence-boundary", recordbirth.PurposeEvidence)
+	recordID := allocation.RecordID
 	selection := evidence.Selection{
 		Key: evidence.IPQualityReportV1Key(), SourceType: string(recordauth.SourceKindVPS),
 		SourceID:        "vps_" + prefix,
@@ -104,14 +109,14 @@ func TestPostgresIntegrationIPQualityProductEvidenceBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareCapture(): %v", err)
 	}
-	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture)
+	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture, allocation.AllocationID)
 	preparation := storeEvidenceRevisionPreparation(t, recordID, []evidence.PreparedCapture{capture}, nil, []string{snapshotID})
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, NewRecordEvidenceRevisionParticipant())
-	if _, err := recordRepository.CommitRevision(ctx, recordEvidenceParticipantCommand(
-		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
-		"Agent IP quality evidence", "ip-quality-product-evidence-boundary", preparation,
-	)); err != nil {
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant())
+	command := recordEvidenceParticipantCommand(t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
+		"Agent IP quality evidence", "ip-quality-product-evidence-boundary", preparation)
+	command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
+	if _, err := recordRepository.CommitRevision(ctx, command); err != nil {
 		t.Fatalf("CommitRevision(evidence): %v", err)
 	}
 	assertPersistedEvidenceSnapshotMatchesCapture(t, ctx, fixture, capture)

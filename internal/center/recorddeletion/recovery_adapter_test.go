@@ -5,8 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-
-	"houfeng/internal/center/recordplatform"
 )
 
 func TestRecoverySurfaceAllowlistsAreClosedOrderedAndDefensivelyCopied(t *testing.T) {
@@ -48,214 +46,144 @@ func TestRecoverySurfaceAllowlistsAreClosedOrderedAndDefensivelyCopied(t *testin
 	}
 }
 
-func TestRecoveryAdapterReplaysDeleteCommitWithExactCoreAndMinimalAuditSurfaces(t *testing.T) {
+func TestRecoveryAdapterUsesVerifiedEntryAndHeldFence(t *testing.T) {
 	t.Parallel()
-
-	entry := deletionTestLedgerEntry(t, deletionTestLedgerRequest(t, LedgerEntryDeleteCommit, 0))
-	entry.Sequence = 12
-	entry.EntryHash = deletionTestDigest(101)
-	request := deletionTestRecoveryRequest(t, entry, 11, deletionTestDigest(100))
-	store := &deletionRecoveryStoreStub{}
-	store.apply = func(command RecoveryReplayCommand) (RecoveryReplayReceipt, error) {
-		if !command.PurgeContent || !reflect.DeepEqual(command.AllowedSurfaces, RecordDeleteRecoverySurfaces()) {
-			t.Fatalf("delete replay command = %#v", command)
-		}
-		if command.RequestFingerprintBytes != request.RequestFingerprintBytes {
-			t.Fatalf("recovery fingerprint bytes = %x, want %x", command.RequestFingerprintBytes, request.RequestFingerprintBytes)
-		}
-		return RecoveryReplayReceipt{
-			Sequence:      entry.Sequence,
-			EntryHash:     entry.EntryHash,
-			SurfaceDigest: command.SurfaceDigest,
-			ContentPurged: true,
-		}, nil
-	}
-	adapter, err := NewRecoveryAdapter(store)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
-
-	receipt, err := adapter.Replay(context.Background(), request)
-	if err != nil {
-		t.Fatalf("Replay() error = %v", err)
-	}
-	if receipt.Sequence != entry.Sequence || !receipt.ContentPurged || store.calls != 1 {
-		t.Fatalf("Replay() = %#v calls=%d", receipt, store.calls)
-	}
-	store.last.AllowedSurfaces[0] = "tampered"
-	if !reflect.DeepEqual(RecordDeleteRecoverySurfaces(), deletionRecoveryDeleteSurfacesForTest()) {
-		t.Fatal("store mutation changed recovery allowlist")
-	}
-}
-
-func TestRecoveryAdapterReplaysNotCommittedWithoutCorePurgeOrTombstoneSurfaces(t *testing.T) {
-	t.Parallel()
-
-	entry := deletionTestLedgerEntry(t, deletionTestLedgerRequest(t, LedgerEntryAttemptNotCommitted, 5))
-	entry.Sequence = 13
-	entry.EntryHash = deletionTestDigest(103)
-	request := deletionTestRecoveryRequest(t, entry, 12, deletionTestDigest(102))
-	store := &deletionRecoveryStoreStub{}
-	store.apply = func(command RecoveryReplayCommand) (RecoveryReplayReceipt, error) {
-		if command.PurgeContent || !reflect.DeepEqual(command.AllowedSurfaces, RecordNotCommittedRecoverySurfaces()) {
-			t.Fatalf("not-committed replay command = %#v", command)
-		}
-		for _, forbidden := range []RecoverySurface{
-			RecoverySurfaceRecords,
-			RecoverySurfaceRecordRevisions,
-			RecoverySurfaceRecordCorePurgeReceipts,
-		} {
-			for _, surface := range command.AllowedSurfaces {
-				if surface == forbidden {
-					t.Fatalf("not-committed replay contains purge surface %q", forbidden)
+	for _, kind := range []LedgerEntryType{LedgerEntryDeleteCommit, LedgerEntryAttemptNotCommitted} {
+		t.Run(string(kind), func(t *testing.T) {
+			request := ledgerTestRequest(t)
+			if kind == LedgerEntryAttemptNotCommitted {
+				request = request.AttemptNotCommitted(5)
+			}
+			verifier, fence, locator := recoveryTestVerifier(t, request)
+			store := &deletionRecoveryStoreStub{apply: func(command RecoveryReplayCommand) (RecoveryReplayReceipt, error) {
+				if err := command.Validate(); err != nil {
+					t.Fatalf("verified replay command invalid: %v", err)
 				}
-			}
-		}
-		return RecoveryReplayReceipt{
-			Sequence:      entry.Sequence,
-			EntryHash:     entry.EntryHash,
-			SurfaceDigest: command.SurfaceDigest,
-			ContentPurged: false,
-		}, nil
-	}
-	adapter, err := NewRecoveryAdapter(store)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
-
-	receipt, err := adapter.Replay(context.Background(), request)
-	if err != nil {
-		t.Fatalf("Replay() error = %v", err)
-	}
-	if receipt.ContentPurged || store.calls != 1 {
-		t.Fatalf("Replay() = %#v calls=%d, want outcome-only replay", receipt, store.calls)
-	}
-}
-
-func TestRecoveryAdapterFailsClosedBeforeStoreForUnknownOrDiscontinuousContracts(t *testing.T) {
-	t.Parallel()
-
-	validEntry := deletionTestLedgerEntry(t, deletionTestLedgerRequest(t, LedgerEntryDeleteCommit, 0))
-	validEntry.Sequence = 12
-	validEntry.EntryHash = deletionTestDigest(111)
-	valid := deletionTestRecoveryRequest(t, validEntry, 11, deletionTestDigest(110))
-	for _, tt := range []struct {
-		name   string
-		mutate func(*RecoveryReplayRequest)
-	}{
-		{name: "unknown contract", mutate: func(request *RecoveryReplayRequest) { request.Entry.Request.DeletionContractVersion = 2 }},
-		{name: "unknown entry type", mutate: func(request *RecoveryReplayRequest) { request.Entry.Request.EntryType = "future_entry" }},
-		{name: "unknown object kind", mutate: func(request *RecoveryReplayRequest) { request.Entry.Request.Object.ObjectKind = "future_object" }},
-		{name: "sequence gap", mutate: func(request *RecoveryReplayRequest) { request.Cursor.Sequence = 9 }},
-		{name: "previous hash mismatch", mutate: func(request *RecoveryReplayRequest) { request.PreviousHash[0] ^= 0xff }},
-		{name: "missing witness proof", mutate: func(request *RecoveryReplayRequest) { request.WitnessProofDigest = [32]byte{} }},
-		{name: "missing canonical fingerprint bytes", mutate: func(request *RecoveryReplayRequest) { request.RequestFingerprintBytes = [32]byte{} }},
-		{name: "mismatched canonical fingerprint bytes", mutate: func(request *RecoveryReplayRequest) { request.RequestFingerprintBytes[0] ^= 0xff }},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			request := valid
-			tt.mutate(&request)
-			store := &deletionRecoveryStoreStub{}
-			adapter, err := NewRecoveryAdapter(store)
+				entry := command.VerifiedEntry.Entry()
+				if entry.Request.EntryType != kind || entry.Sequence != locator.Sequence || command.MaintenanceRID != "recovery_1" || command.MaintenanceGeneration != 2 {
+					t.Fatalf("verified replay command = %#v", command)
+				}
+				wantSurfaces := RecordDeleteRecoverySurfaces()
+				if kind == LedgerEntryAttemptNotCommitted {
+					wantSurfaces = RecordNotCommittedRecoverySurfaces()
+				}
+				if !reflect.DeepEqual(command.AllowedSurfaces, wantSurfaces) || command.PurgeContent != (kind == LedgerEntryDeleteCommit) {
+					t.Fatalf("wrong recovery surfaces: %#v", command)
+				}
+				return RecoveryReplayReceipt{Sequence: locator.Sequence, EntryHash: locator.EntryHash,
+					SurfaceDigest: command.SurfaceDigest, ContentPurged: command.PurgeContent}, nil
+			}}
+			adapter, err := NewRecoveryAdapter(store, verifier, fence)
 			if err != nil {
-				t.Fatalf("NewRecoveryAdapter() error = %v", err)
+				t.Fatal(err)
 			}
-			if _, err := adapter.Replay(context.Background(), request); !errors.Is(err, ErrRecoveryContractUnavailable) {
-				t.Fatalf("Replay() error = %v, want ErrRecoveryContractUnavailable", err)
+			receipt, err := adapter.Replay(context.Background(), RecoveryReplayRequest{Locator: locator})
+			if err != nil || receipt.Sequence != locator.Sequence || receipt.ContentPurged != (kind == LedgerEntryDeleteCommit) || store.calls != 1 {
+				t.Fatalf("Replay() = %#v, %v; calls=%d", receipt, err, store.calls)
 			}
-			if store.calls != 0 {
-				t.Fatalf("store calls = %d, want zero", store.calls)
+			fence.held = false
+			if err := store.last.WithHeldMaintenance(context.Background(), func(context.Context) error { return nil }); err == nil {
+				t.Fatal("retained command remained usable after its fence was released")
 			}
 		})
 	}
 }
 
-func TestRecoveryAdapterRejectsDivergentStoreReceiptAndTypedNilStore(t *testing.T) {
+func TestRecoveryAdapterRejectsUnwitnessedOrUnboundReplay(t *testing.T) {
 	t.Parallel()
-
-	entry := deletionTestLedgerEntry(t, deletionTestLedgerRequest(t, LedgerEntryDeleteCommit, 0))
-	entry.Sequence = 2
-	entry.EntryHash = deletionTestDigest(121)
-	request := deletionTestRecoveryRequest(t, entry, 1, deletionTestDigest(120))
-	store := &deletionRecoveryStoreStub{apply: func(command RecoveryReplayCommand) (RecoveryReplayReceipt, error) {
-		return RecoveryReplayReceipt{
-			Sequence:      command.Entry.Sequence,
-			EntryHash:     command.Entry.EntryHash,
-			SurfaceDigest: deletionTestDigest(122),
-			ContentPurged: true,
-		}, nil
-	}}
-	adapter, err := NewRecoveryAdapter(store)
+	verifier, fence, locator := recoveryTestVerifier(t, ledgerTestRequest(t))
+	store := &deletionRecoveryStoreStub{}
+	adapter, err := NewRecoveryAdapter(store, verifier, fence)
 	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
+		t.Fatal(err)
 	}
-	if _, err := adapter.Replay(context.Background(), request); !errors.Is(err, ErrRecoveryContractUnavailable) {
-		t.Fatalf("Replay() divergent receipt error = %v, want ErrRecoveryContractUnavailable", err)
+	wrong := locator
+	wrong.EntryHash[0] ^= 1
+	if _, err := adapter.Replay(context.Background(), RecoveryReplayRequest{Locator: wrong}); err == nil {
+		t.Fatal("mismatched witnessed entry accepted")
 	}
-
+	if _, err := adapter.Replay(context.Background(), RecoveryReplayRequest{Locator: locator, Cursor: RecoveryReplayCursor{Sequence: 1, EntryHash: locator.EntryHash}}); !errors.Is(err, ErrRecoveryContractUnavailable) {
+		t.Fatalf("discontinuous replay error = %v", err)
+	}
+	if store.calls != 0 {
+		t.Fatalf("unverified replay reached store %d times", store.calls)
+	}
+	if _, err := NewRecoveryAdapter(store, verifier, &recoveryTestFence{held: true, rid: "recovery_1", generation: 2}); !errors.Is(err, ErrInvalidRecoveryAdapter) {
+		t.Fatalf("different fence accepted: %v", err)
+	}
 	var typedNil *deletionRecoveryStoreStub
-	if _, err := NewRecoveryAdapter(typedNil); !errors.Is(err, ErrInvalidRecoveryAdapter) {
-		t.Fatalf("NewRecoveryAdapter(typed nil) error = %v, want ErrInvalidRecoveryAdapter", err)
+	if _, err := NewRecoveryAdapter(typedNil, verifier, fence); !errors.Is(err, ErrInvalidRecoveryAdapter) {
+		t.Fatalf("typed nil store accepted: %v", err)
 	}
 }
 
-func deletionTestRecoveryRequest(
-	t *testing.T,
-	entry DeletionLedgerEntry,
-	cursorSequence uint64,
-	cursorHash [32]byte,
-) RecoveryReplayRequest {
-	t.Helper()
-	return RecoveryReplayRequest{
-		Cursor: RecoveryReplayCursor{
-			Sequence:  cursorSequence,
-			EntryHash: cursorHash,
-		},
-		Entry:                   entry,
-		PreviousHash:            cursorHash,
-		WitnessProofDigest:      deletionTestDigest(115),
-		RequestFingerprintBytes: deletionTestRecoveryFingerprintBytes(t),
-	}
-}
-
-func deletionTestRecoveryFingerprintBytes(t *testing.T) [32]byte {
-	t.Helper()
-	fingerprint, err := recordplatform.FingerprintRequestV1(recordplatform.RequestFingerprintInputV1{
-		Version:            recordplatform.RequestFingerprintVersionV1,
-		OperationKind:      recordplatform.OperationKindRecordPermanentDelete,
-		ProjectID:          recordplatform.ProjectIDDefault,
-		ActorScopeDigest:   deletionTestDigest(71),
-		RequestScopeDigest: deletionTestDigest(72),
-		PayloadDigest:      deletionTestDigest(73),
-	})
+func TestRecoveryAdapterRejectsDivergentStoreReceipt(t *testing.T) {
+	t.Parallel()
+	verifier, fence, locator := recoveryTestVerifier(t, ledgerTestRequest(t))
+	store := &deletionRecoveryStoreStub{apply: func(command RecoveryReplayCommand) (RecoveryReplayReceipt, error) {
+		return RecoveryReplayReceipt{Sequence: locator.Sequence, EntryHash: locator.EntryHash,
+			SurfaceDigest: deletionTestDigest(122), ContentPurged: true}, nil
+	}}
+	adapter, err := NewRecoveryAdapter(store, verifier, fence)
 	if err != nil {
-		t.Fatalf("FingerprintRequestV1() error = %v", err)
+		t.Fatal(err)
 	}
-	bytes, err := fingerprint.PersistedBytes()
-	if err != nil {
-		t.Fatalf("PersistedBytes() error = %v", err)
+	if _, err := adapter.Replay(context.Background(), RecoveryReplayRequest{Locator: locator}); !errors.Is(err, ErrRecoveryContractUnavailable) {
+		t.Fatalf("divergent receipt accepted: %v", err)
 	}
-	return bytes
 }
 
-func deletionRecoveryDeleteSurfacesForTest() []RecoverySurface {
-	return []RecoverySurface{
-		RecoverySurface("content_delivery_epochs"),
-		RecoverySurface("deletion_fence_leases"),
-		RecoverySurfaceDeletionReplayState,
-		RecoverySurfaceDeletionReservations,
-		RecoverySurfaceRecordCorePurgeReceipts,
-		RecoverySurfaceRecordDeletionAudits,
-		RecoverySurfaceRecordDomainActivities,
-		RecoverySurfaceRecordDraftCheckpoints,
-		RecoverySurfaceRecordDrafts,
-		RecoverySurfaceRecordPurgeOperations,
-		RecoverySurfaceRecordRevisionParticipants,
-		RecoverySurfaceRecordRevisionSubjects,
-		RecoverySurfaceRecordRevisionTags,
-		RecoverySurfaceRecordRevisions,
-		RecoverySurfaceRecords,
+func recoveryTestVerifier(t *testing.T, request LedgerAppendRequest) (*LedgerVerifier, *recoveryTestFence, LedgerLocator) {
+	t.Helper()
+	primaryID := ledgerTestIdentity("a", "deletion_ledger", "1", "ledger")
+	witnessID := ledgerTestIdentity("b", "deletion_witness", "2", "witness")
+	domain, err := LedgerDomainDigest(primaryID.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	entry := ledgerTestEntry(t, domain, 1, [32]byte{}, request)
+	primary := LedgerSnapshot{Identity: primaryID, Head: LedgerHead{Sequence: 1, Hash: entry.EntryHash}, Entries: []LedgerChainEntry{ledgerTestRow(entry)}}
+	witness := LedgerSnapshot{Identity: witnessID, Head: LedgerHead{Sequence: 1, Hash: entry.EntryHash}, Entries: []LedgerChainEntry{ledgerTestRow(entry)}}
+	fence := &recoveryTestFence{held: true, rid: "recovery_1", generation: 2}
+	verifier, err := NewLedgerVerifier(ledgerTestReader{primary}, ledgerTestReader{witness}, LedgerVerificationTrust{Primary: primaryID, Witness: witnessID, Continuity: fence})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verifier, fence, LedgerLocator{LedgerDomain: domain, Sequence: entry.Sequence, EntryHash: entry.EntryHash}
+}
+
+type recoveryTestFence struct {
+	held       bool
+	rid        string
+	generation uint64
+}
+
+func (fence *recoveryTestFence) WithHeldLedgerFence(ctx context.Context, apply func(context.Context) error) error {
+	if !fence.held {
+		return errors.New("maintenance fence closed")
+	}
+	return apply(ctx)
+}
+
+func (fence *recoveryTestFence) RecoveryBinding() (string, uint64, error) {
+	if !fence.held {
+		return "", 0, errors.New("maintenance fence closed")
+	}
+	return fence.rid, fence.generation, nil
+}
+
+func (fence *recoveryTestFence) NeverEnrolled() (bool, error) {
+	if !fence.held {
+		return false, errors.New("maintenance fence closed")
+	}
+	return fence.generation == 0, nil
+}
+
+func (fence *recoveryTestFence) VerifyLedgerContinuity(context.Context, LedgerContinuityObservation) error {
+	if !fence.held {
+		return errors.New("maintenance fence closed")
+	}
+	return nil
 }
 
 type deletionRecoveryStoreStub struct {

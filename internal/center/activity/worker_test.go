@@ -25,34 +25,32 @@ func newFakeLeases() *fakeLeases {
 
 func (leases *fakeLeases) AcquireSourceLease(
 	_ context.Context,
-	_ uint64,
+	generation uint64,
 	kind SourceKind,
 	ownerID string,
-	_ time.Duration,
-) (bool, error) {
+	ttl time.Duration,
+) (SourceLease, bool, error) {
 	leases.mu.Lock()
 	defer leases.mu.Unlock()
 	if leases.failWith != nil {
-		return false, leases.failWith
+		return SourceLease{}, false, leases.failWith
 	}
 	if leases.refuse[kind] {
-		return false, nil
+		return SourceLease{}, false, nil
 	}
 	leases.acquired = append(leases.acquired, kind)
 	leases.held[kind] = ownerID
-	return true, nil
+	return SourceLease{Generation: generation, Kind: kind, OwnerID: ownerID, ExpiresAt: time.Now().UTC().Add(ttl)}, true, nil
 }
 
 func (leases *fakeLeases) ReleaseSourceLease(
 	_ context.Context,
-	_ uint64,
-	kind SourceKind,
-	_ string,
+	lease SourceLease,
 ) error {
 	leases.mu.Lock()
 	defer leases.mu.Unlock()
-	leases.released = append(leases.released, kind)
-	delete(leases.held, kind)
+	leases.released = append(leases.released, lease.Kind)
+	delete(leases.held, lease.Kind)
 	return nil
 }
 

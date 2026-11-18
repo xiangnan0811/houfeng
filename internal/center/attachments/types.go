@@ -10,6 +10,8 @@ import (
 	"math"
 	"time"
 	"unicode/utf8"
+
+	"houfeng/internal/center/recordidentity"
 )
 
 const (
@@ -288,6 +290,7 @@ type BlobObject struct {
 	ObjectVersion string
 	SizeBytes     int64
 	BackendKind   BackendKind
+	NamespaceID   string
 }
 
 func (object BlobObject) Validate() error {
@@ -349,22 +352,6 @@ func (command CompleteUploadContentCommand) Validate() error {
 	return nil
 }
 
-type AdmitUploadCommand struct {
-	ProjectID string
-	UploadID  string
-	AuthorID  string
-	Blob      BlobObject
-	Limits    Limits
-}
-
-func (command AdmitUploadCommand) Validate() error {
-	base := UploadMutationCommand{ProjectID: command.ProjectID, UploadID: command.UploadID, AuthorID: command.AuthorID}
-	if base.Validate() != nil || command.Blob.Validate() != nil || command.Limits.Validate() != nil {
-		return ErrInvalidAttachmentCommand
-	}
-	return nil
-}
-
 type FailUploadCommand struct {
 	ProjectID   string
 	UploadID    string
@@ -400,8 +387,8 @@ type CopyAttachmentCommand struct {
 }
 
 func (command CopyAttachmentCommand) Validate() error {
-	if command.ProjectID != "default" || !validPrefixedID(command.SourceRecordID, "rec_") ||
-		!validPrefixedID(command.TargetRecordID, "rec_") || command.SourceRecordID == command.TargetRecordID ||
+	if command.ProjectID != "default" || !recordidentity.IsValid(command.SourceRecordID) ||
+		!recordidentity.IsValid(command.TargetRecordID) || command.SourceRecordID == command.TargetRecordID ||
 		ValidateAttachmentID(command.SourceAttachmentID) != nil ||
 		ValidateAttachmentID(command.TargetAttachmentID) != nil ||
 		command.SourceAttachmentID == command.TargetAttachmentID || !validPrefixedID(command.ActorID, "usr_") ||

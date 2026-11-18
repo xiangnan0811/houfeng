@@ -124,18 +124,10 @@ func TestRecordCollaborationMissingFragmentFailsBeforeBeginTx(t *testing.T) {
 
 	t.Run("convergence", func(t *testing.T) {
 		beginCalls := 0
-		_, err := convergeAppACLCurrentWithDependencies(
-			context.Background(),
-			func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-				beginCalls++
-				return nil, errors.New("begin must not run")
-			},
-			"houfeng_center_runtime",
-			"houfeng_platform_admin",
-			fsys,
-			fragments,
-			appACLCurrentConvergenceTestDependencies(),
-		)
+		_, err := convergeAppACLCurrentWithDependencies(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			beginCalls++
+			return nil, errors.New("begin must not run")
+		}, "houfeng_center_runtime", "houfeng_platform_admin", appACLCurrentTransitionBindingsV2[2].CatalogRole, fsys, fragments, appACLCurrentConvergenceTestDependencies())
 		if err == nil || !strings.Contains(err.Error(), `migration "0055_create_record_collaboration.sql" has no current APP ACL fragment`) {
 			t.Fatalf("record-collaboration convergence error = %v, want missing-fragment rejection", err)
 		}

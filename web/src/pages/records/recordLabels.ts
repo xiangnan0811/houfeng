@@ -40,6 +40,7 @@ export const RECORD_STATUS_GROUP_LABELS: Record<RecordStatusGroup, string> = {
 export const RECORD_LIFECYCLE_LABELS: Record<RecordLifecycle, string> = {
   active: '在用',
   archived: '已归档',
+  trashed: '回收站',
 }
 
 export const RECORD_FOLLOW_UP_LABELS: Record<RecordFollowUpState, string> = {

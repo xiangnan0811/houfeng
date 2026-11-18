@@ -179,16 +179,25 @@ record_notification_audit_summaries,
 record_collaboration_purge_receipts
 ```
 
+C81 successor 另增 `record_notification_delivery_starts`，在每次实际发送开始时保存
+不可变的 outbox row、owner ID/generation/observed expiry 与 delivery attempt binding。
+它属于当前 collaboration V2 surface；历史 V1 surface digest 与已存 receipt 不重写。
+
+已取得 live outbox owner 的外部投递在发送前使用不补建 epoch 的锁前缀；gate 关闭后仅可在重核持久 route 和 exact owner tuple 后登记取消，不能调用 provider。缺 epoch、stale owner 和 admission/authority 故障继续拒绝，不把它们伪装成取消成功。此路径不提供 gate 后 pending/过期 processing 的新 claim，也不构成 epoch 已删除后的 root-independent drain 验收。
+
+
 它只扩展现有 `record_outbox` 的 `source_version` 与
 `record_fence_epoch`，不新建 outbox/idempotency/lease 表。typed notification event
 使用 raw stable `subject_id`，另以正数 `source_version` 与 captured auth/fence
 epoch 绑定 exact source；generic foundation event 的新增字段保持 0。
 
-action/comment/watch/revision participant 的 durable 顺序是 admitted transaction
-内的 idempotency claim → deletion reservation/epoch/fence → locked current record +
-current source authorization → same-tx membership → business/history/follower/activity/
-identity-only outbox → idempotency completion → commit。业务回调任一点失败都必须整体
-rollback；不得在事务中发送网络请求。
+action/comment/watch/revision participant 先在事务外准备当前 source proof；在 admitted
+READ COMMITTED 事务内取得 source/asset graph、必要 namespace 和 comparison fence，
+再按全部资源的统一 rank 获取 actor/membership、reservation、epoch、lease/gate、root、
+quota/generation，随后获取 compound idempotency scope/row、content 与 collaboration effects。
+多 key 先按实际 advisory hash 排序去重，再按完整 key 排序锁行，避免 hash collision 反转锁序。
+锁后重新发现 route 并复核当前授权；漂移整笔 rollback/reselect，不能在后序补取前序锁。
+业务/history/follower/activity、identity-only outbox 与幂等完成原子提交；网络发送不在事务内。
 
 Watch 是可继续演进的 current resource，没有第二套历史表。foundation 的 content-free
 result fingerprint 必须绑定 idempotency key 与完整返回状态；已存在的 follower row 还要
@@ -210,9 +219,13 @@ comment revision/action event/tombstone/reply/mention/notification/audit/receipt
 append-only 或 trigger-guarded。comment redaction 必须清空 current 与全部 history 的
 source/render/hash，写 tombstone 后不可恢复；reply 只允许单层且同 record/fence。
 
-runtime 不拥有 raw DELETE。正常 follower/recipient pruning 与 permanent purge 只能
-调用 `0055` 的 closed `SECURITY DEFINER` public `bytea` wrappers；permanent purge 在
-同一 transaction 内证明 13 个 purgeable surfaces 全空后才写 immutable receipt。
+runtime 不拥有 collaboration raw DELETE。正常 follower/recipient pruning 使用既有
+closed wrappers；当前 expanded purge 使用 C81 worker-only
+`record_collaboration_purge_v2(bytea)` 与 `record_collaboration_purge_verify_v2(bytea)`，
+绑定完整 operation/reservation/fence 与 observed worker owner，显式计数并验证 start rows，
+不能把 FK cascade 当作独立 receipt。历史 V1 receipt 不能代替 expanded surface 证明。
+完整 writer SQL enforcement、outbox durable drain 和真实 issuer-issued gate 验收尚未完成；
+这些局部接线不授权切换或开启永久删除 HTTP。
 
 ### 3.2 Comment Markdown v1
 
@@ -249,16 +262,71 @@ budget；count 还必须遵守 caller limit。hard budget 是 fail-closed work b
 请求越过 500 个失效候选继续寻找更旧结果。
 
 external delivery 默认未配置。只有 exact `(default,user,channel,binding_id)` scoped
-binding 才可计划；global incident Telegram/Feishu settings 不是 binding source。发送
-发生在 claim transaction 之外，但 prepare/finalize 各自复用 admitted transaction，
-并重新验证完整 outbox claim tuple、membership/auth/fence/source/policy/binding。消息仅为
-固定英文 summary 与 canonical HTTPS `/records/{record}?notification={rnt}` link；不得
-包含 Record title、comment、action details、recipient、credential、provider response。
+binding 才可计划；global incident Telegram/Feishu settings 不是 binding source。
+prepare 在 admitted transaction 内重新验证 claim、membership/auth/fence/source/policy/binding，
+提交 start 后才在事务外发送。消息仅为固定英文 summary 与 canonical HTTPS
+`/records/{record}?notification={rnt}` link；不得包含 Record title、comment、action details、
+recipient、credential 或 provider response。
+
+start 持久保存完整 original claim/attempt binding 与 correlation digest；随机 256-bit
+reporting capability 只向原 sender 返回一次，数据库只保存 hash。start、fact、completion、
+handoff 不依赖在线 root、epoch、notification、delivery 或 outbox 的 FK，且禁止
+UPDATE/DELETE/TRUNCATE。capability 不得进入 HTTP、JSON、普通 formatting 或日志；其 SQL
+参数只能经过禁用 bind/statement capture 的连接和数据库日志配置，pgx 不装配参数 tracer。
+本地隔离 smoke 检查这些条件；这不证明外部 PostgreSQL 或代理的日志配置。
+
+`ReportExternalDeliveryOutcome` 用原 claim、attempt 和 capability 单独提交 bounded
+provider fact，返回 attempt/evidence locator。它仍需当前 direct LOGIN/source admission，
+但不要求原 queue owner、root 或 epoch 存活；takeover、gate 和内容清理后仍可登记迟到事实。
+exact 重报幂等，冲突事实并存并披露 unknown。worker 无 provider-report EXECUTE，不能制造
+sender 身份或成功报告；历史没有 capability 的 start 不补发 capability。
+
+`FinalizeExternalDelivery` 使用当前 exact queue claim 和已提交 fact locator，由 SQL 读取
+真实结果，原子更新 attempt、delivery、outbox 并保留 completion。`QueueFinalized=true`
+时 projector 不再重复 sent/retry/cancel。响应丢失的 exact replay 返回原 disposition 与
+`NextAttemptAt`，不延长 retry；旧 owner 漂移后拒绝 finalize，但已经提交的 report 不回滚。
+takeover 先读取 completion/fact：已知 sent 不重发，已知 temporary failure 恢复合法 retry；
+无事实、冲突或已 unknown/drained 的 attempt 不自动重发，迟到事实也不重开已终结 queue。
+retry 到期后的 start 还必须按 attempt 顺序锁定全部已有 start，与迟到 report 串行，
+核其 completion、已定 retry 时间和所有 provider facts。若旧 attempt 已有冲突或 unknown
+observation，以当前 claim 将 delivery/queue 终结为 unknown/complete，不创建新 attempt。
+此时 SQL 返回原 attempt number/start time 与 NULL capability；store 明确转为
+`QueueFinalized=true`，不构造发送准备。原 completion、deadline 和事实不被覆盖。
 
 provider timeout 最多 30 秒且严格早于 owner lease expiry；temporary failure 使用
-deterministic exponential retry，最多 8 attempts。crash/takeover 的不确定发送结果进入
-`unknown_outcome`，不得猜测并重发。未配置 delivery processor 时 typed delivery event
-被 closed cancel；业务/inbox transaction 仍可成功。
+deterministic exponential retry，最多 8 attempts。gate、事件期限或 attempt 上限阻止 retry
+时只终结本地 queue，不改写真实 provider fact。未配置 processor 或尚未开始的取消继续使用
+当前 claim；通用 sent/retry/cancel 不得绕过已开始 attempt 的原子 completion。
+
+历史 V1 continuation 与 V2 collaboration purge 分别使用 worker-only
+`record_outbox_drain_v1(bytea)`、`record_outbox_drain_v2(bytea)`，每事务最多处理 100 项。
+V1 只接受原十二字段 legacy adapter envelope，独立校验 committed reservation、verified
+delete_commit、online_purging 与 caller 提交的 live exact owner；不创建或借用 V2 gate，
+V1 新发行继续关闭。V2 保留原八字段 envelope、gate 和 compound-owner 校验。
+两条路径在同一 caller-observed claim 下执行真实 drain、purge 与 verify；每个提交后的 batch
+继续核原 owner 和期限，不在循环中采用数据库的新 owner。
+
+drain 覆盖 record/action/comment/delivery route，不受旧 queue lease、event TTL 或 retry
+时间限制；歧义 legacy route 保持 blocker。每个真实 start 和 predecessor unknown 先持久
+移交，再终结在线投影；只有可证明从未开始的 queue 才记为未发送。purge/verify 核完整
+handoff 和 absence，保留 start/fact/completion/handoff，不计入 removed rows。
+unknown 不转为 not_sent，late fact 不改变原 handoff 或 receipt，邻 record 不受影响。
+
+V1 首次真实 markdown/comparison/collaboration metadata purge 与 receipt 在同一事务发布
+exact operation/project/record/fence epoch 的 browser cleanup event，使用既有固定四 scopes。
+已有 event 必须逐字段相同才可重用，冲突以 `55000` 拒绝；verify 缺 event、handoff 或 receipt
+同样拒绝，不能补造。event/target/ack 不依赖在线 root，V1 终态必须保留该客户端清理责任。
+
+命令在取得锁后和返回前核 exact owner；普通 Go 事务保持约束 deferred 至 COMMIT，由私有
+rejecting assertion 再核 lease。直接 SQL 调用者可用 `SET CONSTRAINTS ... IMMEDIATE`
+提前触发断言，因此不将此机制声明为对任意直接 SQL 会话的不可绕过 COMMIT-time fencing。
+
+删除预览通过受限 delivery inventory 按稳定 `delivery_id` 去重；已知无冲突 sent 为已外发，
+processing、未决 start、unknown/conflict 为可能外发，不按 retry attempts 累加或因本地
+terminal queue 变零。该披露不证明消息被召回。backup 还要求 exact recipient/delivery counts：
+孤立 retained obligation 或与 legacy aggregate audit 的重叠缺乏可恢复 provenance 时显式
+unavailable，不填零、不相加或取最大值；普通无重叠备份与逐 delivery 预览保持可用。
+
 
 ### 3.4 Provider / adapter
 
@@ -336,6 +404,10 @@ typed-nil 绕过或使用测试 membership 打开 production。witnessed source 
   recipient revoke、external outcomes、deletion/restore rollback。
 - Migration/ACL：fresh + exact repeat + current runtime/admin ACL；runtime raw DELETE 必须
   `42501`，closed wrappers 与 immutable triggers 必须真实执行。
+- C81 delivery authority：真实 PostgreSQL 覆盖 normal sent/retry、report/finalize 崩溃切点、
+  takeover、capability 伪造及 worker 假报拒绝、冲突事实、late report、immutable/FK/trigger
+  catalog、每种 drain route、start/drain 两种时序、owner 锁等待及 deferred COMMIT 过期。
+  fixture 手写 gate/旧库存仅为 SQL 行为证据，不是 admitted issuer 或生产恢复验收。
 - Race/vet：affected packages `go test -race`、`go vet`、`make verify-go`。
 - HTTP：每条 route 的 allowlist、non-nil `[]`、opaque 404、closed 409/422/503、
   malformed query/header/body 的 application 零调用。

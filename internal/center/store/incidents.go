@@ -13,6 +13,8 @@ import (
 
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/incidents"
+	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/center/targets"
 )
 
 type incidentStoreTx interface {
@@ -146,11 +148,17 @@ func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, 
 	if mutation.ExpectedObjectRowVersion == "" {
 		return errors.New("incident mutation object row version is required")
 	}
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("begin incident mutation tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	if err := assertIncidentSourceWritable(ctx, tx, mutation.ObjectType, mutation.ObjectID); err != nil {
+		return err
+	}
 
 	if err := guardIncidentObjectRowVersion(ctx, tx, mutation); err != nil {
 		return err
@@ -195,11 +203,19 @@ func guardIncidentObjectRowVersion(ctx context.Context, tx incidentStoreTx, muta
 }
 
 func (r *PostgresIncidentRepository) AppendNotificationRecords(ctx context.Context, notifications []incidents.NotificationRecordWrite) error {
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("begin notification append tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	for _, notification := range notifications {
+		if err := assertIncidentSourceWritable(ctx, tx, notification.ObjectType, notification.ObjectID); err != nil {
+			return err
+		}
+	}
 
 	if err := insertNotificationRecords(ctx, tx, notifications); err != nil {
 		return err
@@ -435,4 +451,20 @@ func projectObjectSummary(ctx context.Context, tx incidentStoreTx, objectType in
 	}
 
 	return nil
+}
+
+func assertIncidentSourceWritable(ctx context.Context, tx incidentStoreTx, objectType incidents.ObjectType, objectID string) error {
+	var err error
+	switch objectType {
+	case incidents.ObjectTypeMonitoringInstance:
+		err = assertMonitoringSourceWritable(ctx, tx, objectID)
+	case incidents.ObjectTypeTarget:
+		err = assertSourceWritable(ctx, tx, "target", objectID)
+	default:
+		return fmt.Errorf("unsupported incident mutation object type %q", objectType)
+	}
+	if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) || errors.Is(err, targets.ErrTargetNotFound) {
+		return incidents.ErrIncidentProjectionObjectNotFound
+	}
+	return err
 }

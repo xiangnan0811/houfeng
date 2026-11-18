@@ -15,6 +15,7 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
@@ -91,7 +92,7 @@ func recordCommentRouteFromPath(path string) (recordCommentRoute, bool) {
 		return recordCommentRoute{}, false
 	}
 	segments := strings.Split(strings.TrimPrefix(path, prefix), "/")
-	if len(segments) < 2 || !validRecordTransportID(segments[0]) || segments[1] != "comments" {
+	if len(segments) < 2 || !recordidentity.IsValid(segments[0]) || segments[1] != "comments" {
 		return recordCommentRoute{}, false
 	}
 	route := recordCommentRoute{recordID: segments[0]}

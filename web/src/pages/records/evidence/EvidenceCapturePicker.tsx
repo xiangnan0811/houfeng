@@ -3,9 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Input, SegmentedControl, Select } from '../../../components/atoms'
 import type { BadgeTone } from '../../../components/atoms'
 import { formatBytes } from '../../../lib/format'
+import { sameRecordAllocation } from '../../../lib/recordAllocation'
 import type {
   EvidenceCapturePreview,
   EvidenceCapturePreviewInput,
+  RecordAllocation,
   RecordSubjectKind,
 } from '../../../lib/types'
 import {
@@ -35,15 +37,24 @@ export type PendingEvidence = Readonly<{
   source_label: string
   window_label: string
   valid_until: string
+  /** 新建记录：首次预览取得的服务端预留，发布时原样带上。 */
+  allocation?: RecordAllocation
 }>
 
+export type EvidenceReservationNotice = Readonly<{ message: string; canDiscard: boolean }>
+
 type Props = {
-  /** 已有记录的 ID，或本次新建记录在首次预览时由服务端预分配的 ID。 */
+  /** 已有记录的 ID，或本次新建记录在首次预览时由服务端预留的 ID。 */
   recordId?: string | undefined
+  /** 新建记录已取得的预留；与 recordId 一起原样随后续预览发出。已有记录不传。 */
+  allocation?: RecordAllocation | undefined
   subjects: readonly EvidenceCaptureSubject[]
   /** 提供时可在记录主体之外再选其他 VPS（及其监控实例），用于跨主机对比。 */
   otherSources?: OtherEvidenceSourceLoaders | undefined
   requestPreview: (input: EvidenceCapturePreviewInput, signal: AbortSignal) => Promise<EvidenceCapturePreview>
+  reservationNotice?: EvidenceReservationNotice | null
+  onDiscardReservation?: (() => Promise<void>) | undefined
+  previewBlocked?: boolean
   onConfirm: (evidence: PendingEvidence) => void
   /** 记录发布进行中：可以继续预览，但不能加入，免得新证据赶不上这次发布。 */
   disabled?: boolean
@@ -142,7 +153,7 @@ const OTHER_SOURCE = 'other'
 // “其他 VPS”能提供的来源类型：VPS 本身与它的监控实例；入口探测目标不挂在 VPS 下，只能取记录主体。
 const OTHER_SOURCE_KINDS: readonly RecordSubjectKind[] = ['vps', 'monitoring_instance']
 
-export function EvidenceCapturePicker({ recordId, subjects, otherSources, requestPreview, onConfirm, disabled = false, now = systemNow }: Props) {
+export function EvidenceCapturePicker({ recordId, allocation, subjects, otherSources, requestPreview, onConfirm, reservationNotice = null, onDiscardReservation, previewBlocked = false, disabled = false, now = systemNow }: Props) {
   const kinds = useMemo(() => EVIDENCE_CAPTURE_KINDS.filter((kind) => kind.sourceKinds.some((sourceKind) =>
     subjects.some((subject) => subject.kind === sourceKind) || (otherSources !== undefined && OTHER_SOURCE_KINDS.includes(sourceKind)))),
   [otherSources, subjects])
@@ -193,6 +204,8 @@ export function EvidenceCapturePicker({ recordId, subjects, otherSources, reques
   const [added, setAdded] = useState('')
   const [, setTick] = useState(0)
   const requestRef = useRef<AbortController | null>(null)
+  const previewButtonRef = useRef<HTMLButtonElement>(null)
+  const sourceRef = useRef<HTMLSelectElement>(null)
 
   const captureWindow = kind?.window === 'month'
     ? monthWindow(month)
@@ -247,7 +260,7 @@ export function EvidenceCapturePicker({ recordId, subjects, otherSources, reques
     checked ? [...list, value] : list.filter((entry) => entry !== value)
 
   const handlePreview = async () => {
-    if (!kind || !source || !captureWindow || !canPreview) return
+    if (!kind || !source || !captureWindow || !canPreview || previewBlocked) return
     requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
@@ -266,11 +279,16 @@ export function EvidenceCapturePicker({ recordId, subjects, otherSources, reques
       sensitive_topology_fields: sortedSelection(sensitiveFields),
     }
     if (recordId !== undefined) input.record_id = recordId
+    if (allocation !== undefined) input.allocation = allocation
+    // 新建记录的证据必须落在服务端预留的同一个目标上；缺预留时不能用 record_id 代替归属。
+    const newTarget = recordId === undefined || allocation !== undefined
     try {
       const result = await requestPreview(input, controller.signal)
       if (controller.signal.aborted || requestRef.current !== controller) return
       if (result.kind !== input.kind || result.schema_version !== input.schema_version ||
         (recordId !== undefined && result.record_id !== recordId) ||
+        (newTarget && (!result.allocation || result.allocation.record_id !== result.record_id
+          || (allocation !== undefined && !sameRecordAllocation(result.allocation, allocation)))) ||
         result.source.type !== input.source_type || result.source.id !== input.source_id ||
         !sameUTCInstant(result.requested_window.start, input.requested_window.start) ||
         !sameUTCInstant(result.requested_window.end, input.requested_window.end) ||
@@ -299,6 +317,7 @@ export function EvidenceCapturePicker({ recordId, subjects, otherSources, reques
       source_label: source.label,
       window_label: formatEvidenceWindow(preview.actual_window),
       valid_until: preview.valid_until,
+      ...(preview.allocation ? { allocation: preview.allocation } : {}),
     })
     // 同一预览只能加入一次：清掉它，避免重复点击把同一个采集意图加两遍。
     setPreview(null)
@@ -318,6 +337,7 @@ export function EvidenceCapturePicker({ recordId, subjects, otherSources, reques
           {kinds.map((option) => <option key={option.kind} value={option.kind}>{option.label}</option>)}
         </Select>
         <Select
+          ref={sourceRef}
           label="来源"
           value={otherMode ? OTHER_SOURCE : source ? `${source.kind}/${source.source_id}` : ''}
           onChange={(event) => { setSourceValue(event.target.value); invalidate() }}
@@ -406,10 +426,19 @@ export function EvidenceCapturePicker({ recordId, subjects, otherSources, reques
       ) : null}
 
       <div className="evidence-capture__actions">
-        <Button size="sm" variant="secondary" disabled={!canPreview} onClick={() => void handlePreview()}>
+        <Button ref={previewButtonRef} size="sm" variant="secondary" disabled={!canPreview} aria-disabled={previewBlocked} onClick={() => void handlePreview()}>
           {pending ? '正在生成预览…' : '生成预览'}
         </Button>
-        {error ? <span className="record-material__stale" role="alert">{error}</span> : null}
+        {reservationNotice ? <span className="record-material__stale" role="alert">{reservationNotice.message}</span>
+          : error ? <span className="record-material__stale" role="alert">{error}</span> : null}
+        {reservationNotice?.canDiscard && onDiscardReservation ? (
+          <Button size="sm" variant="secondary" title="只清除本地确认状态，不撤销已发出的请求" onClick={() => {
+            if (previewButtonRef.current && !previewButtonRef.current.disabled) previewButtonRef.current.focus()
+            else sourceRef.current?.focus()
+            setError('')
+            void onDiscardReservation()
+          }}>放弃预留确认</Button>
+        ) : null}
         {added ? <span className="record-muted" role="status">{added}</span> : null}
       </div>
 

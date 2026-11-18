@@ -8,6 +8,7 @@ const comparison: ComparisonEvaluateResponse = {
   digest: 'aa'.repeat(32),
   items: [{
     snapshot_id: 'evs_a',
+    source_record_id: 'rec_a',
     canonical_hash: '11'.repeat(32),
     kind: 'monitoring.host',
     schema_version: 1,

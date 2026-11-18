@@ -209,6 +209,9 @@ func (store *fakeRebuildStore) RecordSearchRebuildNeeded(context.Context) (bool,
 
 func (store *fakeRebuildStore) ClaimRecordSearchRebuild(_ context.Context, _ RebuildClaim) (RebuildLease, error) {
 	store.claims++
+	if store.lease.LeaseExpiresAt.IsZero() {
+		store.lease.LeaseExpiresAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
 	return store.lease, nil
 }
 
@@ -225,7 +228,9 @@ func (store *fakeRebuildStore) ProjectRecordSearchRebuildBatch(
 	if index >= len(store.batches) {
 		return RebuildBatchResult{}, fmt.Errorf("unexpected batch call %d", index)
 	}
-	return store.batches[index], nil
+	result := store.batches[index]
+	result.LeaseExpiresAt = batch.LeaseExpiresAt.Add(time.Second)
+	return result, nil
 }
 
 func (store *fakeRebuildStore) PublishRecordSearchRebuild(

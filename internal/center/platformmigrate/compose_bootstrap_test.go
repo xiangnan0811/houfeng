@@ -2,8 +2,6 @@ package platformmigrate
 
 import (
 	"errors"
-	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -38,51 +36,6 @@ func TestComposeBootstrapConfigRejectsUnsafeOrAmbiguousInputs(t *testing.T) {
 				t.Fatalf("ComposeBootstrapConfig.Validate() error = %v, want %v", err, ErrInvalidComposeBootstrapConfig)
 			}
 		})
-	}
-}
-
-func TestComposeBootstrapIncludesIsolatedRecordsAuthorityRole(t *testing.T) {
-	t.Parallel()
-
-	config := composeBootstrapConfigFixture()
-	if got, want := config.roleNames(), []string{
-		"houfeng_runtime",
-		"houfeng_platform_admin",
-		"houfeng_migrator",
-		"houfeng_records_authority",
-	}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("Compose bootstrap roles = %q, want %q", got, want)
-	}
-	if got, want := config.rolePasswords(), map[string]string{
-		"houfeng_runtime":           "runtime-secret",
-		"houfeng_platform_admin":    "admin-secret",
-		"houfeng_migrator":          "migrator-secret",
-		"houfeng_records_authority": "authority-secret",
-	}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("Compose bootstrap password roles = %q, want %q", got, want)
-	}
-}
-
-func TestComposeBootstrapSQLPreservesPostgres16PreR1Contract(t *testing.T) {
-	t.Parallel()
-
-	contract := composePreR1ValidateSQL + composePreR1RevokeSQL + composePreR1VerifySQL
-	for _, required := range []string{
-		"procedure.pronargs = 0",
-		"procedure.proowner = 10",
-		"OUT pg_control_version integer, OUT catalog_version_no integer, OUT system_identifier bigint, OUT pg_control_last_modified timestamp with time zone",
-		"REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system() FROM PUBLIC",
-		"pg_catalog.aclexplode(procedure.proacl)",
-		"acl_grant.grantor = procedure.proowner",
-		"acl_grant.grantee = procedure.proowner",
-		"NOT acl_grant.is_grantable",
-	} {
-		if !strings.Contains(contract, required) {
-			t.Fatalf("Compose bootstrap pre-R1 SQL must contain %q", required)
-		}
-	}
-	if strings.Contains(contract, "pg_get_function_identity_arguments(procedure.oid) = ''") {
-		t.Fatal("Compose bootstrap must select pg_control_system() by zero input arguments, not empty formatted arguments")
 	}
 }
 
@@ -129,16 +82,18 @@ func composeBootstrapConfigFixture() ComposeBootstrapConfig {
 		DatabaseName:  "houfeng",
 		BootstrapRole: "postgres",
 		AuthorityRole: "houfeng_records_authority",
-		Roles: AppRoleSetV1{
-			CenterRuntime: "houfeng_runtime",
-			PlatformAdmin: "houfeng_platform_admin",
-			Migrator:      "houfeng_migrator",
+		Roles: AppRoleSetV2{
+			CenterRuntime:  "houfeng_runtime",
+			PlatformAdmin:  "houfeng_platform_admin",
+			DeletionWorker: "houfeng_record_deletion_worker",
+			Migrator:       "houfeng_migrator",
 		},
 		Passwords: ComposeRolePasswords{
-			Runtime:       "runtime-secret",
-			PlatformAdmin: "admin-secret",
-			Migrator:      "migrator-secret",
-			Authority:     "authority-secret",
+			Runtime:        "runtime-secret",
+			PlatformAdmin:  "admin-secret",
+			DeletionWorker: "deletion-worker-secret",
+			Migrator:       "migrator-secret",
+			Authority:      "authority-secret",
 		},
 	}
 }

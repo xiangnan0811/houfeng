@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/vpsassets"
 	"houfeng/internal/center/vpsmaintenance"
 )
 
@@ -95,6 +96,12 @@ func (r *PostgresVPSMaintenanceRepository) Start(ctx context.Context, vpsID stri
 		return vpsmaintenance.Review{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertVPSLifecycleSourcesWritable(ctx, tx, vpsID); err != nil {
+		if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+			return vpsmaintenance.Review{}, vpsmaintenance.ErrNotFound
+		}
+		return vpsmaintenance.Review{}, err
+	}
 	current, err := readVPSMaintenanceReview(ctx, tx, vpsID)
 	if err != nil {
 		return current, err
@@ -149,6 +156,12 @@ func (r *PostgresVPSMaintenanceRepository) End(ctx context.Context, vpsID string
 		return vpsmaintenance.Review{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertVPSLifecycleSourcesWritable(ctx, tx, vpsID); err != nil {
+		if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+			return vpsmaintenance.Review{}, vpsmaintenance.ErrNotFound
+		}
+		return vpsmaintenance.Review{}, err
+	}
 	current, err := readVPSMaintenanceReview(ctx, tx, vpsID)
 	if err != nil {
 		return current, err

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 const (
@@ -43,7 +44,7 @@ type ActionRecord struct {
 }
 
 func (record ActionRecord) Validate() error {
-	if ValidateActionID(record.ActionID) != nil || !validRecordID(record.RecordID) ||
+	if ValidateActionID(record.ActionID) != nil || !recordidentity.IsValid(record.RecordID) ||
 		record.Version == 0 || record.Version > MaxActionVersion || !validActionStatus(record.Status) ||
 		!validActionText(record.Title, MaxActionTitleRunes, false) ||
 		!validActionText(record.Details, MaxActionDetailsRunes, true) ||

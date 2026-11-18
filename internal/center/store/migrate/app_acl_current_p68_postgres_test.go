@@ -136,7 +136,7 @@ func runAppACLCurrentP68HistoryUpgrade(
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C68 to C74 convergence: %v", err)
 	}
@@ -159,7 +159,7 @@ func runAppACLCurrentP68HistoryUpgrade(
 	}
 
 	beforeRepeat := after
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("repeat C68 to C74 convergence: %v", err)
 	}
@@ -179,7 +179,7 @@ func assertAppACLCurrentP68LedgerAppend(t *testing.T, before, after []appACLCurr
 	assertAppACLCurrentLedgerSuffix(t, before, after,
 		appACLCurrentP69Migration, appACLCurrentP70Migration, appACLCurrentP71Migration,
 		appACLCurrentP72Migration, appACLCurrentP73Migration, appACLCurrentP74Migration,
-		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 }
 
 func assertAppACLCurrentP70CatalogDelta(
@@ -282,7 +282,7 @@ func testPostgresIntegrationAppACLCurrentP70Upgrade(t *testing.T) {
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C70 to C74 P70 convergence: %v", err)
 	}
@@ -300,11 +300,11 @@ func testPostgresIntegrationAppACLCurrentP70Upgrade(t *testing.T) {
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
 		appACLCurrentP71Migration, appACLCurrentP72Migration, appACLCurrentP73Migration,
 		appACLCurrentP74Migration, appACLCurrentP75Migration, appACLCurrentP76Migration,
-		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 	assertAppACLCurrentP70CatalogDelta(t, before.Catalog, after.Catalog, fixture.runtimeRole)
 
 	beforeRepeat := after
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("repeat C70 to C74 P70 convergence: %v", err)
 	}
@@ -338,7 +338,7 @@ func testPostgresIntegrationAppACLCurrentP68SettingsPresence(t *testing.T, profi
 			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("P68-only settings=%s convergence: %v", state, err)
 			}
@@ -350,7 +350,7 @@ func testPostgresIntegrationAppACLCurrentP68SettingsPresence(t *testing.T, profi
 				t.Fatalf("admit P68-only settings=%s runtime: %v", state, err)
 			}
 			beforeRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
-			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("repeat P68-only settings=%s convergence: %v", state, err)
 			}
@@ -406,17 +406,9 @@ func testPostgresIntegrationAppACLCurrentP68FailureCutpoints(t *testing.T, profi
 					return cutpoint
 				}
 			}
-			_, err := convergeAppACLCurrentWithDependencies(
-				ctx,
-				func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-					return migratorDB.BeginTx(ctx, options)
-				},
-				fixture.runtimeRole,
-				fixture.adminRole,
-				migrations.FS,
-				appACLCurrentMigrationFragments,
-				dependencies,
-			)
+			_, err := convergeAppACLCurrentWithDependencies(ctx, func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+				return migratorDB.BeginTx(ctx, options)
+			}, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 			if !errors.Is(err, cutpoint) {
 				t.Fatalf("C69 %s rollback error = %v, want controlled cutpoint", stage, err)
 			}
@@ -430,7 +422,7 @@ func testPostgresIntegrationAppACLCurrentP68FailureCutpoints(t *testing.T, profi
 			}
 			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("C69 retry after %s rollback: %v", stage, err)
 			}
@@ -443,7 +435,7 @@ func testPostgresIntegrationAppACLCurrentP68FailureCutpoints(t *testing.T, profi
 				t.Fatalf("admit C69 after %s retry: %v", stage, err)
 			}
 			beforeRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
-			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("C69 repeat after %s retry: %v", stage, err)
 			}

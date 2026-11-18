@@ -19,6 +19,13 @@ type AppACLCurrentFunctionContract struct {
 	Config          []string
 }
 
+// Function replacements change an already managed function at one migration
+// boundary. Both sides retain the same catalog identity.
+type AppACLCurrentFunctionReplacement struct {
+	Before AppACLCurrentFunctionContract
+	After  AppACLCurrentFunctionContract
+}
+
 // AppACLCurrentAuxiliaryPrivilege describes a grant to a fixed-purpose role
 // outside the frozen runtime/admin privilege body. Auxiliary grants are still
 // part of the current catalog contract, but they never alter the canonical r1
@@ -33,12 +40,18 @@ type AppACLCurrentAuxiliaryPrivilege struct {
 }
 
 type AppACLCurrentMigrationFragment struct {
-	Migration           string
-	Objects             []AppACLManagedObjectR1
-	RetiredObjects      []AppACLManagedObjectR1
-	Privileges          func(databaseName string) []AppACLPrivilege
-	AuxiliaryPrivileges []AppACLCurrentAuxiliaryPrivilege
-	Functions           []AppACLCurrentFunctionContract
+	Migration      string
+	Objects        []AppACLManagedObjectR1
+	RetiredObjects []AppACLManagedObjectR1
+	Privileges     func(databaseName string) []AppACLPrivilege
+	// RevokedPrivileges removes exact tuples granted by an earlier fragment
+	// or the frozen R1 base. Replay fails unless every tuple is present
+	// exactly once at this point of the migration order; historical fragments
+	// are never rewritten to express a later revocation.
+	RevokedPrivileges    []AppACLPrivilege
+	AuxiliaryPrivileges  []AppACLCurrentAuxiliaryPrivilege
+	Functions            []AppACLCurrentFunctionContract
+	FunctionReplacements []AppACLCurrentFunctionReplacement `json:",omitempty"`
 }
 
 var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
@@ -71,6 +84,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	ipQualityCollectionScopeAppACLCurrentMigrationFragment(),
 	ipQualityCacheExpiryAppACLCurrentMigrationFragment(),
 	agentReplayAppACLCurrentMigrationFragment(),
+	recordDeletionSuccessorAppACLCurrentMigrationFragment(),
 }
 
 func ipQualityCacheExpiryAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -1031,12 +1045,14 @@ type appACLCurrentSourceContract struct {
 }
 
 type appACLCurrentCompiledMigrationFragment struct {
-	Migration           string
-	Objects             []AppACLManagedObjectR1
-	RetiredObjects      []AppACLManagedObjectR1
-	Privileges          []AppACLPrivilege
-	AuxiliaryPrivileges []AppACLCurrentAuxiliaryPrivilege
-	Functions           []AppACLCurrentFunctionContract
+	Migration            string
+	Objects              []AppACLManagedObjectR1
+	RetiredObjects       []AppACLManagedObjectR1
+	Privileges           []AppACLPrivilege
+	RevokedPrivileges    []AppACLPrivilege
+	AuxiliaryPrivileges  []AppACLCurrentAuxiliaryPrivilege
+	Functions            []AppACLCurrentFunctionContract
+	FunctionReplacements []AppACLCurrentFunctionReplacement `json:",omitempty"`
 }
 
 func compileAppACLCurrentSourceContract(
@@ -1099,12 +1115,14 @@ func compileAppACLCurrentSourceContract(
 
 func cloneAppACLCurrentMigrationFragment(fragment AppACLCurrentMigrationFragment) AppACLCurrentMigrationFragment {
 	cloned := AppACLCurrentMigrationFragment{
-		Migration:           fragment.Migration,
-		Objects:             append([]AppACLManagedObjectR1(nil), fragment.Objects...),
-		RetiredObjects:      append([]AppACLManagedObjectR1(nil), fragment.RetiredObjects...),
-		Privileges:          fragment.Privileges,
-		AuxiliaryPrivileges: append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
-		Functions:           append([]AppACLCurrentFunctionContract(nil), fragment.Functions...),
+		Migration:            fragment.Migration,
+		Objects:              append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		RetiredObjects:       append([]AppACLManagedObjectR1(nil), fragment.RetiredObjects...),
+		Privileges:           fragment.Privileges,
+		RevokedPrivileges:    append([]AppACLPrivilege(nil), fragment.RevokedPrivileges...),
+		AuxiliaryPrivileges:  append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
+		Functions:            append([]AppACLCurrentFunctionContract(nil), fragment.Functions...),
+		FunctionReplacements: cloneAppACLCurrentFunctionReplacements(fragment.FunctionReplacements),
 	}
 	for index := range cloned.Functions {
 		cloned.Functions[index].Config = append([]string(nil), cloned.Functions[index].Config...)
@@ -1119,12 +1137,14 @@ func compileAppACLCurrentMigrationFragment(
 		return appACLCurrentCompiledMigrationFragment{}, fmt.Errorf("current APP ACL fragment %q has no privilege compiler", fragment.Migration)
 	}
 	return appACLCurrentCompiledMigrationFragment{
-		Migration:           fragment.Migration,
-		Objects:             append([]AppACLManagedObjectR1(nil), fragment.Objects...),
-		RetiredObjects:      append([]AppACLManagedObjectR1(nil), fragment.RetiredObjects...),
-		Privileges:          append([]AppACLPrivilege(nil), fragment.Privileges(appACLCurrentValidationDatabase)...),
-		AuxiliaryPrivileges: append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
-		Functions:           cloneAppACLCurrentFunctionContracts(fragment.Functions),
+		Migration:            fragment.Migration,
+		Objects:              append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		RetiredObjects:       append([]AppACLManagedObjectR1(nil), fragment.RetiredObjects...),
+		Privileges:           append([]AppACLPrivilege(nil), fragment.Privileges(appACLCurrentValidationDatabase)...),
+		RevokedPrivileges:    append([]AppACLPrivilege(nil), fragment.RevokedPrivileges...),
+		AuxiliaryPrivileges:  append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
+		Functions:            cloneAppACLCurrentFunctionContracts(fragment.Functions),
+		FunctionReplacements: cloneAppACLCurrentFunctionReplacements(fragment.FunctionReplacements),
 	}, nil
 }
 
@@ -1138,10 +1158,19 @@ func cloneAppACLCurrentFunctionContracts(
 	return cloned
 }
 
+func cloneAppACLCurrentFunctionReplacements(replacements []AppACLCurrentFunctionReplacement) []AppACLCurrentFunctionReplacement {
+	cloned := append([]AppACLCurrentFunctionReplacement(nil), replacements...)
+	for index := range cloned {
+		cloned[index].Before.Config = append([]string(nil), cloned[index].Before.Config...)
+		cloned[index].After.Config = append([]string(nil), cloned[index].After.Config...)
+	}
+	return cloned
+}
+
 func validateAppACLCurrentFragments(fragments []appACLCurrentCompiledMigrationFragment) error {
 	_, err := compileAppACLCurrentCatalogContract(
 		appACLCurrentSourceContract{fragments: fragments},
-		appACLCurrentValidationDatabase, appACLCurrentTransitionBindings, appACLCurrentTransitionMigrator,
+		appACLCurrentValidationDatabase, appACLCurrentTransitionBindingsV2, appACLCurrentTransitionMigrator,
 	)
 	return err
 }
@@ -1227,19 +1256,39 @@ func appACLCurrentManagedObjectFromPrivilege(privilege AppACLPrivilege) (AppACLM
 	}
 }
 
+// compileAppACLCurrentCatalogContract compiles the exact catalog contract of
+// one source prefix. bindings must always carry runtime and admin. A source
+// that includes the record-deletion successor additionally requires the
+// worker binding and yields a v2 three-binding contract; an older source
+// prefix is projected onto its historical runtime/admin bindings so its v1
+// bytes remain identical to the released goldens.
 func compileAppACLCurrentCatalogContract(
 	source appACLCurrentSourceContract,
 	databaseName string,
 	bindings []AppACLRoleBinding,
 	migratorRole string,
 ) (appACLEffectiveCatalogContract, error) {
-	r1, err := CompileAppACLEffectiveCatalogContractR1(databaseName, bindings)
+	historicalBindings, workerBinding, err := splitAppACLCurrentRoleBindings(bindings)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, err
+	}
+	workerRequired := appACLCurrentSourceRequiresDeletionWorker(source)
+	if workerRequired && workerBinding == nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL source %q requires the %s binding", recordDeletionSuccessorMigration, AppACLSubjectRecordDeletionWorker)
+	}
+	r1, err := CompileAppACLEffectiveCatalogContractR1(databaseName, historicalBindings)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("compile frozen r1 catalog base: %w", err)
 	}
 	contract, err := appACLEffectiveCatalogContractFromR1(r1, migratorRole)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("adapt frozen r1 catalog base: %w", err)
+	}
+	if workerRequired {
+		if workerBinding.CatalogRole == migratorRole {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("app ACL migrator role reuses %s catalog role %q", workerBinding.Subject, workerBinding.CatalogRole)
+		}
+		contract.RoleBindings = append(contract.RoleBindings, *workerBinding)
 	}
 
 	fragmentFunctions, err := materializeAppACLCurrentFragments(&contract, source.fragments, databaseName, migratorRole)
@@ -1253,13 +1302,22 @@ func compileAppACLCurrentCatalogContract(
 	if len(contract.Privileges) > 65536 {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonical privilege set has too many privileges")
 	}
-	contract.RoleBindings, err = canonicalRoleBindings(contract.RoleBindings)
+	contract.RoleBindings, err = canonicalAppACLRoleBindings(contract.RoleBindings)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL role bindings: %w", err)
 	}
 	contract.Privileges, err = canonicalPrivileges(contract.Privileges)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL privileges: %w", err)
+	}
+	boundSubjects := make(map[AppACLSubject]struct{}, len(contract.RoleBindings))
+	for _, binding := range contract.RoleBindings {
+		boundSubjects[binding.Subject] = struct{}{}
+	}
+	for _, privilege := range contract.Privileges {
+		if _, bound := boundSubjects[privilege.Subject]; !bound {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL privilege uses unbound subject %q", privilege.Subject)
+		}
 	}
 	contract.AuxiliaryPrivileges, err = canonicalAppACLCurrentAuxiliaryPrivileges(contract.AuxiliaryPrivileges)
 	if err != nil {

@@ -25,17 +25,7 @@ const contentProcessorCrashExitCode = 86
 
 func TestPostgresIntegrationAttachmentProcessorCrashCutpointsConvergeAfterRestart(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
 	helperBinary := buildContentProcessorCrashHelper(t)
-	blobRoot := filepath.Join(t.TempDir(), "blob-root")
-	blob, err := attachments.NewLocalBlobStore(blobRoot)
-	if err != nil {
-		t.Fatalf("NewLocalBlobStore() error = %v", err)
-	}
-	databaseURL := contentProcessorCrashDatabaseURL(
-		fixture.directRoleConfig(t, fixture.runtime, "content-processor-crash-helper"),
-	)
-
 	cutpoints := []string{
 		string(attachments.ProcessorWorkerCutpointAfterClaim),
 		string(attachments.ProcessorWorkspaceCutpointAfterMkdir),
@@ -46,38 +36,67 @@ func TestPostgresIntegrationAttachmentProcessorCrashCutpointsConvergeAfterRestar
 	}
 	for index, cutpoint := range cutpoints {
 		t.Run(cutpoint, func(t *testing.T) {
-			content := []byte(fmt.Sprintf("content processor crash cutpoint %d\n", index))
-			digest := sha256.Sum256(content)
-			version, err := blob.Put(ctx, attachments.PutRequest{
-				ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
-			}, bytes.NewReader(content))
+			signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+			fixture := signed.platform
+			blobRoot := filepath.Join(t.TempDir(), "blob-root")
+			blob, err := newPostgresLocalBlobStore(t, ctx, fixture, blobRoot)
 			if err != nil {
-				t.Fatalf("LocalBlobStore.Put(source) error = %v", err)
+				t.Fatal(err)
 			}
-			source := attachments.BlobObject{
-				Key: version.Key, ObjectVersion: version.VersionID, SHA256: version.SHA256,
-				SizeBytes: version.SizeBytes, BackendKind: attachments.BackendKindLocal,
+			databaseURL := contentProcessorCrashDatabaseURL(fixture.directRoleConfig(t, fixture.runtime, "content-processor-crash-helper"))
+			content := []byte(fmt.Sprintf("content processor crash cutpoint %d\n", index))
+			actor := attachmentUploadWorkflowActor(t)
+			suffix := fmt.Sprintf("processcrash%d", index)
+			draftID, uploadID, attachmentID := "rdf_"+suffix, "aup_"+suffix, "att_"+suffix
+			seedAttachmentDraft(t, ctx, fixture, draftID, actor.UserID)
+			repository := NewPostgresAttachmentRepository(fixture.openDirectRuntimePool(t, ctx, "processor-crash-upload", 2))
+			service := newAttachmentUploadWorkflowService(t, fixture, repository, blob, attachments.TransportKindLocal, actor, draftID, time.Now)
+			expiresAt := time.Now().UTC().Add(time.Hour)
+			if _, err := service.CreateUpload(ctx, attachments.CreateUploadRequest{Actor: actor, UploadID: uploadID, AttachmentID: attachmentID,
+				DraftID: draftID, DisplayName: suffix + ".txt", MediaType: "text/plain", DeclaredSizeBytes: int64(len(content)), ExpiresAt: expiresAt}); err != nil {
+				t.Fatal(err)
 			}
-			now := time.Now().UTC().Truncate(time.Microsecond)
-			seed := seedAttachmentProcessorJob(t, ctx, fixture, attachmentProcessorSeed{
-				Suffix: fmt.Sprintf("processcrash%d", index), Source: source,
-				State: attachments.ProcessorStateQueued, Profile: attachments.ProcessorProfileText,
-				CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
-				MaxAttempts: 3, ReservedQuotaBytes: source.SizeBytes,
-			})
+			put, err := service.PutContent(ctx, attachments.PutUploadContentRequest{Actor: actor, DraftID: draftID, UploadID: uploadID,
+				ExpectedSHA256: sha256.Sum256(content), Content: bytes.NewReader(content)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.CompleteUpload(ctx, attachments.CompleteUploadRequest{Actor: actor, DraftID: draftID, UploadID: uploadID}); err != nil {
+				t.Fatal(err)
+			}
+			source := attachments.BlobObject{Key: put.Object.Key, ObjectVersion: put.Object.VersionID, SHA256: put.Object.SHA256,
+				SizeBytes: put.Object.SizeBytes, BackendKind: attachments.BackendKindLocal, NamespaceID: blob.Namespace().NamespaceID}
+			seed := attachmentProcessorSeedResult{UploadID: uploadID, AttachmentID: attachmentID, DraftID: draftID, Source: source}
+			if err := fixture.db.QueryRow(ctx, `select processor_job_id from public.attachment_processor_jobs where upload_id=$1`, uploadID).Scan(&seed.ProcessorJobID); err != nil {
+				t.Fatal(err)
+			}
+			// This fixture directly seeds a worker row for the active signed
+			// contract; membership issuer acceptance is tested separately.
+			if _, err := fixture.db.Exec(ctx, `insert into public.deployment_membership
+				(instance_id,deployment_id,project_id,instance_kind,capability,deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at)
+				select 'compose-processor',deployment_id,project_id,'worker','records.runtime',active_domain_identity_epoch,minimum_fence_contract_version,false,true,clock_timestamp()+interval '1 hour'
+				from public.deployment_contract_state where project_id='default'`); err != nil {
+				t.Fatal(err)
+			}
 			workspaceRoot := filepath.Join(t.TempDir(), "processor-root")
+			container, deploymentID := newContentProcessorLaunchFixture(t, ctx, fixture, helperBinary, blobRoot, workspaceRoot)
 			environment := contentProcessorCrashEnvironment(databaseURL, blobRoot, workspaceRoot)
+			environment = append(environment,
+				"HOUFENG_RECORD_BIRTH_LAUNCH_FILE=/run/houfeng/records-authority/birth-launch-processor.json",
+				"HOUFENG_RECORD_DEPLOYMENT_ID="+deploymentID,
+				"HOUFENG_RECORD_INSTANCE_ID=compose-processor", "HOUFENG_RECORD_INSTANCE_KIND=worker",
+				"HOUFENG_RECORD_INSTANCE_CAPABILITY=records.runtime")
 
-			output, err := runContentProcessorCrashHelper(helperBinary, environment, "crash", cutpoint)
+			output, err := runContentProcessorCrashHelper(container, environment, "crash", cutpoint)
 			var exitError *exec.ExitError
 			if !errors.As(err, &exitError) || exitError.ExitCode() != contentProcessorCrashExitCode {
 				t.Fatalf("crash helper error = %v, output = %s", err, output)
 			}
 			expireAttachmentProcessorCrashState(t, ctx, fixture, seed.ProcessorJobID)
-			if output, err := runContentProcessorCrashHelper(helperBinary, environment, "recover", ""); err != nil {
+			if output, err := runContentProcessorCrashHelper(container, environment, "recover", ""); err != nil {
 				t.Fatalf("recovery helper error = %v, output = %s", err, output)
 			}
-			if output, err := runContentProcessorCrashHelper(helperBinary, environment, "recover", ""); err != nil {
+			if output, err := runContentProcessorCrashHelper(container, environment, "recover", ""); err != nil {
 				t.Fatalf("recovery replay helper error = %v, output = %s", err, output)
 			}
 
@@ -89,9 +108,9 @@ func TestPostgresIntegrationAttachmentProcessorCrashCutpointsConvergeAfterRestar
 			assertAttachmentProcessorCrashConverged(
 				t, ctx, fixture, seed, source, workspaceRoot, wantWorkspaces,
 			)
+			assertNoLocalBlobTemporaryResidue(t, blobRoot)
 		})
 	}
-	assertNoLocalBlobTemporaryResidue(t, blobRoot)
 }
 
 func contentProcessorCrashDatabaseURL(config *pgxpool.Config) string {
@@ -114,8 +133,21 @@ func buildContentProcessorCrashHelper(t *testing.T) string {
 		t.Fatalf("resolve repository root: %v", err)
 	}
 	binary := filepath.Join(t.TempDir(), "houfeng-content-processor.test")
-	command := exec.Command("go", "test", "-c", "-o", binary, "./cmd/houfeng-content-processor")
+	arguments := []string{"test", "-c", "-o", binary}
+	cgo := "CGO_ENABLED=0"
+	for _, flag := range strings.Fields(os.Getenv("GOFLAGS")) {
+		if flag == "-race" || flag == "-race=true" {
+			// Keep the inherited race instrumentation while avoiding a host
+			// glibc dependency in the Alpine fixture. Go handles DNS/user lookups.
+			cgo = "CGO_ENABLED=1"
+			arguments = append(arguments, "-tags=netgo,osusergo", "-ldflags=-linkmode=external -extldflags=-static")
+			break
+		}
+	}
+	arguments = append(arguments, "./cmd/houfeng-content-processor")
+	command := exec.Command("go", arguments...)
 	command.Dir = repositoryRoot
+	command.Env = append(os.Environ(), cgo)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build content processor crash helper: %v\n%s", err, output)
@@ -124,29 +156,33 @@ func buildContentProcessorCrashHelper(t *testing.T) string {
 }
 
 func contentProcessorCrashEnvironment(databaseURL, blobRoot, workspaceRoot string) []string {
-	return append(os.Environ(),
+	// Only this isolated APP's explicit configuration reaches the helper.
+	return []string{
 		"HOUFENG_CONTENT_PROCESSOR_CRASH_HELPER=1",
-		"HOUFENG_DATABASE_URL="+databaseURL,
+		"HOUFENG_DATABASE_URL=" + databaseURL,
 		"HOUFENG_ATTACHMENT_BLOB_BACKEND=local",
-		"HOUFENG_ATTACHMENT_BLOB_ROOT="+blobRoot,
-		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT="+workspaceRoot,
+		"HOUFENG_ATTACHMENT_BLOB_ROOT=" + blobRoot,
+		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT=" + workspaceRoot,
 		"HOUFENG_CONTENT_PROCESSOR_OWNER_ID=processor_crash_helper",
-		"HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION=100ms",
+		"HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION=5s",
 		"HOUFENG_CONTENT_PROCESSOR_CLEANUP_TIMEOUT=5s",
 		"HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_ITEMS=10",
 		"HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_RUNTIME=5s",
 		"HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY=1us",
-	)
+	}
 }
 
-func runContentProcessorCrashHelper(binary string, environment []string, phase, cutpoint string) (string, error) {
+func runContentProcessorCrashHelper(container string, environment []string, phase, cutpoint string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, binary, "-test.run=^TestContentProcessorCrashHelper$", "-test.v")
-	command.Env = append(environment,
+	arguments := []string{"exec"}
+	for _, entry := range append(append([]string{}, environment...),
 		"HOUFENG_CONTENT_PROCESSOR_CRASH_PHASE="+phase,
-		"HOUFENG_CONTENT_PROCESSOR_CRASH_CUTPOINT="+cutpoint,
-	)
+		"HOUFENG_CONTENT_PROCESSOR_CRASH_CUTPOINT="+cutpoint) {
+		arguments = append(arguments, "--env", entry)
+	}
+	arguments = append(arguments, container, "/processor-helper", "-test.run=^TestContentProcessorCrashHelper$", "-test.v")
+	command := exec.CommandContext(ctx, "docker", arguments...)
 	output, err := command.CombinedOutput()
 	return string(output), err
 }
@@ -248,7 +284,7 @@ func assertNoLocalBlobTemporaryResidue(t *testing.T, root string) {
 		if err != nil {
 			return err
 		}
-		if strings.HasPrefix(entry.Name(), ".tmp-") {
+		if strings.HasPrefix(entry.Name(), ".blob-tmp-") || strings.HasPrefix(entry.Name(), ".tmp-") {
 			return fmt.Errorf("temporary Blob residue at %s", path)
 		}
 		return nil

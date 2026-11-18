@@ -56,12 +56,29 @@ func TestApplyFSRejectsUnknownAppliedMigration(t *testing.T) {
 	}
 }
 
+func TestApplyFSRejectsBirthSuccessorBeforeLedgerWrite(t *testing.T) {
+	store := &fakeMigrationStore{}
+	fsys := fstest.MapFS{
+		"0001_old.sql":                    {Data: []byte("select 1")},
+		"0003_record_birth_authority.sql": {Data: []byte("select 2")},
+	}
+	err := ApplyFS(context.Background(), store, fsys)
+	if err == nil || !strings.Contains(err.Error(), "convergence") {
+		t.Fatalf("generic successor error = %v", err)
+	}
+	if store.ensured != 0 || store.executed != 0 || store.applied != nil {
+		t.Fatal("generic successor performed a write before rejection")
+	}
+}
+
 type fakeMigrationStore struct {
 	applied  map[string]string
+	ensured  int
 	executed int
 }
 
 func (s *fakeMigrationStore) EnsureLedger(context.Context) error {
+	s.ensured++
 	if s.applied == nil {
 		s.applied = make(map[string]string)
 	}

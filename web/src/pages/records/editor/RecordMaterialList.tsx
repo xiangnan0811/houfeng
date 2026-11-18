@@ -34,12 +34,12 @@ export function RecordMaterialList({ items, renderActions }: RecordMaterialListP
           <span className="record-material__kind">{item.kind === 'evidence' ? '系统证据' : '用户附件'}</span>
           <span className="record-material__name">
             <MaterialName item={item} />
-            {item.pending ? <span className="record-material__meta">读取中</span> : null}
+            {item.confirmationPending ? <span className="record-material__meta">确认中</span> : item.pending ? <span className="record-material__meta">读取中</span> : null}
             {item.unsaved ? <Badge variant="state" tone="notice">待保存</Badge> : null}
-            {!item.available && !item.pending ? <span className="record-material__stale">引用已失效</span> : null}
+            {!item.available && !item.pending && !item.confirmationPending ? <span className="record-material__stale">引用已失效</span> : null}
           </span>
           <span className="record-material__actions">
-            {item.kind === 'evidence' && !item.unsaved ? (
+            {item.kind === 'evidence' && item.available && !item.pending && !item.confirmationPending && !item.unsaved ? (
               <Link className="text-link" to={`/evidence/${encodeURIComponent(item.id)}`} state={state}>
                 查看证据
               </Link>

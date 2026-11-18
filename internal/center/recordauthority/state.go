@@ -70,10 +70,14 @@ type ComposeMembership struct {
 // VerifiedComposeState contains only values recovered from a completely
 // verified durable state. The private key remains internal to verification.
 type VerifiedComposeState struct {
-	DeploymentID      recordplatform.DeploymentID
-	ActivationCommand recordplatform.ContractActivationProjectionCommandV1
-	Memberships       []ComposeMembership
-	databasePassword  string
+	DeploymentID               recordplatform.DeploymentID
+	ActivationCommand          recordplatform.ContractActivationProjectionCommandV1
+	MembershipVersion          uint8
+	MembershipRotation         *recordplatform.DomainRotationProjectionCommandV1
+	Memberships                []ComposeMembership
+	databasePassword           string
+	genesisActivationCommand   recordplatform.ContractActivationProjectionCommandV1
+	verifiedMembershipRotation *recordplatform.DomainRotationProjectionCommandV1
 }
 
 // DatabasePassword returns the constrained authority role credential. Callers
@@ -191,8 +195,14 @@ func createComposeState(root string, randomness io.Reader) (VerifiedComposeState
 	if err := os.Mkdir(publicDirectory, 0o755); err != nil {
 		return VerifiedComposeState{}, fmt.Errorf("%w: create public authority directory", ErrComposeStateInvalid)
 	}
+	if err := os.Chmod(publicDirectory, 0o755); err != nil {
+		return VerifiedComposeState{}, fmt.Errorf("%w: set public authority directory permissions", ErrComposeStateInvalid)
+	}
 	if err := os.Mkdir(privateDirectory, 0o700); err != nil {
 		return VerifiedComposeState{}, fmt.Errorf("%w: create private authority directory", ErrComposeStateInvalid)
+	}
+	if err := os.Chmod(privateDirectory, 0o700); err != nil {
+		return VerifiedComposeState{}, fmt.Errorf("%w: set private authority directory permissions", ErrComposeStateInvalid)
 	}
 	files := []struct {
 		path string
@@ -227,9 +237,8 @@ func createComposeState(root string, randomness io.Reader) (VerifiedComposeState
 	return verifiedComposeStateFromEntry(entry, databasePassword)
 }
 
-// LoadComposeState verifies file shape, canonical encoding, the complete
-// one-entry hash chain, and its Ed25519 signature before deriving the existing
-// projection command.
+// LoadComposeState verifies the canonical signed genesis and, when present,
+// its immutable signed membership successor before deriving projections.
 func LoadComposeState(root string) (VerifiedComposeState, error) {
 	if !validComposeStateRoot(root) {
 		return VerifiedComposeState{}, ErrComposeStateInvalid
@@ -306,7 +315,11 @@ func LoadComposeState(root string) (VerifiedComposeState, error) {
 	if err != nil {
 		return VerifiedComposeState{}, err
 	}
-	return verifiedComposeStateFromEntry(entry, databasePassword)
+	state, err := verifiedComposeStateFromEntry(entry, databasePassword)
+	if err != nil {
+		return VerifiedComposeState{}, err
+	}
+	return loadComposeMembershipSuccessor(root, state, entry, publicKey)
 }
 
 // PersistActivationReceipt validates the database projector result against the
@@ -430,8 +443,7 @@ func composeReceiptInputs(
 	if err != nil {
 		return VerifiedComposeState{}, nil, [sha256.Size]byte{}, ErrComposeActivationReceiptInvalid
 	}
-	providedCommand, err := state.ActivationCommand.MarshalBinary()
-	if err != nil || state.DeploymentID != canonicalState.DeploymentID || !bytes.Equal(providedCommand, canonicalCommand) {
+	if !equalVerifiedComposeState(state, canonicalState) {
 		return VerifiedComposeState{}, nil, [sha256.Size]byte{}, ErrComposeActivationReceiptInvalid
 	}
 	return canonicalState, canonicalCommand, recordplatform.ProjectionCASReceiptDigestV1(canonicalCommand), nil
@@ -631,10 +643,12 @@ func verifiedComposeStateFromEntry(entry signedActivationLedgerEntryV1, database
 		}
 	}
 	return VerifiedComposeState{
-		DeploymentID:      recordplatform.DeploymentID(entry.Body.DeploymentID),
-		ActivationCommand: command,
-		Memberships:       memberships,
-		databasePassword:  databasePassword,
+		DeploymentID:             recordplatform.DeploymentID(entry.Body.DeploymentID),
+		ActivationCommand:        command,
+		MembershipVersion:        1,
+		genesisActivationCommand: command,
+		Memberships:              memberships,
+		databasePassword:         databasePassword,
 	}, nil
 }
 

@@ -2,10 +2,22 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../lib/apiRequest'
-import type { RecordDraft } from '../../../lib/types'
-import { draftBufferKey, draftBufferRecordId, memoryDraftBufferStore, readUnsyncedDraft, writeUnsyncedDraft } from '../draftBuffer'
-import { emptyRecordDraftPayload, recordDetailFixture, recordRevisionFixture } from '../testFixtures'
+import { applyRecordClientCleanup, type RecordCleanupAck } from '../../../lib/recordClientCleanup'
+import type { RecordAllocation, RecordDraft } from '../../../lib/types'
+import { boundPublication, discardUserDrafts, draftBufferKey, draftBufferRecordId, memoryDraftBufferStore, readUnsyncedDraft, writeUnsyncedDraft } from '../draftBuffer'
+import { emptyRecordDraftPayload, recordAllocationFixture, recordDetailFixture, recordRevisionFixture } from '../testFixtures'
 import { useRecordDraft, type PublishEvidence } from './useRecordDraft'
+
+const withResolvers = <T,>() => (Promise as PromiseConstructor & {
+  withResolvers: () => { promise: Promise<T>; resolve: (value: T) => void }
+}).withResolvers()
+
+const ORDINARY_RECORD_ID = recordAllocationFixture('ordinary').record_id
+const EVIDENCE_ALLOCATION = recordAllocationFixture('evidence', { purpose: 'evidence_preview', idempotency_key: 'evidence-preview-key' })
+
+async function seedUnsyncedDraft(store: Parameters<typeof writeUnsyncedDraft>[0], value: Parameters<typeof writeUnsyncedDraft>[1]) {
+  await writeUnsyncedDraft(store, value, await store.captureScope(value.userId, value.recordId))
+}
 
 const api = vi.hoisted(() => ({
   getRecord: vi.fn(),
@@ -15,6 +27,7 @@ const api = vi.hoisted(() => ({
   createRecordDraft: vi.fn(),
   patchRecordDraft: vi.fn(),
   createRecord: vi.fn(),
+  createRecordAllocation: vi.fn(),
   createRecordRevision: vi.fn(),
   restoreRecordRevision: vi.fn(),
 }))
@@ -29,23 +42,15 @@ describe('useRecordDraft', () => {
     api.patchRecordDraft.mockResolvedValue(draftFixture())
     api.listRecordDrafts.mockResolvedValue({ items: [] })
     api.getRecordDraft.mockResolvedValue(draftFixture())
+    api.createRecordAllocation.mockImplementation(async (input: { purpose: 'record_create'; request_digest: string }, key: string) => (
+      recordAllocationFixture('ordinary', { purpose: input.purpose, request_digest: input.request_digest, idempotency_key: key })
+    ))
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  it('opens a new workspace without fetching a record', () => {
-    const store = memoryDraftBufferStore()
-    const { result } = renderHook(() => useRecordDraft({
-      mode: 'new',
-      userId: 'usr_1',
-      store,
-    }))
-    expect(result.current.state.status).toBe('ready')
-    expect(result.current.state.payload.markdown_dialect_version).toBe(1)
-    expect(api.getRecord).not.toHaveBeenCalled()
-  })
 
   it('loads an existing record and maps it into the editor payload', async () => {
     api.getRecord.mockResolvedValue(recordDetailFixture())
@@ -62,6 +67,27 @@ describe('useRecordDraft', () => {
     expect(api.listRecordDrafts).toHaveBeenCalledWith({ limit: 100 })
   })
 
+  it('refuses a trashed edit workspace without discarding its unsynced buffer', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture({
+      lifecycle: 'trashed',
+      capabilities: { read: true, update: false, draft: false, archive: false, restore: false, permanent_delete: false },
+    }))
+    const store = memoryDraftBufferStore()
+    const key = draftBufferKey('usr_1', 'rec_001')
+    const payload = { ...emptyRecordDraftPayload('usr_1'), body_markdown: 'local unsynced work' }
+    await seedUnsyncedDraft(store, { key, userId: 'usr_1', recordId: 'rec_001', payload, updatedAt: Date.now() })
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('error'))
+    await act(async () => {
+      result.current.commands.patchPayload({ body_markdown: 'must not overwrite' })
+      await result.current.commands.saveDraft()
+    })
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect((await readUnsyncedDraft(store, key))?.payload.body_markdown).toBe('local unsynced work')
+    expect(api.createRecordDraft).not.toHaveBeenCalled()
+    expect(api.patchRecordDraft).not.toHaveBeenCalled()
+  })
+
   it('overlays the unsynced buffer when reopening an edit workspace', async () => {
     api.getRecord.mockResolvedValue(recordDetailFixture())
     const store = memoryDraftBufferStore()
@@ -71,7 +97,7 @@ describe('useRecordDraft', () => {
       recordId: 'rec_001',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'local unsynced', body_markdown: 'keep local' },
       updatedAt: Date.now(),
-    })
+    }, await store.captureScope('usr_1', 'rec_001'))
     const { result } = renderHook(() => useRecordDraft({
       mode: 'edit',
       recordId: 'rec_001',
@@ -140,13 +166,14 @@ describe('useRecordDraft', () => {
     expect(result.current.state.revision?.evidence_snapshot_ids).toEqual(['ev_hist'])
   })
 
-  it('marks the payload dirty when the operator edits metadata', () => {
+  it('marks the payload dirty when the operator edits metadata', async () => {
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({
       mode: 'new',
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'Next' }))
     expect(result.current.state.dirty).toBe(true)
     expect(result.current.state.payload.title).toBe('Next')
@@ -155,32 +182,40 @@ describe('useRecordDraft', () => {
   it('creates a draft then publishes a new record', async () => {
     const draft = draftFixture()
     api.createRecordDraft.mockResolvedValue(draft)
-    api.createRecord.mockResolvedValue({ record_id: 'rec_new' })
+    api.createRecord.mockResolvedValue({ record_id: ORDINARY_RECORD_ID })
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({
       mode: 'new',
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     await act(async () => {
       await result.current.commands.publish()
     })
     expect(api.createRecordDraft).toHaveBeenCalled()
+    expect(api.createRecordAllocation).toHaveBeenCalledWith({ purpose: 'record_create', request_digest: expect.stringMatching(/^[0-9a-f]{64}$/) }, expect.any(String))
     expect(api.createRecord).toHaveBeenCalledWith({
       draft_id: draft.draft_id,
       draft_etag: draft.etag,
+      record_id: ORDINARY_RECORD_ID,
+      allocation: expect.objectContaining({ record_id: ORDINARY_RECORD_ID, purpose: 'record_create' }),
     }, expect.any(String))
+    // The publication key is separate from the reservation key.
+    expect(api.createRecord.mock.calls[0]?.[1]).not.toBe(api.createRecordAllocation.mock.calls[0]?.[1])
+    await expect(store.get(draftBufferKey('usr_1'))).resolves.toBeUndefined()
     expect(result.current.state.dirty).toBe(false)
     expect(result.current.state.draft).toBeNull()
-    expect(result.current.state.publishedRecordId).toBe('rec_new')
+    expect(result.current.state.publishedRecordId).toBe(ORDINARY_RECORD_ID)
   })
 
   it('publishes a new record with captured evidence on the pre-allocated record id', async () => {
     const draft = draftFixture()
     api.createRecordDraft.mockResolvedValue(draft)
-    api.createRecord.mockResolvedValue({ record_id: 'rec_allocated' })
+    api.createRecord.mockResolvedValue({ record_id: EVIDENCE_ALLOCATION.record_id })
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     await act(async () => {
       await expect(result.current.commands.publish([
         pendingEvidence('eci_1'),
@@ -190,10 +225,381 @@ describe('useRecordDraft', () => {
     expect(api.createRecord).toHaveBeenCalledWith({
       draft_id: draft.draft_id,
       draft_etag: draft.etag,
-      record_id: 'rec_allocated',
+      record_id: EVIDENCE_ALLOCATION.record_id,
+      allocation: EVIDENCE_ALLOCATION,
       evidence_items: [{ capture_intent_id: 'eci_1' }, { capture_intent_id: 'eci_2' }],
     }, expect.any(String))
-    expect(result.current.state.publishedRecordId).toBe('rec_allocated')
+    // Evidence already reserved the target; no second reservation.
+    expect(api.createRecordAllocation).not.toHaveBeenCalled()
+    expect(result.current.state.publishedRecordId).toBe(EVIDENCE_ALLOCATION.record_id)
+  })
+
+  it('refuses new-record evidence that carries no server reservation', async () => {
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    const unreserved = { ...pendingEvidence('eci_1') }
+    delete unreserved.allocation
+    await act(async () => {
+      await expect(result.current.commands.publish([unreserved])).resolves.toBe(false)
+    })
+    expect(api.createRecordAllocation).not.toHaveBeenCalled()
+    expect(api.createRecord).not.toHaveBeenCalled()
+    expect(result.current.state.message).toContain('服务端记录预留')
+  })
+
+  it('makes the full request durable before the first publish request leaves', async () => {
+    const store = memoryDraftBufferStore()
+    let storedAtSend: unknown
+    api.createRecord.mockImplementation(async (body: unknown, key: string) => {
+      const stored = boundPublication(await store.get(draftBufferKey('usr_1')))
+      storedAtSend = stored && { body: stored.request, key: stored.idempotencyKey, sentBody: body, sentKey: key }
+      return { record_id: ORDINARY_RECORD_ID }
+    })
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await expect(result.current.commands.publish()).resolves.toBe(true)
+    })
+    expect(storedAtSend).toEqual({
+      body: api.createRecord.mock.calls[0]?.[0],
+      key: api.createRecord.mock.calls[0]?.[1],
+      sentBody: api.createRecord.mock.calls[0]?.[0],
+      sentKey: api.createRecord.mock.calls[0]?.[1],
+    })
+  })
+
+  it('replays the exact stored request after a lost reply and reload, though the draft is gone', async () => {
+    const store = memoryDraftBufferStore()
+    api.createRecord.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    act(() => first.result.current.commands.patchPayload({ title: 'sent title' }))
+    await act(async () => {
+      await expect(first.result.current.commands.publish()).resolves.toBe(false)
+    })
+    expect(first.result.current.state.publicationPending).toBe(true)
+    expect(first.result.current.state.message).toContain('尚未确认')
+    first.unmount()
+
+    // The draft was consumed by the committed request: loading it would fail.
+    api.getRecordDraft.mockRejectedValue(new ApiError(404, 'gone'))
+    api.createRecord.mockResolvedValueOnce({ record_id: ORDINARY_RECORD_ID })
+    const second = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(second.result.current.state.publishedRecordId).toBe(ORDINARY_RECORD_ID))
+    expect(api.createRecord).toHaveBeenCalledTimes(2)
+    expect(api.createRecord.mock.calls[1]).toEqual(api.createRecord.mock.calls[0])
+    expect(api.createRecordDraft).toHaveBeenCalledTimes(1)
+    expect(api.patchRecordDraft).not.toHaveBeenCalled()
+    expect(api.createRecordAllocation).toHaveBeenCalledTimes(1)
+    await expect(store.get(draftBufferKey('usr_1'))).resolves.toBeUndefined()
+  })
+
+  it('resumes an unknown reservation after reload without creating another draft or allocation key', async () => {
+    const store = memoryDraftBufferStore()
+    api.createRecordAllocation.mockReset()
+    api.createRecordAllocation
+      .mockRejectedValueOnce(new TypeError('allocation response lost'))
+      .mockImplementationOnce(async (input: { purpose: 'record_create'; request_digest: string }, key: string) =>
+        recordAllocationFixture('ordinary', { purpose: input.purpose, request_digest: input.request_digest, idempotency_key: key }))
+    api.createRecord.mockResolvedValueOnce({ record_id: ORDINARY_RECORD_ID, certification_pending: true })
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    act(() => first.result.current.commands.patchPayload({ title: 'fixed before allocation' }))
+    await act(async () => { expect(await first.result.current.commands.publish()).toBe(false) })
+    const saved = await store.get(draftBufferKey('usr_1'))
+    expect(saved?.publication).toMatchObject({ phase: 'reserving', request: { draft_id: 'dft_001', draft_etag: 'etag-1' } })
+    expect(first.result.current.state.publicationPending).toBe(true)
+    first.unmount()
+
+    const second = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(second.result.current.state.publishedRecordId).toBe(ORDINARY_RECORD_ID))
+    expect(api.createRecordAllocation.mock.calls[1]).toEqual(api.createRecordAllocation.mock.calls[0])
+    expect(api.createRecordDraft).toHaveBeenCalledTimes(1)
+    expect(api.patchRecordDraft).not.toHaveBeenCalled()
+    expect(api.getRecordDraft).not.toHaveBeenCalled()
+    expect(api.createRecord).toHaveBeenCalledTimes(1)
+    expect(api.createRecord.mock.calls[0]?.[1]).toBe(saved?.publication?.idempotencyKey)
+    expect(api.createRecord.mock.calls[0]?.[0]).toMatchObject({ draft_id: 'dft_001', draft_etag: 'etag-1', record_id: ORDINARY_RECORD_ID })
+  })
+
+  it('preserves the draft when the user discards an unavailable reservation after reload', async () => {
+    const store = memoryDraftBufferStore()
+    const userId = 'usr_reservationdiscard'
+    api.createRecordAllocation.mockReset()
+    api.createRecordAllocation.mockRejectedValue(new TypeError('allocation unavailable'))
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    act(() => first.result.current.commands.patchPayload({ body_markdown: 'preserved draft body' }))
+    await act(async () => { expect(await first.result.current.commands.publish()).toBe(false) })
+    first.unmount()
+    const second = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(second.result.current.state.publicationPending).toBe(true))
+    expect(second.result.current.state.payload.body_markdown).toBe('')
+    await act(async () => { expect(await second.result.current.commands.discardPendingPublication()).toBe(true) })
+    expect(second.result.current.state.payload.body_markdown).toBe('preserved draft body')
+    expect(second.result.current.state.dirty).toBe(true)
+  })
+
+  it('closes an in-flight ordinary publication before cleanup is acknowledged', async () => {
+    const base = memoryDraftBufferStore()
+    const cleanupGate = withResolvers<void>()
+    const store = { ...base, applyCleanup: async (...args: Parameters<typeof base.applyCleanup>) => {
+      await cleanupGate.promise
+      return base.applyCleanup(...args)
+    } }
+    const response = withResolvers<{ record_id: string }>()
+    api.createRecord.mockReturnValueOnce(response.promise)
+    const userId = 'usr_cleanupordinary'
+    const workspace = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(workspace.result.current.state.status).toBe('ready'))
+    act(() => workspace.result.current.commands.patchPayload({ title: 'private title', body_markdown: 'private body' }))
+    let publishing: Promise<boolean> = Promise.resolve(false)
+    act(() => { publishing = workspace.result.current.commands.publish() })
+    await waitFor(() => expect(api.createRecord).toHaveBeenCalledTimes(1))
+    let cleanup!: Promise<RecordCleanupAck>
+    act(() => { cleanup = applyRecordClientCleanup(store, userId, 'browser1', {
+      version: 1, cursor: '1', operation_id: 'rpo_purge', record_id: ORDINARY_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['markdown_draft_buffer', 'markdown_workspace'],
+    }) })
+    expect(workspace.result.current.state.status).toBe('empty')
+    expect(workspace.result.current.state.payload.title).toBe('')
+    expect(workspace.result.current.state.payload.body_markdown).toBe('')
+    expect(workspace.result.current.state.publicationPending).toBe(false)
+    expect(workspace.result.current.state.publishing).toBe(false)
+    expect(workspace.result.current.commands.isPublishing()).toBe(false)
+    await act(async () => { cleanupGate.resolve(); await cleanup })
+    await act(async () => { response.resolve({ record_id: ORDINARY_RECORD_ID }); expect(await publishing).toBe(false) })
+    expect(workspace.result.current.state.publishedRecordId).toBeNull()
+    expect(workspace.result.current.state.payload.body_markdown).toBe('')
+    expect(await store.get(draftBufferKey(userId))).toBeUndefined()
+  })
+
+  it('closes a restored evidence publication and ignores its late successful replay', async () => {
+    const store = memoryDraftBufferStore()
+    const userId = 'usr_cleanupevidence'
+    const response = withResolvers<{ record_id: string }>()
+    api.createRecord.mockRejectedValueOnce(new TypeError('response lost')).mockReturnValueOnce(response.promise)
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    act(() => first.result.current.commands.patchPayload({ body_markdown: 'evidence body' }))
+    await act(async () => { expect(await first.result.current.commands.publish([pendingEvidence('eci_1')])).toBe(false) })
+    first.unmount()
+    const second = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(api.createRecord).toHaveBeenCalledTimes(2))
+    expect(second.result.current.state.payload.body_markdown).toBe('evidence body')
+    await act(async () => { await applyRecordClientCleanup(store, userId, 'browser2', {
+      version: 1, cursor: '1', operation_id: 'rpo_evidence', record_id: EVIDENCE_ALLOCATION.record_id,
+      cleanup_epoch: '1', scopes: ['markdown_draft_buffer', 'markdown_workspace'],
+    }) })
+    expect(second.result.current.state.status).toBe('empty')
+    expect(second.result.current.state.payload.body_markdown).toBe('')
+    expect(second.result.current.state.publicationPending).toBe(false)
+    await act(async () => { response.resolve({ record_id: EVIDENCE_ALLOCATION.record_id }) })
+    expect(second.result.current.state.publishedRecordId).toBeNull()
+    expect(second.result.current.state.payload.body_markdown).toBe('')
+    expect(await store.get(draftBufferKey(userId))).toBeUndefined()
+  })
+
+  it('never exposes recovered publication content when cleanup races destination validation', async () => {
+    const base = memoryDraftBufferStore()
+    const userId = 'usr_cleanuprace'
+    api.createRecord.mockRejectedValueOnce(new TypeError('response lost'))
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId, store: base }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    act(() => first.result.current.commands.patchPayload({ body_markdown: 'must remain hidden' }))
+    await act(async () => { expect(await first.result.current.commands.publish()).toBe(false) })
+    first.unmount()
+    const hold = withResolvers<void>()
+    const reached = withResolvers<void>()
+    const store = { ...base, captureScope: async (...args: Parameters<typeof base.captureScope>) => {
+      if (args[1] === ORDINARY_RECORD_ID) { reached.resolve(); await hold.promise }
+      return base.captureScope(...args)
+    } }
+    const second = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await act(async () => { await reached.promise })
+    expect(second.result.current.state.payload.body_markdown).toBe('')
+    await act(async () => { await applyRecordClientCleanup(base, userId, 'browser3', {
+      version: 1, cursor: '1', operation_id: 'rpo_race', record_id: ORDINARY_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['markdown_draft_buffer', 'markdown_workspace'],
+    }) })
+    expect(second.result.current.state.status).toBe('empty')
+    await act(async () => { hold.resolve() })
+    expect(second.result.current.state.payload.body_markdown).toBe('')
+    expect(second.result.current.state.publicationPending).toBe(false)
+    expect(api.createRecord).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an unresolved reservation hidden until its target is checked after cleanup', async () => {
+    const store = memoryDraftBufferStore()
+    const userId = 'usr_reservingrace'
+    const response = withResolvers<RecordAllocation>()
+    api.createRecordAllocation.mockReset()
+    api.createRecordAllocation.mockRejectedValueOnce(new TypeError('allocation response lost')).mockReturnValueOnce(response.promise)
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    act(() => first.result.current.commands.patchPayload({ body_markdown: 'hidden during reservation recovery' }))
+    await act(async () => { expect(await first.result.current.commands.publish()).toBe(false) })
+    first.unmount()
+    const second = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(api.createRecordAllocation).toHaveBeenCalledTimes(2))
+    expect(second.result.current.state.status).toBe('loading')
+    expect(second.result.current.state.payload.body_markdown).toBe('')
+    await act(async () => { await applyRecordClientCleanup(store, userId, 'browser4', {
+      version: 1, cursor: '1', operation_id: 'rpo_reserving', record_id: ORDINARY_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['markdown_draft_buffer', 'markdown_workspace'],
+    }) })
+    const [input, key] = api.createRecordAllocation.mock.calls[1] as [{ purpose: 'record_create'; request_digest: string }, string]
+    await act(async () => { response.resolve(recordAllocationFixture('ordinary', {
+      purpose: input.purpose, request_digest: input.request_digest, idempotency_key: key,
+    })) })
+    await waitFor(() => expect(second.result.current.state.status).toBe('empty'))
+    expect(second.result.current.state.payload.body_markdown).toBe('')
+    expect(api.createRecord).not.toHaveBeenCalled()
+  })
+
+  it('closes a pending draft when another tab broadcasts destination cleanup', async () => {
+    const store = memoryDraftBufferStore()
+    const userId = 'usr_cleanuptab'
+    api.createRecord.mockRejectedValueOnce(new TypeError('response lost'))
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'tab private title' }))
+    await act(async () => { expect(await result.current.commands.publish()).toBe(false) })
+    const remote = new BroadcastChannel('houfeng-record-security')
+    remote.postMessage({ type: 'cleanup', userId, event: {
+      version: 1, cursor: '1', operation_id: 'rpo_tab', record_id: ORDINARY_RECORD_ID,
+      cleanup_epoch: '1', scopes: ['markdown_draft_buffer', 'markdown_workspace'],
+    } })
+    await waitFor(() => expect(result.current.state.status).toBe('empty'))
+    expect(result.current.state.payload.title).toBe('')
+    expect(result.current.state.publicationPending).toBe(false)
+    remote.close()
+  })
+
+  it('replays a pending evidence publication even after its capture intents expired, until confirmation succeeds', async () => {
+    const store = memoryDraftBufferStore()
+    api.createRecord
+      .mockRejectedValueOnce(new ApiError(504, 'gateway timeout'))
+      .mockRejectedValueOnce(new ApiError(503, 'publication pending', { code: 'publication_pending' }))
+      .mockResolvedValueOnce({ record_id: EVIDENCE_ALLOCATION.record_id })
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await expect(first.result.current.commands.publish([pendingEvidence('eci_1')])).resolves.toBe(false)
+    })
+    first.unmount()
+
+    const second = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(api.createRecord).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(second.result.current.state.publishing).toBe(false))
+    expect(second.result.current.state.message).toContain('确认中')
+    const expired = { ...pendingEvidence('eci_other'), valid_until: new Date(Date.now() - 1_000).toISOString() }
+    await act(async () => {
+      await expect(second.result.current.commands.publish([expired])).resolves.toBe(true)
+    })
+    expect(api.createRecord).toHaveBeenCalledTimes(3)
+    expect(api.createRecord.mock.calls[2]).toEqual(api.createRecord.mock.calls[0])
+    expect(api.createRecord.mock.calls[2]?.[0]).toMatchObject({ evidence_items: [{ capture_intent_id: 'eci_1' }], allocation: EVIDENCE_ALLOCATION })
+    expect(second.result.current.state.publishedRecordId).toBe(EVIDENCE_ALLOCATION.record_id)
+  })
+
+  it('keeps a sent request after a 404 and holds edits and saves until it resolves', async () => {
+    const store = memoryDraftBufferStore()
+    api.createRecord.mockRejectedValueOnce(new ApiError(404, 'not found', { code: 'resource_not_found' }))
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'sent' }))
+    await act(async () => {
+      await expect(result.current.commands.publish()).resolves.toBe(false)
+    })
+    // No reply proves the request did not commit: the workspace is not revoked or reset.
+    expect(result.current.state.status).toBe('ready')
+    expect(result.current.state.publicationPending).toBe(true)
+    const drafts = api.createRecordDraft.mock.calls.length + api.patchRecordDraft.mock.calls.length
+    act(() => result.current.commands.patchPayload({ title: 'edited after send' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    expect(result.current.state.payload.title).toBe('sent')
+    expect(api.createRecordDraft.mock.calls.length + api.patchRecordDraft.mock.calls.length).toBe(drafts)
+    await expect(result.current.commands.ensureDraft()).resolves.toBeUndefined()
+    expect(boundPublication(await store.get(draftBufferKey('usr_1')))?.request.record_id).toBe(ORDINARY_RECORD_ID)
+  })
+
+  it.each([401, 403, 409, 503])('keeps the exact publication after HTTP %i', async (status) => {
+    const store = memoryDraftBufferStore()
+    api.createRecord.mockRejectedValueOnce(new ApiError(status, 'unavailable'))
+    const workspace = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(workspace.result.current.state.status).toBe('ready'))
+    await act(async () => { expect(await workspace.result.current.commands.publish()).toBe(false) })
+    const pending = boundPublication(await store.get(draftBufferKey('usr_1')))
+    expect(pending?.request).toEqual(api.createRecord.mock.calls[0]?.[0])
+    expect(pending?.idempotencyKey).toBe(api.createRecord.mock.calls[0]?.[1])
+    expect(pending?.publicationDigest).toMatch(/^[0-9a-f]{64}$/)
+    expect(workspace.result.current.state.publicationPending).toBe(true)
+  })
+
+  it('starts a new reservation and key only after an explicit discard', async () => {
+    const store = memoryDraftBufferStore()
+    api.createRecord.mockRejectedValueOnce(new ApiError(409, 'conflict', { code: 'idempotency_conflict' }))
+    let reservations = 0
+    api.createRecordAllocation.mockImplementation(async (input: { purpose: 'record_create'; request_digest: string }, key: string) => (
+      recordAllocationFixture(`r${++reservations}`, { purpose: input.purpose, request_digest: input.request_digest, idempotency_key: key })
+    ))
+    api.createRecordDraft.mockResolvedValueOnce(draftFixture({ draft_id: 'dft_old', etag: 'etag-old' }))
+      .mockResolvedValueOnce(draftFixture({ draft_id: 'dft_new', etag: 'etag-new' }))
+    const userId = 'usr_discardordinary'
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId, store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await expect(result.current.commands.publish()).resolves.toBe(false)
+    })
+    expect(result.current.state.message).toContain('不一致')
+    await act(async () => {
+      await expect(result.current.commands.discardPendingPublication()).resolves.toBe(true)
+    })
+    expect(result.current.state.publicationPending).toBe(false)
+    expect(result.current.state.message).toContain('可能已经创建')
+    const newTarget = recordAllocationFixture('r2').record_id
+    api.createRecord.mockResolvedValueOnce({ record_id: newTarget })
+    act(() => result.current.commands.patchPayload({ title: 'new request' }))
+    await act(async () => {
+      await expect(result.current.commands.publish()).resolves.toBe(true)
+    })
+    expect(api.createRecordAllocation).toHaveBeenCalledTimes(2)
+    expect(api.createRecordAllocation.mock.calls[1]?.[1]).not.toBe(api.createRecordAllocation.mock.calls[0]?.[1])
+    expect(api.createRecord.mock.calls[1]?.[0]).toMatchObject({ draft_id: 'dft_new', record_id: newTarget })
+    expect(api.createRecord.mock.calls[1]?.[1]).not.toBe(api.createRecord.mock.calls[0]?.[1])
+    await act(async () => { await applyRecordClientCleanup(store, userId, 'browser4', {
+      version: 1, cursor: '1', operation_id: 'rpo_oldattempt', record_id: recordAllocationFixture('r1').record_id,
+      cleanup_epoch: '1', scopes: ['markdown_draft_buffer', 'markdown_workspace'],
+    }) })
+    expect(result.current.state.status).toBe('ready')
+    expect(result.current.state.payload.title).toBe('new request')
+    expect(result.current.state.publishedRecordId).toBe(newTarget)
+  })
+
+  it('does not replay another user’s or a logged-out user’s pending publication', async () => {
+    const store = memoryDraftBufferStore()
+    api.createRecord.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const first = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await first.result.current.commands.publish()
+    })
+    first.unmount()
+
+    const other = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_2', store }))
+    await waitFor(() => expect(other.result.current.state.status).toBe('ready'))
+    expect(other.result.current.state.publicationPending).toBe(false)
+    other.unmount()
+
+    await discardUserDrafts('usr_1', store)
+    const again = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(again.result.current.state.status).toBe('ready'))
+    expect(again.result.current.state.publicationPending).toBe(false)
+    expect(api.createRecord).toHaveBeenCalledTimes(1)
   })
 
   it('appends captured evidence after the existing snapshots when publishing a revision', async () => {
@@ -240,6 +646,7 @@ describe('useRecordDraft', () => {
     }))
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     const expiring = { ...pendingEvidence('eci_1'), valid_until: new Date(Date.now() + 60_000).toISOString() }
     let publishing: Promise<boolean> = Promise.resolve(true)
     act(() => {
@@ -263,10 +670,11 @@ describe('useRecordDraft', () => {
   it('ignores a second publish while the first is still running', async () => {
     let releaseCreate: () => void = () => undefined
     api.createRecord.mockImplementation(() => new Promise((resolve) => {
-      releaseCreate = () => resolve({ record_id: 'rec_allocated' })
+      releaseCreate = () => resolve({ record_id: EVIDENCE_ALLOCATION.record_id })
     }))
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     let first: Promise<boolean> = Promise.resolve(false)
     act(() => {
       first = result.current.commands.publish([pendingEvidence('eci_1')])
@@ -282,14 +690,17 @@ describe('useRecordDraft', () => {
     expect(api.createRecord).toHaveBeenCalledTimes(1)
   })
 
-  it('explains a publish rejected because the evidence source changed since the preview', async () => {
+  it('explains a publish rejected because the evidence source changed, without dropping the sent request', async () => {
     api.createRecord.mockRejectedValue(new ApiError(409, 'evidence preview stale', { code: 'evidence_preview_stale' }))
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     await act(async () => {
       await expect(result.current.commands.publish([pendingEvidence('eci_1')])).resolves.toBe(false)
     })
-    expect(result.current.state.message).toBe('有证据预览已失效（过期或来源数据已变化），请移除后重新采集')
+    expect(result.current.state.message).toContain('有证据预览已失效（过期或来源数据已变化）')
+    expect(result.current.state.message).toContain('尚未确认')
+    expect(result.current.state.publicationPending).toBe(true)
     expect(result.current.state.publishedRecordId).toBeNull()
   })
 
@@ -298,13 +709,14 @@ describe('useRecordDraft', () => {
     const second = draftFixture({ etag: 'etag-2' })
     api.createRecordDraft.mockResolvedValue(first)
     api.patchRecordDraft.mockResolvedValue(second)
-    api.createRecord.mockResolvedValue({ record_id: 'rec_new' })
+    api.createRecord.mockResolvedValue({ record_id: ORDINARY_RECORD_ID })
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({
       mode: 'new',
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'first' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -321,6 +733,8 @@ describe('useRecordDraft', () => {
     expect(api.createRecord).toHaveBeenCalledWith({
       draft_id: second.draft_id,
       draft_etag: second.etag,
+      record_id: ORDINARY_RECORD_ID,
+      allocation: expect.objectContaining({ record_id: ORDINARY_RECORD_ID }),
     }, expect.any(String))
   })
 
@@ -377,7 +791,7 @@ describe('useRecordDraft', () => {
       recordId: 'rec_001',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'stale local' },
       updatedAt: bufferedAt,
-    })
+    }, await store.captureScope('usr_1', 'rec_001'))
     const { result } = renderHook(() => useRecordDraft({
       mode: 'edit',
       recordId: 'rec_001',
@@ -401,7 +815,7 @@ describe('useRecordDraft', () => {
       updated_at: serverDraftAt,
     }))
     const store = memoryDraftBufferStore()
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1', 'rec_001'),
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -428,6 +842,7 @@ describe('useRecordDraft', () => {
     }))
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await act(async () => {})
     act(() => result.current.commands.patchPayload({ title: 'first' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -459,6 +874,7 @@ describe('useRecordDraft', () => {
     }))
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await act(async () => {})
     act(() => result.current.commands.patchPayload({ title: 'first' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -490,6 +906,7 @@ describe('useRecordDraft', () => {
     api.patchRecordDraft.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPatch = reject }))
     const store = memoryDraftBufferStore()
     const { result, unmount } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await act(async () => {})
     act(() => result.current.commands.patchPayload({ title: 'first' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -522,6 +939,7 @@ describe('useRecordDraft', () => {
     api.patchRecordDraft.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPatch = reject }))
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await act(async () => {})
     act(() => result.current.commands.patchPayload({ title: 'first' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -553,14 +971,15 @@ describe('useRecordDraft', () => {
     let releaseWrite: (() => void) | undefined
     const inner = memoryDraftBufferStore()
     const store = {
+      ...inner,
       get: (key: string) => inner.get(key),
       list: () => inner.list(),
       delete: (key: string) => inner.delete(key),
-      async set(value: Parameters<typeof inner.set>[0]) {
+      async set(value: Parameters<typeof inner.set>[0], scope: Parameters<typeof inner.set>[1]) {
         await new Promise<void>((resolve) => {
           releaseWrite = resolve
         })
-        await inner.set(value)
+        await inner.set(value, scope)
       },
     }
     api.createRecordDraft.mockResolvedValue(draftFixture())
@@ -569,6 +988,7 @@ describe('useRecordDraft', () => {
       userId: 'usr_1',
       store,
     }))
+    await act(async () => {})
     act(() => result.current.commands.patchPayload({ title: 'old' }))
     act(() => {
       vi.advanceTimersByTime(2000)
@@ -589,7 +1009,7 @@ describe('useRecordDraft', () => {
   it('deletes the synced buffer after a successful draft save', async () => {
     api.createRecordDraft.mockResolvedValue(draftFixture())
     const store = memoryDraftBufferStore()
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1'),
       userId: 'usr_1',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'buffered' },
@@ -600,6 +1020,7 @@ describe('useRecordDraft', () => {
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'saved' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -613,13 +1034,14 @@ describe('useRecordDraft', () => {
       resolveSave = resolve
     }))
     api.patchRecordDraft.mockResolvedValue(draftFixture({ etag: 'etag-2' }))
-    api.createRecord.mockResolvedValue({ record_id: 'rec_new' })
+    api.createRecord.mockResolvedValue({ record_id: ORDINARY_RECORD_ID })
     const store = memoryDraftBufferStore()
     const { result } = renderHook(() => useRecordDraft({
       mode: 'new',
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'one' }))
     act(() => {
       void result.current.commands.saveDraft()
@@ -640,6 +1062,8 @@ describe('useRecordDraft', () => {
     expect(api.createRecord).toHaveBeenCalledWith({
       draft_id: 'dft_001',
       draft_etag: 'etag-2',
+      record_id: ORDINARY_RECORD_ID,
+      allocation: expect.objectContaining({ record_id: ORDINARY_RECORD_ID }),
     }, expect.any(String))
   })
 
@@ -657,6 +1081,7 @@ describe('useRecordDraft', () => {
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'mine', body_markdown: 'keep me' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -675,6 +1100,7 @@ describe('useRecordDraft', () => {
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'Draft title', body_markdown: 'keep me' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -695,6 +1121,7 @@ describe('useRecordDraft', () => {
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ body_markdown: 'keep me' }))
     await act(async () => {
       await result.current.commands.publish()
@@ -714,6 +1141,7 @@ describe('useRecordDraft', () => {
       userId: 'usr_1',
       store,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'one' }))
     let savePromise: Promise<void> = Promise.resolve()
     act(() => {
@@ -1234,7 +1662,7 @@ describe('useRecordDraft', () => {
   it('clears the unsynced buffer when the record is revoked', async () => {
     api.getRecord.mockRejectedValue(new ApiError(403, 'forbidden'))
     const store = memoryDraftBufferStore()
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1', 'rec_001'),
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1261,7 +1689,7 @@ describe('useRecordDraft', () => {
       store,
     }))
     await waitFor(() => expect(result.current.state.status).toBe('revoked'))
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1', 'rec_001'),
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1282,7 +1710,7 @@ describe('useRecordDraft', () => {
       .mockRejectedValueOnce(new ApiError(404, 'gone'))
     const inner = memoryDraftBufferStore()
     const key = draftBufferKey('usr_1', 'rec_001')
-    await writeUnsyncedDraft(inner, {
+    await seedUnsyncedDraft(inner, {
       key,
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1299,11 +1727,12 @@ describe('useRecordDraft', () => {
     })
     const writes: string[] = []
     const store = {
+      ...inner,
       get: (lookup: string) => inner.get(lookup),
       list: () => inner.list(),
-      async set(value: Parameters<typeof inner.set>[0]) {
+      async set(value: Parameters<typeof inner.set>[0], scope: Parameters<typeof inner.set>[1]) {
         writes.push(value.payload.body_markdown)
-        await inner.set(value)
+        await inner.set(value, scope)
       },
       async delete(lookup: string) {
         markDeleteStarted()
@@ -1360,7 +1789,7 @@ describe('useRecordDraft', () => {
       .mockRejectedValueOnce(new ApiError(403, 'forbidden'))
     const inner = memoryDraftBufferStore()
     const key = draftBufferKey('usr_1', 'rec_001')
-    await writeUnsyncedDraft(inner, {
+    await seedUnsyncedDraft(inner, {
       key,
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1377,11 +1806,12 @@ describe('useRecordDraft', () => {
     })
     const writes: string[] = []
     const store = {
+      ...inner,
       get: (lookup: string) => inner.get(lookup),
       list: () => inner.list(),
-      async set(value: Parameters<typeof inner.set>[0]) {
+      async set(value: Parameters<typeof inner.set>[0], scope: Parameters<typeof inner.set>[1]) {
         writes.push(value.payload.body_markdown)
-        await inner.set(value)
+        await inner.set(value, scope)
       },
       async delete(lookup: string) {
         markDeleteStarted()
@@ -1428,7 +1858,7 @@ describe('useRecordDraft', () => {
   it('does not let a late buffer read restore a record after authorization is revoked', async () => {
     const inner = memoryDraftBufferStore()
     const key = draftBufferKey('usr_1', 'rec_001')
-    await writeUnsyncedDraft(inner, {
+    await seedUnsyncedDraft(inner, {
       key,
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1441,12 +1871,12 @@ describe('useRecordDraft', () => {
     })
     let reads = 0
     const store = {
-      async get(lookup: string) {
+      ...inner,
+      async readUnexpired(lookup: string, now: number) {
         reads += 1
         await readGate
-        return inner.get(lookup)
+        return inner.readUnexpired(lookup, now)
       },
-      set: (value: Parameters<typeof inner.set>[0]) => inner.set(value),
       delete: (lookup: string) => inner.delete(lookup),
       list: () => inner.list(),
     }
@@ -1598,7 +2028,7 @@ describe('useRecordDraft', () => {
         attachment_ids: ['att_secret'],
       })
     })
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1', 'rec_001'),
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1695,7 +2125,7 @@ describe('useRecordDraft', () => {
       store,
     }))
     await waitFor(() => expect(result.current.state.status).toBe('ready'))
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1', 'rec_001'),
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1719,7 +2149,7 @@ describe('useRecordDraft', () => {
       store,
     }))
     await waitFor(() => expect(result.current.state.status).toBe('ready'))
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1', 'rec_001'),
       userId: 'usr_1',
       recordId: 'rec_001',
@@ -1733,18 +2163,6 @@ describe('useRecordDraft', () => {
     expect(result.current.state.dirty).toBe(true)
   })
 
-  it('registers a leave warning while the payload is dirty', () => {
-    const add = vi.spyOn(window, 'addEventListener')
-    const store = memoryDraftBufferStore()
-    const { result } = renderHook(() => useRecordDraft({
-      mode: 'new',
-      userId: 'usr_1',
-      store,
-    }))
-    act(() => result.current.commands.patchPayload({ title: 'unsaved' }))
-    expect(add).toHaveBeenCalledWith('beforeunload', expect.any(Function))
-    add.mockRestore()
-  })
 
   it('keeps an unscoped new buffer when opening a canonical subject prefill', async () => {
     const store = memoryDraftBufferStore()
@@ -1755,7 +2173,7 @@ describe('useRecordDraft', () => {
       source_id: 'vps_001',
       primary: true,
     }]
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1'),
       userId: 'usr_1',
       payload: {
@@ -1786,7 +2204,7 @@ describe('useRecordDraft', () => {
 
   it('still restores the unscoped new buffer without a subject prefill', async () => {
     const store = memoryDraftBufferStore()
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1'),
       userId: 'usr_1',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'draft A' },
@@ -1809,7 +2227,7 @@ describe('useRecordDraft', () => {
       source_id: 'vps_001',
       primary: true,
     }]
-    await writeUnsyncedDraft(inner, {
+    await seedUnsyncedDraft(inner, {
       key: draftBufferKey('usr_1', draftBufferRecordId(undefined, seedB)),
       userId: 'usr_1',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'old scoped', subjects: seedB },
@@ -1820,11 +2238,11 @@ describe('useRecordDraft', () => {
       release = resolve
     })
     const store = {
+      ...inner,
       async get(key: string) {
         await gate
         return inner.get(key)
       },
-      set: (value: Parameters<typeof inner.set>[0]) => inner.set(value),
       delete: (key: string) => inner.delete(key),
       list: () => inner.list(),
     }
@@ -1834,6 +2252,7 @@ describe('useRecordDraft', () => {
       store,
       seedSubjects: seedB,
     }))
+    await act(async () => {})
     act(() => result.current.commands.patchPayload({ title: 'typed B' }))
     await act(async () => {
       release?.()
@@ -1853,25 +2272,26 @@ describe('useRecordDraft', () => {
       source_id: 'vps_001',
       primary: true,
     }]
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1'),
       userId: 'usr_1',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'draft A' },
       updatedAt: Date.now(),
     })
     api.createRecordDraft.mockResolvedValue(draftFixture())
-    api.createRecord.mockResolvedValue({ record_id: 'rec_new' })
+    api.createRecord.mockResolvedValue({ record_id: ORDINARY_RECORD_ID })
     const { result } = renderHook(() => useRecordDraft({
       mode: 'new',
       userId: 'usr_1',
       store,
       seedSubjects: seedB,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'canonical B' }))
     await act(async () => {
       await result.current.commands.publish()
     })
-    expect(result.current.state.publishedRecordId).toBe('rec_new')
+    expect(result.current.state.publishedRecordId).toBe(ORDINARY_RECORD_ID)
     await expect(readUnsyncedDraft(store, draftBufferKey('usr_1'))).resolves.toMatchObject({
       payload: { title: 'draft A' },
     })
@@ -1900,6 +2320,7 @@ describe('useRecordDraft', () => {
       store,
       seedSubjects: seedA,
     }))
+    await waitFor(() => expect(first.result.current.state.status).toBe('ready'))
     act(() => first.result.current.commands.patchPayload({ title: 'draft A' }))
     first.unmount()
     const second = renderHook(() => useRecordDraft({
@@ -1935,6 +2356,7 @@ describe('useRecordDraft', () => {
       store,
       seedSubjects: seed,
     }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'keep me' }))
     await act(async () => {
       await result.current.commands.saveDraft()
@@ -1958,7 +2380,7 @@ describe('useRecordDraft', () => {
         title: `server ${recordId}`,
       }),
     }))
-    await writeUnsyncedDraft(store, {
+    await seedUnsyncedDraft(store, {
       key: draftBufferKey('usr_1', 'rec_002'),
       userId: 'usr_1',
       recordId: 'rec_002',
@@ -2011,6 +2433,44 @@ describe('useRecordDraft', () => {
     expect(result.current.state.restoredToRecordId).toBe('rec_001')
     expect(result.current.state.record?.current.revision_id).toBe('rrv_002')
   })
+  it('does not carry a prior user body into a newly authorized workspace', async () => {
+    const store = memoryDraftBufferStore()
+    const { result, rerender, unmount } = renderHook(({ userId }) => useRecordDraft({
+      mode: 'new', userId, store,
+    }), { initialProps: { userId: 'usr_1' } })
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'first user private body' }))
+    rerender({ userId: 'usr_2' })
+    await act(async () => {})
+    expect(result.current.state.payload.title).toBe('')
+    expect(result.current.state.payload.owner_id).toBe('usr_2')
+    expect(result.current.state.dirty).toBe(false)
+    unmount()
+    await expect(store.get(draftBufferKey('usr_2'))).resolves.toBeUndefined()
+    expect((await store.get(draftBufferKey('usr_1')))?.payload.title).toBe('first user private body')
+  })
+
+  it('rejects a failed save arriving after durable cleanup and never writes it back on unmount', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    let rejectSave: (error: Error) => void = () => undefined
+    api.createRecordDraft.mockReturnValue(new Promise((_resolve, reject) => { rejectSave = reject }))
+    const store = memoryDraftBufferStore()
+    const { result, unmount } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ body_markdown: 'late private body' }))
+    let saving: Promise<void> = Promise.resolve()
+    act(() => { saving = result.current.commands.saveDraft() })
+    await waitFor(() => expect(api.createRecordDraft).toHaveBeenCalled())
+    await store.applyCleanup('usr_1', 'browser_one', { version: 1, cursor: '1', operation_id: 'rpo_one', record_id: 'rec_001', cleanup_epoch: '1', scopes: ['markdown_draft_buffer', 'markdown_workspace'] })
+    await act(async () => {
+      rejectSave(new Error('lost response'))
+      await saving
+    })
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.payload.body_markdown).toBe('')
+    unmount()
+    await expect(store.get(draftBufferKey('usr_1', 'rec_001'))).resolves.toBeUndefined()
+  })
 })
 
 function publishedRevision() {
@@ -2045,9 +2505,9 @@ function holdDeletes() {
   // 保存草稿会先删掉本地缓冲，发布后的刷新读取还没开始。只停住那次读取之后的删除。
   let gateDeletes = false
   const store = {
+    ...inner,
     get: (lookup: string) => inner.get(lookup),
     list: () => inner.list(),
-    set: (value: Parameters<typeof inner.set>[0]) => inner.set(value),
     async delete(lookup: string) {
       if (!gateDeletes) {
         await inner.delete(lookup)
@@ -2108,8 +2568,13 @@ async function revokeDuringPublicationRefresh(held: ReturnType<typeof holdDelete
   return { publishing, result }
 }
 
-function pendingEvidence(captureIntentId: string, recordId = 'rec_allocated'): PublishEvidence {
-  return { record_id: recordId, capture_intent_id: captureIntentId, valid_until: new Date(Date.now() + 10 * 60_000).toISOString() }
+function pendingEvidence(captureIntentId: string, recordId = EVIDENCE_ALLOCATION.record_id): PublishEvidence {
+  return {
+    record_id: recordId,
+    capture_intent_id: captureIntentId,
+    valid_until: new Date(Date.now() + 10 * 60_000).toISOString(),
+    ...(recordId === EVIDENCE_ALLOCATION.record_id ? { allocation: EVIDENCE_ALLOCATION } : {}),
+  }
 }
 
 function draftFixture(overrides: Partial<RecordDraft> = {}): RecordDraft {

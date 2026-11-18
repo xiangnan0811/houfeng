@@ -176,6 +176,46 @@ func digestReadinessSnapshot(snapshot ReadinessSnapshot) [sha256.Size]byte {
 	return sha256.Sum256(payload)
 }
 
+// digestAdapterPreviewSnapshots is the shared codec for V1 registry previews
+// and issuer previews. The original preview domain and version are retained.
+func digestAdapterPreviewSnapshots(previews map[AdapterName]AdapterPreviewSnapshot) (adapterPreviewAggregate, error) {
+	payload := make([]byte, 0, 1024)
+	payload = appendLengthPrefixed(payload, deletionAdapterPreviewDomainV2)
+	payload = appendUint64(payload, 2)
+	aggregate := adapterPreviewAggregate{
+		onlinePurgeScopes: make([]AdapterName, 0, len(requiredAdapterNames)),
+		survivingCopies:   make([]SurvivingCopySummary, 0),
+	}
+	for _, name := range requiredAdapterNames {
+		snapshot, ok := previews[name]
+		if !ok || snapshot.Validate() != nil {
+			return adapterPreviewAggregate{}, fmt.Errorf("%w: adapter %q preview snapshot", ErrInvalidDeletionPreview, name)
+		}
+		aggregate.onlinePurgeScopes = append(aggregate.onlinePurgeScopes, name)
+		payload = appendLengthPrefixed(payload, string(name))
+		payload = append(payload, snapshot.DependencyDigest[:]...)
+		payload = append(payload, snapshot.ImpactDigest[:]...)
+		payload = appendUint64(payload, uint64(len(snapshot.SurvivingCopies)))
+		for _, surviving := range snapshot.SurvivingCopies {
+			summary := SurvivingCopySummary{
+				Scope: name, Kind: surviving.Kind, CountStatus: surviving.CountStatus,
+				CopyCount: cloneSurvivingCopyCount(surviving.CopyCount),
+			}
+			if err := summary.Validate(); err != nil {
+				return adapterPreviewAggregate{}, fmt.Errorf("%w: adapter %q surviving copy owner", ErrInvalidDeletionPreview, name)
+			}
+			payload = appendLengthPrefixed(payload, string(summary.Kind))
+			payload = appendLengthPrefixed(payload, string(summary.CountStatus))
+			if summary.CountStatus == SurvivingCopyCountKnown {
+				payload = appendUint64(payload, *summary.CopyCount)
+			}
+			aggregate.survivingCopies = append(aggregate.survivingCopies, summary)
+		}
+	}
+	aggregate.digest = sha256.Sum256(payload)
+	return aggregate, nil
+}
+
 func appendLengthPrefixed(target []byte, value string) []byte {
 	target = appendUint64(target, uint64(len(value)))
 	return append(target, value...)

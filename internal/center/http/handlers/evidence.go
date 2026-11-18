@@ -13,6 +13,8 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/store"
 )
 
@@ -26,7 +28,8 @@ type evidenceHandlerApplication interface {
 }
 
 type EvidenceHandlerOptions struct {
-	NewRecordID       func() (string, error)
+	Birth             *recordbirth.Coordinator
+	Allocations       recordAllocationRepository
 	NewSnapshotID     func() (string, error)
 	ComparisonEnabled bool
 }
@@ -36,9 +39,6 @@ func Evidence(application evidenceHandlerApplication) http.Handler {
 }
 
 func EvidenceWithOptions(application evidenceHandlerApplication, options EvidenceHandlerOptions) http.Handler {
-	if options.NewRecordID == nil {
-		options.NewRecordID = func() (string, error) { return ids.New("rec") }
-	}
 	if options.NewSnapshotID == nil {
 		options.NewSnapshotID = func() (string, error) { return ids.New("evs") }
 	}
@@ -77,15 +77,16 @@ func EvidenceWithOptions(application evidenceHandlerApplication, options Evidenc
 }
 
 type evidenceCapturePreviewInput struct {
-	RecordID                string             `json:"record_id,omitempty"`
-	Kind                    evidence.KindName  `json:"kind"`
-	SchemaVersion           uint16             `json:"schema_version"`
-	SourceType              string             `json:"source_type"`
-	SourceID                string             `json:"source_id"`
-	RequestedWindow         evidenceTimeWindow `json:"requested_window"`
-	Metrics                 []string           `json:"metrics"`
-	PrecisionSeconds        uint64             `json:"precision_seconds"`
-	SensitiveTopologyFields []string           `json:"sensitive_topology_fields"`
+	Allocation              *recordAllocationResponse `json:"allocation,omitempty"`
+	RecordID                string                    `json:"record_id,omitempty"`
+	Kind                    evidence.KindName         `json:"kind"`
+	SchemaVersion           uint16                    `json:"schema_version"`
+	SourceType              string                    `json:"source_type"`
+	SourceID                string                    `json:"source_id"`
+	RequestedWindow         evidenceTimeWindow        `json:"requested_window"`
+	Metrics                 []string                  `json:"metrics"`
+	PrecisionSeconds        uint64                    `json:"precision_seconds"`
+	SensitiveTopologyFields []string                  `json:"sensitive_topology_fields"`
 }
 
 type evidenceTimeWindow struct {
@@ -113,16 +114,8 @@ func handleEvidenceCapturePreview(
 		writeEvidenceError(w, http.StatusBadRequest, "invalid_request", "invalid evidence preview request")
 		return
 	}
-	recordID := input.RecordID
-	if recordID == "" {
-		var err error
-		recordID, err = options.NewRecordID()
-		if err != nil || !validRecordTransportID(recordID) {
-			writeEvidenceError(w, http.StatusServiceUnavailable, "evidence_service_unavailable", "evidence service unavailable")
-			return
-		}
-	} else if !validRecordTransportID(recordID) {
-		writeEvidenceError(w, http.StatusBadRequest, "invalid_request", "invalid evidence preview request")
+	allocation, recordID, ok := prepareEvidencePreviewAllocation(w, request, actor, options, input)
+	if !ok {
 		return
 	}
 	snapshotID, err := options.NewSnapshotID()
@@ -137,8 +130,13 @@ func handleEvidenceCapturePreview(
 		Metrics:         append([]string{}, input.Metrics...), Precision: time.Duration(input.PrecisionSeconds) * time.Second,
 		SensitiveTopologyFields: append([]string{}, input.SensitiveTopologyFields...),
 	}
+	allocationID := ""
+	if allocation != nil {
+		allocationID = allocation.AllocationID
+	}
 	result, err := application.CapturePreview(request.Context(), evidence.CapturePreviewRequest{
 		Actor: actor, RecordID: recordID, SnapshotID: snapshotID, Selection: selection,
+		AllocationID: allocationID,
 	})
 	if err != nil {
 		writeEvidenceApplicationError(w, err)
@@ -150,7 +148,9 @@ func handleEvidenceCapturePreview(
 		writeEvidenceError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, newEvidenceCapturePreviewResponse(result))
+	response := newEvidenceCapturePreviewResponse(result)
+	response.Allocation = allocation
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func handleEvidenceRead(
@@ -173,7 +173,7 @@ func handleEvidenceRead(
 		writeEvidenceApplicationError(w, err)
 		return
 	}
-	if result.SnapshotID != snapshotID || !validRecordTransportID(result.RecordID) ||
+	if result.SnapshotID != snapshotID || !recordidentity.IsValid(result.RecordID) ||
 		result.Envelope.Key != result.Summary.Key || result.Summary.RendererVersion == "" || result.Summary.ReadModel == nil {
 		writeEvidenceError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
@@ -182,6 +182,7 @@ func handleEvidenceRead(
 }
 
 type evidenceCapturePreviewResponse struct {
+	Allocation              *recordAllocationResponse       `json:"allocation,omitempty"`
 	RecordID                string                          `json:"record_id"`
 	SnapshotID              string                          `json:"snapshot_id"`
 	CaptureIntentID         string                          `json:"capture_intent_id"`

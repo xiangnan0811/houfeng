@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -20,22 +23,31 @@ import (
 const recordObjectKind = "record"
 
 type PostgresRecordRepository struct {
-	platform     *PostgresRecordPlatformRepository
-	participants records.RevisionParticipantRegistry
+	platform      *PostgresRecordPlatformRepository
+	participants  records.RevisionParticipantRegistry
+	authorization *PostgresCurrentRecordAuthorizationSource
+	continuity    recordbirth.ContinuitySource
 }
 
 func NewPostgresRecordRepository(
 	pool *pgxpool.Pool,
 	gate AdmissionGate,
 	participants []records.RevisionParticipant,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+	continuity recordbirth.ContinuitySource,
 ) (*PostgresRecordRepository, error) {
+	if authorization == nil {
+		return nil, fmt.Errorf("%w: revision authorization", records.ErrInvalidRevisionCommand)
+	}
 	registry, err := records.NewRevisionParticipantRegistry(participants)
 	if err != nil {
 		return nil, err
 	}
 	return &PostgresRecordRepository{
-		platform:     NewPostgresRecordPlatformRepository(pool, gate),
-		participants: registry,
+		platform:      NewPostgresRecordPlatformRepository(pool, gate),
+		participants:  registry,
+		authorization: authorization,
+		continuity:    continuity,
 	}, nil
 }
 
@@ -53,7 +65,7 @@ func (repository *PostgresRecordRepository) CommitRevision(
 	ctx context.Context,
 	command records.RevisionCommitCommand,
 ) (records.RevisionCommitResult, error) {
-	if ctx == nil || repository == nil || repository.platform == nil {
+	if ctx == nil || repository == nil || repository.platform == nil || repository.authorization == nil {
 		return records.RevisionCommitResult{}, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
 	}
 	if err := command.Validate(); err != nil {
@@ -64,13 +76,19 @@ func (repository *PostgresRecordRepository) CommitRevision(
 		return records.RevisionCommitResult{}, err
 	}
 
-	options := pgx.TxOptions{}
-	if len(command.ImportedAttachments) > 0 {
-		options.IsoLevel = pgx.ReadCommitted
+	commands := []records.RevisionCommitCommand{command}
+	authority, err := repository.prepareRevisionMutationAuthority(ctx, commands)
+	if err != nil {
+		return records.RevisionCommitResult{}, err
 	}
 	var result records.RevisionCommitResult
-	err = repository.platform.runRecordPlatformTransaction(ctx, options, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		committed, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared)
+	err = repository.runRevisionMutationTransaction(ctx, commands, func(ctx context.Context, transaction *RecordPlatformTransaction, proof []byte) error {
+		result = records.RevisionCommitResult{}
+		batch, err := acquireRevisionBatch(ctx, transaction, repository.participants, authority, commands, nil, proof)
+		if err != nil {
+			return err
+		}
+		committed, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared, batch, 0)
 		if err != nil {
 			return err
 		}
@@ -87,11 +105,10 @@ func (repository *PostgresRecordRepository) CommitRevisions(
 	ctx context.Context,
 	commands []records.RevisionCommitCommand,
 ) ([]records.RevisionCommitResult, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || len(commands) == 0 {
+	if ctx == nil || repository == nil || repository.platform == nil || repository.authorization == nil || len(commands) == 0 {
 		return nil, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
 	}
 	prepared := make([]preparedRecordRevision, 0, len(commands))
-	options := pgx.TxOptions{}
 	for _, command := range commands {
 		if err := command.Validate(); err != nil {
 			return nil, err
@@ -101,14 +118,20 @@ func (repository *PostgresRecordRepository) CommitRevisions(
 			return nil, err
 		}
 		prepared = append(prepared, next)
-		if len(command.ImportedAttachments) > 0 {
-			options.IsoLevel = pgx.ReadCommitted
-		}
+	}
+	authority, err := repository.prepareRevisionMutationAuthority(ctx, commands)
+	if err != nil {
+		return nil, err
 	}
 	results := make([]records.RevisionCommitResult, len(commands))
-	err := repository.platform.runRecordPlatformTransaction(ctx, options, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.runRevisionMutationTransaction(ctx, commands, func(ctx context.Context, transaction *RecordPlatformTransaction, proof []byte) error {
+		clear(results)
+		batch, err := acquireRevisionBatch(ctx, transaction, repository.participants, authority, commands, nil, proof)
+		if err != nil {
+			return err
+		}
 		for index, command := range commands {
-			result, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared[index])
+			result, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared[index], batch, index)
 			if err != nil {
 				return err
 			}
@@ -127,46 +150,82 @@ func (repository *PostgresRecordRepository) CommitRevisionsFinishing(
 	commands []records.RevisionCommitCommand,
 	finish records.RevisionCommitFinish,
 ) ([]records.RevisionCommitResult, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || len(commands) == 0 || finish.Validate() != nil {
+	if ctx == nil || repository == nil || repository.platform == nil || repository.authorization == nil || len(commands) == 0 || finish.Validate() != nil {
 		return nil, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
 	}
+	finishActorDigest := finish.Actor.CanonicalHash()
 	prepared := make([]preparedRecordRevision, 0, len(commands))
-	options := pgx.TxOptions{}
 	for _, command := range commands {
 		if err := command.Validate(); err != nil {
 			return nil, err
+		}
+		if command.Actor.CanonicalHash() != finishActorDigest {
+			return nil, records.ErrInvalidRevisionCommand
+		}
+		if command.BirthPermit.AllocationID != "" && command.BirthRequest.Purpose != recordbirth.PurposeImport {
+			return nil, records.ErrInvalidRevisionCommand
 		}
 		next, err := prepareRecordRevision(command)
 		if err != nil {
 			return nil, err
 		}
 		prepared = append(prepared, next)
-		if len(command.ImportedAttachments) > 0 {
-			options.IsoLevel = pgx.ReadCommitted
-		}
+	}
+	authority, err := repository.prepareRevisionMutationAuthority(ctx, commands)
+	if err != nil {
+		return nil, err
 	}
 	originID, err := newRecordOriginID()
 	if err != nil {
 		return nil, fmt.Errorf("%w: origin", records.ErrInvalidRevisionCommand)
 	}
 	results := make([]records.RevisionCommitResult, len(commands))
-	err = repository.platform.runRecordPlatformTransaction(ctx, options, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		if err := assertOriginAvailableOnTx(ctx, transaction, finish.OriginDigest); err != nil {
+	err = repository.runRevisionMutationTransaction(ctx, commands, func(ctx context.Context, transaction *RecordPlatformTransaction, proof []byte) error {
+		clear(results)
+		batch, err := acquireRevisionBatch(ctx, transaction, repository.participants, authority, commands, &finish, proof)
+		if err != nil {
 			return err
 		}
-		if err := lockImportJobForApplyOnTx(ctx, transaction, finish); err != nil {
-			return err
+		if !batch.importReplayed {
+			if err := assertOriginAvailableOnTx(ctx, transaction, finish.OriginDigest); err != nil {
+				return err
+			}
 		}
 		for index, command := range commands {
-			result, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared[index])
+			result, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared[index], batch, index)
 			if err != nil {
 				return err
 			}
 			results[index] = result
+			if batch.importReplayed {
+				continue
+			}
+			binding, err := json.Marshal(struct {
+				RecordID         string `json:"record_id"`
+				OriginKind       string `json:"origin_kind"`
+				OriginID         string `json:"origin_id"`
+				OriginGeneration uint64 `json:"origin_generation"`
+			}{result.RecordID, "import_archive", finish.ImportJobID, finish.JobLockVersion})
+			if err != nil {
+				return err
+			}
+			if _, err := transaction.tx.Exec(ctx, `select public.record_write_bind_record($1)`, binding); err != nil {
+				return fmt.Errorf("bind import archive target: %w", err)
+			}
 		}
 		sourceRecord := finish.SourceRecord
 		if sourceRecord == "" && len(results) > 0 {
 			sourceRecord = results[0].RecordID
+		}
+		if batch.importReplayed {
+			var exists bool
+			if err := transaction.tx.QueryRow(ctx, `select exists(select 1 from public.record_origins where project_id='default' and origin_kind=$1 and origin_digest=$2 and source_record_id=$3)`, finish.OriginKind, finish.OriginDigest[:], sourceRecord).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				return ErrRecordImportCASConflict
+			}
+			return nil
 		}
 		if err := insertOriginOnTx(ctx, transaction, originID, InsertRecordOriginInput{
 			OriginKind:   finish.OriginKind,
@@ -183,6 +242,44 @@ func (repository *PostgresRecordRepository) CommitRevisionsFinishing(
 	return results, nil
 }
 
+func (repository *PostgresRecordRepository) runRevisionMutationTransaction(ctx context.Context, commands []records.RevisionCommitCommand, callback func(context.Context, *RecordPlatformTransaction, []byte) error) error {
+	hasCreate := false
+	for _, command := range commands {
+		if command.Idempotency.Key.OperationKind == recordplatform.OperationKindRecordCreate {
+			hasCreate = true
+			break
+		}
+	}
+	if hasCreate {
+		needsBirth := false
+		err := repository.platform.runRecordPlatformTransaction(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted, AccessMode: pgx.ReadOnly}, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+			for _, command := range commands {
+				if command.Idempotency.Key.OperationKind != recordplatform.OperationKindRecordCreate {
+					continue
+				}
+				completed, err := peekRevisionReplay(ctx, transaction.tx, command)
+				if err != nil {
+					return err
+				}
+				if !completed {
+					needsBirth = true
+					break
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if needsBirth {
+			return repository.platform.runSourceAuthorizedBirthMutationTransaction(ctx, repository.continuity, callback)
+		}
+	}
+	return repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		return callback(ctx, transaction, nil)
+	})
+}
+
 func newRecordOriginID() (string, error) {
 	return ids.New("ror")
 }
@@ -192,16 +289,15 @@ func (repository *PostgresRecordRepository) commitRevisionOnTx(
 	transaction *RecordPlatformTransaction,
 	command records.RevisionCommitCommand,
 	prepared preparedRecordRevision,
+	batch *revisionBatchAcquisition,
+	index int,
 ) (records.RevisionCommitResult, error) {
-	claim, err := transaction.ClaimIdempotency(ctx, command.Idempotency)
+	claim, err := batch.claim(ctx, transaction, command)
 	if err != nil {
 		return records.RevisionCommitResult{}, err
 	}
 	if (claim.ReplayResult == nil) == (claim.Owner == nil) {
 		return records.RevisionCommitResult{}, fmt.Errorf("%w: missing idempotency owner", records.ErrInvalidRevisionCommand)
-	}
-	if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
-		return records.RevisionCommitResult{}, err
 	}
 	if claim.ReplayResult != nil {
 		return loadRecordRevisionReplayResult(ctx, transaction.tx, command, prepared)
@@ -209,7 +305,10 @@ func (repository *PostgresRecordRepository) commitRevisionOnTx(
 	var root lockedRecordRoot
 	switch command.Idempotency.Key.OperationKind {
 	case recordplatform.OperationKindRecordCreate:
-		root, err = createAndLockRecordRoot(ctx, transaction.tx, command.RecordID)
+		if !batch.created[index] {
+			return records.RevisionCommitResult{}, records.ErrInvalidRevisionCommand
+		}
+		root, err = lockRecordRoot(ctx, transaction.tx, command.RecordID)
 		if err != nil {
 			return records.RevisionCommitResult{}, err
 		}
@@ -270,6 +369,13 @@ func (repository *PostgresRecordRepository) commitRevisionOnTx(
 	}
 	if err := updateRecordCurrentProjection(ctx, transaction.tx, command, prepared, root, nextLockVersion, nextAuthorizationEpoch); err != nil {
 		return records.RevisionCommitResult{}, err
+	}
+	if command.Idempotency.Key.OperationKind == recordplatform.OperationKindRecordCreate {
+		permit := command.BirthPermit
+		permit.ContinuityProof = batch.continuityProof
+		if err := finishRecordBirthOnTx(ctx, transaction.tx, permit); err != nil {
+			return records.RevisionCommitResult{}, err
+		}
 	}
 	if _, err := insertRecordDomainActivity(ctx, transaction.tx, command, prepared, nextLockVersion, nextAuthorizationEpoch); err != nil {
 		return records.RevisionCommitResult{}, err
@@ -387,7 +493,7 @@ func (repository *PostgresRecordRepository) CommitRecordLifecycle(
 	ctx context.Context,
 	command records.RecordLifecycleCommand,
 ) (records.RecordLifecycleResult, error) {
-	if ctx == nil || repository == nil || repository.platform == nil {
+	if ctx == nil || repository == nil || repository.platform == nil || repository.authorization == nil {
 		return records.RecordLifecycleResult{}, fmt.Errorf("%w: repository", records.ErrInvalidRecordLifecycleCommand)
 	}
 	if err := command.Validate(); err != nil {
@@ -402,8 +508,24 @@ func (repository *PostgresRecordRepository) CommitRecordLifecycle(
 		return records.RecordLifecycleResult{}, err
 	}
 
+	authorization, err := repository.authorization.prepareCurrentAuthorization(ctx, []string{command.RecordID})
+	if err != nil {
+		return records.RecordLifecycleResult{}, err
+	}
 	var result records.RecordLifecycleResult
-	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		result = records.RecordLifecycleResult{}
+		if err := lockComparisonDecisionForWriter(ctx, transaction.tx); err != nil {
+			return err
+		}
+		resources, err := discoverRecordLifecycleMutationResources(ctx, transaction.tx, command)
+		if err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResourcesBeforeClaims(ctx, transaction.tx, resources); err != nil {
+			return err
+		}
+		transaction.registerAcquiredIdempotencyScopes(resources)
 		claim, err := transaction.ClaimIdempotency(ctx, command.Idempotency)
 		if err != nil {
 			return err
@@ -411,9 +533,32 @@ func (repository *PostgresRecordRepository) CommitRecordLifecycle(
 		if (claim.ReplayResult == nil) == (claim.Owner == nil) {
 			return fmt.Errorf("%w: missing idempotency owner", records.ErrInvalidRecordLifecycleCommand)
 		}
-		if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
+		if err := acquireRecordMutationResourcesAfterClaims(ctx, transaction.tx, resources); err != nil {
 			return err
 		}
+		rechecked, err := discoverRecordLifecycleMutationResources(ctx, transaction.tx, command)
+		if err != nil || !reflect.DeepEqual(resources.resources, rechecked.resources) {
+			return &pgconn.PgError{Code: "40001", Message: "record lifecycle route changed; restart transaction"}
+		}
+		actor, err := (&postgresCollaborationMembershipReader{}).ReadMemberActor(ctx, transaction.tx, command.Actor.ProjectID, command.Actor.UserID)
+		if err != nil || actor.CanonicalHash() != command.Actor.CanonicalHash() {
+			return recordauth.ErrDenied
+		}
+		current, err := authorization.resolveCurrentAuthorizationInTransaction(ctx, transaction.tx, actor, command.RecordID)
+		if err != nil {
+			return err
+		}
+		capability := recordauth.CapabilityRecordUpdate
+		if command.TargetLifecycle == records.LifecycleTrashed {
+			capability = recordauth.CapabilityRecordDelete
+		}
+		if claim.ReplayResult != nil {
+			capability = recordauth.CapabilityRecordRead
+		}
+		if err := records.AuthorizeRecordResource(actor, capability, current.Evidence); err != nil {
+			return err
+		}
+		transaction.registerAcquiredRecordMutationResources(resources)
 		if claim.ReplayResult != nil {
 			result, err = loadRecordLifecycleReplayResult(
 				ctx,
@@ -429,13 +574,9 @@ func (repository *PostgresRecordRepository) CommitRecordLifecycle(
 		if err != nil {
 			return err
 		}
-		expectedLifecycle := records.LifecycleActive
-		if command.TargetLifecycle == records.LifecycleActive {
-			expectedLifecycle = records.LifecycleArchived
-		}
 		if root.currentRevisionID == nil || *root.currentRevisionID != command.CurrentRevisionID ||
 			root.lockVersion != command.LockVersion || root.authorizationEpoch != command.AuthorizationEpoch ||
-			root.lifecycle != expectedLifecycle {
+			root.lifecycle != command.ExpectedLifecycle {
 			return records.ErrRecordRevisionConflict
 		}
 
@@ -445,7 +586,7 @@ func (repository *PostgresRecordRepository) CommitRecordLifecycle(
 			ctx,
 			transaction.tx,
 			command,
-			expectedLifecycle,
+			command.ExpectedLifecycle,
 			nextLockVersion,
 			nextAuthorizationEpoch,
 		)
@@ -780,20 +921,6 @@ type lockedRecordRoot struct {
 	canonicalHash            []byte
 }
 
-func createAndLockRecordRoot(ctx context.Context, tx pgx.Tx, recordID string) (lockedRecordRoot, error) {
-	command, err := tx.Exec(ctx, `
-		insert into public.records (record_id, project_id, lifecycle)
-		values ($1, $2, 'active')
-		on conflict (record_id) do nothing`, recordID, recordplatform.ProjectIDDefault)
-	if err != nil {
-		return lockedRecordRoot{}, fmt.Errorf("create record root: %w", err)
-	}
-	if command.RowsAffected() != 1 {
-		return lockedRecordRoot{}, records.ErrRecordAlreadyExists
-	}
-	return lockRecordRoot(ctx, tx, recordID)
-}
-
 func lockRecordRoot(ctx context.Context, tx pgx.Tx, recordID string) (lockedRecordRoot, error) {
 	var root lockedRecordRoot
 	var lifecycle string
@@ -1034,6 +1161,7 @@ func updateRecordLifecycle(
 		update public.records
 		set lifecycle = $2,
 		    archived_at = case when $2 = 'archived' then transaction_timestamp() else null end,
+		    trashed_at = case when $2 = 'trashed' then transaction_timestamp() else null end,
 		    lock_version = $3,
 		    authorization_epoch = $4,
 		    updated_at = transaction_timestamp()
@@ -1115,7 +1243,7 @@ func insertRecordLifecycleActivity(
 		command.RecordID,
 		command.CurrentRevisionID,
 		string(activityKind),
-		command.ActorID,
+		command.Actor.UserID,
 		int64(authorizationEpoch),
 		int64(lockVersion),
 	).Scan(&eventAt)

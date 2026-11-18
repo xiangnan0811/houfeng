@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
 	"houfeng/internal/center/recordplatform"
+	"houfeng/internal/center/records"
 )
 
 var (
@@ -62,11 +66,14 @@ type ActivityPublishResult struct {
 func PublishActivityBatch(
 	ctx context.Context,
 	pool *pgxpool.Pool,
-	generation uint64,
+	lease activity.SourceLease,
 	candidates []activity.CandidateEvent,
 ) (ActivityPublishResult, error) {
 	if ctx == nil || pool == nil {
 		return ActivityPublishResult{}, errors.New("publish activity batch: nil dependency")
+	}
+	if err := lease.Validate(); err != nil {
+		return ActivityPublishResult{}, activity.ErrSourceLeaseLost
 	}
 	transaction, err := pool.Begin(ctx)
 	if err != nil {
@@ -74,8 +81,11 @@ func PublishActivityBatch(
 	}
 	defer func() { _ = transaction.Rollback(ctx) }()
 
-	result, err := publishActivityBatchInTx(ctx, transaction, generation, candidates)
+	result, err := publishActivityBatchInTx(ctx, transaction, lease, candidates)
 	if err != nil {
+		return ActivityPublishResult{}, err
+	}
+	if err := assertActivitySourceLease(ctx, transaction, lease); err != nil {
 		return ActivityPublishResult{}, err
 	}
 	if err := transaction.Commit(ctx); err != nil {
@@ -87,30 +97,76 @@ func PublishActivityBatch(
 func publishActivityBatchInTx(
 	ctx context.Context,
 	transaction pgx.Tx,
-	generation uint64,
+	lease activity.SourceLease,
 	candidates []activity.CandidateEvent,
 ) (ActivityPublishResult, error) {
-	if generation == 0 {
-		return ActivityPublishResult{}, ErrActivityGenerationInactive
+	if err := lease.Validate(); err != nil {
+		return ActivityPublishResult{}, activity.ErrSourceLeaseLost
+	}
+	for _, candidate := range candidates {
+		if candidate.Source.Kind != lease.Kind {
+			return ActivityPublishResult{}, activity.ErrForeignSourceCandidate
+		}
+	}
+	if err := lockAssetGraphForSync(ctx, transaction); err != nil {
+		return ActivityPublishResult{}, err
+	}
+	recordIDs, extra, err := discoverActivityBatchResources(ctx, transaction, candidates)
+	if err != nil {
+		return ActivityPublishResult{}, err
+	}
+	before, err := discoverEffectRecordResources(ctx, transaction, recordIDs, nil)
+	if err != nil {
+		return ActivityPublishResult{}, err
+	}
+	declared, err := normalizeRecordMutationDeclarations(before, extra)
+	if err != nil {
+		return ActivityPublishResult{}, err
+	}
+	if err := lockComparisonDecisionForWriter(ctx, transaction); err != nil {
+		return ActivityPublishResult{}, err
+	}
+	if err := acquireRecordMutationResourceRange(ctx, transaction, declared, 10, 60); err != nil {
+		if errors.Is(err, records.ErrRecordDeletionReserved) {
+			return ActivityPublishResult{}, fmt.Errorf("%w: %w", ErrActivityRecordFenced, err)
+		}
+		return ActivityPublishResult{}, err
 	}
 
-	// Locking the head first is the serialization root for both candidate
-	// classification and sequence allocation. Everything below runs with the
-	// guarantee that no other publisher can classify or number rows in this
-	// generation at the same time.
+	// The entire record set is held before the head serializes numbering.
 	var publishedThrough, allocatedThrough uint64
-	err := transaction.QueryRow(ctx, `
+	err = transaction.QueryRow(ctx, `
 		select published_ingest_sequence, allocated_ingest_sequence
 		from public.record_activity_projection_heads
 		where project_id = $1 and projection_generation = $2 and head_state = 'active'
 		for update`,
-		recordplatform.ProjectIDDefault, generation,
+		recordplatform.ProjectIDDefault, lease.Generation,
 	).Scan(&publishedThrough, &allocatedThrough)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ActivityPublishResult{}, ErrActivityGenerationInactive
 	}
 	if err != nil {
 		return ActivityPublishResult{}, fmt.Errorf("publish activity batch: lock generation head: %w", err)
+	}
+	if err := assertActivitySourceLease(ctx, transaction, lease); err != nil {
+		return ActivityPublishResult{}, err
+	}
+	if err := acquireRecordMutationResourceRange(ctx, transaction, declared, 71, 75); err != nil {
+		return ActivityPublishResult{}, err
+	}
+	after, err := discoverEffectRecordResources(ctx, transaction, recordIDs, nil)
+	if err != nil {
+		return ActivityPublishResult{}, err
+	}
+	currentRecords, currentExtra, err := discoverActivityBatchResources(ctx, transaction, candidates)
+	if err != nil {
+		return ActivityPublishResult{}, err
+	}
+	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(recordIDs, currentRecords) || !reflect.DeepEqual(extra, currentExtra) {
+		return ActivityPublishResult{}, &pgconn.PgError{Code: "40001", Message: "activity source route changed; restart batch"}
+	}
+	if err := recheckActivitySourceRoutes(ctx, transaction, candidates); err != nil {
+		return ActivityPublishResult{}, err
 	}
 
 	existing, err := loadExistingActivityHashes(ctx, transaction, candidates)
@@ -165,13 +221,13 @@ func publishActivityBatchInTx(
 	supersededRevisions := 0
 	for offset, candidate := range missing {
 		sequence := assignedFrom + uint64(offset)
-		if err := insertActivityRow(ctx, transaction, generation, sequence, candidate); err != nil {
+		if err := insertActivityRow(ctx, transaction, lease.Generation, sequence, candidate); err != nil {
 			return ActivityPublishResult{}, err
 		}
 		if !candidate.OpensRevision {
 			continue
 		}
-		opened, err := openRevisionInterval(ctx, transaction, generation, sequence, candidate)
+		opened, err := openRevisionInterval(ctx, transaction, lease.Generation, sequence, candidate)
 		if err != nil {
 			return ActivityPublishResult{}, err
 		}
@@ -187,7 +243,7 @@ func publishActivityBatchInTx(
 		    allocated_ingest_sequence = greatest(allocated_ingest_sequence, $3),
 		    updated_at = now()
 		where project_id = $1 and projection_generation = $2 and head_state = 'active'`,
-		recordplatform.ProjectIDDefault, generation, assignedThrough,
+		recordplatform.ProjectIDDefault, lease.Generation, assignedThrough,
 	); err != nil {
 		return ActivityPublishResult{}, fmt.Errorf("publish activity batch: advance published head: %w", err)
 	}
@@ -198,6 +254,94 @@ func publishActivityBatchInTx(
 	result.PublishedThrough = assignedThrough
 	result.SupersededRevisions = supersededRevisions
 	return result, nil
+}
+
+func discoverActivityBatchResources(ctx context.Context, tx pgx.Tx, candidates []activity.CandidateEvent) ([]string, records.RevisionMutationResources, error) {
+	var recordIDs []string
+	var resources records.RevisionMutationResources
+	for _, candidate := range candidates {
+		if candidate.Source.Kind == activity.SourceKindRecordDomain || candidate.Source.Kind == activity.SourceKindEvidenceSnapshot {
+			if candidate.SourceRecordID == "" || (candidate.Source.Kind == activity.SourceKindRecordDomain && candidate.RecordID != candidate.SourceRecordID) {
+				return nil, resources, activity.ErrIncompleteRevisionClaim
+			}
+		}
+		if candidate.SourceRecordID != "" {
+			recordIDs = append(recordIDs, candidate.SourceRecordID)
+			if candidate.RevisionID != "" {
+				resources.Revisions = append(resources.Revisions, records.RevisionMutationRevision{RecordID: candidate.SourceRecordID, RevisionID: candidate.RevisionID})
+			}
+			if candidate.Source.Kind == activity.SourceKindEvidenceSnapshot {
+				snapshot, err := readRevisionMutationSnapshot(ctx, tx, candidate.Source.EventID)
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil, resources, &pgconn.PgError{Code: "40001", Message: "activity evidence source disappeared; restart batch"}
+				}
+				if err != nil {
+					return nil, resources, err
+				}
+				if snapshot.RecordID != candidate.SourceRecordID {
+					return nil, resources, &pgconn.PgError{Code: "40001", Message: "activity evidence owner changed; restart batch"}
+				}
+				resources.Snapshots = append(resources.Snapshots, snapshot)
+			}
+		}
+		for _, subject := range candidate.Subjects {
+			resources.Sources = append(resources.Sources, records.RevisionMutationSource{
+				ProjectID: string(recordplatform.ProjectIDDefault), SourceKind: subject.Kind, SourceID: subject.SourceID,
+			})
+		}
+		appendRevisionMutationVisibility(&resources, candidate.AuthScope.Visibility)
+	}
+	normalized, err := records.CombineRevisionMutationResources(resources)
+	return recordIDs, normalized, err
+}
+
+func recheckActivitySourceRoutes(ctx context.Context, tx pgx.Tx, candidates []activity.CandidateEvent) error {
+	for _, candidate := range candidates {
+		if candidate.SourceRecordID == "" {
+			continue
+		}
+		var recordID string
+		var version int64
+		switch candidate.Source.Kind {
+		case activity.SourceKindRecordDomain:
+			var kind, revisionID, actorID string
+			var recordedAt time.Time
+			err := tx.QueryRow(ctx, `
+				select a.record_id,a.source_version,a.event_kind,
+				       coalesce(a.revision_id,effective.revision_id,''),a.actor_id,a.recorded_at
+				from public.record_domain_activities a
+				left join lateral (select revision_id from public.record_revisions r
+				  where r.record_id=a.record_id and r.created_at<=a.event_at
+				  order by r.revision_no desc limit 1) effective on a.revision_id is null
+				where a.project_id=$1 and a.activity_id=$2`, recordplatform.ProjectIDDefault, candidate.Source.EventID,
+			).Scan(&recordID, &version, &kind, &revisionID, &actorID, &recordedAt)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return &pgconn.PgError{Code: "40001", Message: "activity source disappeared; restart batch"}
+			}
+			if err != nil {
+				return fmt.Errorf("recheck record activity source: %w", err)
+			}
+			if recordID != candidate.SourceRecordID || version <= 0 || uint64(version) != candidate.Source.Version ||
+				kind != string(candidate.EventKind) || revisionID != candidate.RevisionID || candidate.Actor == nil ||
+				candidate.Actor.ActorID != actorID || !candidate.RecordedAt.Equal(recordedAt) {
+				return &pgconn.PgError{Code: "40001", Message: "record activity source changed; restart batch"}
+			}
+		case activity.SourceKindEvidenceSnapshot:
+			err := tx.QueryRow(ctx, `select record_id,schema_version from public.evidence_snapshots where snapshot_id=$1`, candidate.Source.EventID).Scan(&recordID, &version)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return &pgconn.PgError{Code: "40001", Message: "activity evidence source disappeared; restart batch"}
+			}
+			if err != nil {
+				return fmt.Errorf("recheck evidence activity source: %w", err)
+			}
+			if recordID != candidate.SourceRecordID || version <= 0 || uint64(version) != candidate.Source.Version || candidate.EvidenceID != candidate.Source.EventID {
+				return &pgconn.PgError{Code: "40001", Message: "activity evidence source changed; restart batch"}
+			}
+		default:
+			return &pgconn.PgError{Code: "40001", Message: "activity record source route is unsupported; restart batch"}
+		}
+	}
+	return nil
 }
 
 // openRevisionInterval moves a record's current-revision pointer to the revision

@@ -98,6 +98,7 @@ var recordCollaborationSurfaceNames = []SurfaceName{
 	"record_notification_audit_summaries",
 	"record_notification_deliveries",
 	"record_notification_delivery_attempts",
+	"record_notification_delivery_starts",
 	"record_notification_recipients",
 	"record_notifications",
 }
@@ -136,6 +137,22 @@ var recordPortabilitySurfaceNames = []SurfaceName{
 	"record_portability_purge_receipts",
 }
 
+var recordMarkdownClientSurfaceNames = []SurfaceName{
+	"browser_record_cleanup_events",
+	"browser_record_cleanup_receipts",
+	"browser_record_cleanup_targets",
+	"markdown_client_draft_buffers",
+	"markdown_client_workspaces",
+	"record_markdown_client_purge_receipts",
+}
+
+var recordComparisonSurfaceNames = []SurfaceName{
+	"comparison_client_save_attempts",
+	"comparison_client_workbenches",
+	"comparison_result_dependencies",
+	"record_comparison_purge_receipts",
+}
+
 func RequiredAdapterNames() []AdapterName {
 	return append([]AdapterName(nil), requiredAdapterNames...)
 }
@@ -156,6 +173,19 @@ func RecordCollaborationSurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordCollaborationSurfaceNames...)
 }
 
+// RecordCollaborationSurfaceDigestV1 identifies historical receipts only.
+// The active descriptor includes delivery-start proofs and never accepts this
+// older fingerprint as authority for the expanded surface.
+func RecordCollaborationSurfaceDigestV1() [sha256.Size]byte {
+	return digestAdapterSurfaces(AdapterDescriptor{name: AdapterNameRecordCollaboration, surfaces: []SurfaceName{
+		"record_action_events", "record_actions", "record_collaboration_purge_receipts",
+		"record_comment_mentions", "record_comment_replies", "record_comment_revisions",
+		"record_comment_tombstones", "record_comments", "record_followers",
+		"record_notification_audit_summaries", "record_notification_deliveries",
+		"record_notification_delivery_attempts", "record_notification_recipients", "record_notifications",
+	}})
+}
+
 func RecordSearchSurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordSearchSurfaceNames...)
 }
@@ -166,6 +196,14 @@ func RecordActivitySurfaceNames() []SurfaceName {
 
 func RecordPortabilitySurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordPortabilitySurfaceNames...)
+}
+
+func RecordMarkdownClientSurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordMarkdownClientSurfaceNames...)
+}
+
+func RecordComparisonSurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordComparisonSurfaceNames...)
 }
 
 type AdapterDescriptor struct {
@@ -225,6 +263,12 @@ func (descriptor AdapterDescriptor) validate() error {
 	}
 	if descriptor.name == AdapterNameRecordPortability && !slices.Equal(descriptor.surfaces, recordPortabilitySurfaceNames) {
 		return fmt.Errorf("%w: record_portability surfaces", ErrInvalidAdapterDescriptor)
+	}
+	if descriptor.name == AdapterNameRecordMarkdownClient && !slices.Equal(descriptor.surfaces, recordMarkdownClientSurfaceNames) {
+		return fmt.Errorf("%w: record_markdown_client surfaces", ErrInvalidAdapterDescriptor)
+	}
+	if descriptor.name == AdapterNameRecordComparison && !slices.Equal(descriptor.surfaces, recordComparisonSurfaceNames) {
+		return fmt.Errorf("%w: record_comparison surfaces", ErrInvalidAdapterDescriptor)
 	}
 	return nil
 }

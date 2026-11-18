@@ -24,6 +24,7 @@ type ipQualityExecutor interface {
 }
 
 type ipQualityTx interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	Commit(context.Context) error
@@ -71,11 +72,24 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 		newReportID = func() (string, error) { return ids.New("ipq") }
 	}
 
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("begin ip quality reports transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return err
+	}
+	checkedSources := make(map[string]struct{}, len(reports))
+	for _, report := range reports {
+		if _, checked := checkedSources[report.MonitoringInstanceID]; checked {
+			continue
+		}
+		if err := assertMonitoringSourceWritable(ctx, tx, report.MonitoringInstanceID); err != nil {
+			return err
+		}
+		checkedSources[report.MonitoringInstanceID] = struct{}{}
+	}
 
 	for _, report := range reports {
 		reportID, err := newReportID()

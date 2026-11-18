@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -35,7 +36,7 @@ type WatchStatus struct {
 }
 
 func (status WatchStatus) Validate() error {
-	if !validRecordID(status.RecordID) || recordauth.ValidateActorUserID(status.UserID) != nil ||
+	if !recordidentity.IsValid(status.RecordID) || recordauth.ValidateActorUserID(status.UserID) != nil ||
 		ValidateFollowerPreference(status.Preference) != nil || status.Version > math.MaxInt64 ||
 		status.RecordFenceEpoch > math.MaxInt64 {
 		return ErrInvalidWatchCommand
@@ -81,7 +82,7 @@ type WatchCommand struct {
 }
 
 func (command WatchCommand) Validate() error {
-	if !validRecordID(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
+	if !recordidentity.IsValid(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
 		command.RecordLockVersion == 0 || command.AuthorizationEpoch == 0 || command.ExpectedVersion > math.MaxInt64 ||
 		ValidateFollowerPreference(command.Preference) != nil || command.Actor.ProjectID != recordauth.ProjectIDDefault ||
 		command.Idempotency.Key.ProjectID != recordplatform.ProjectIDDefault ||
@@ -102,7 +103,7 @@ type WatchReadCommand struct {
 }
 
 func (command WatchReadCommand) Validate() error {
-	if !validRecordID(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
+	if !recordidentity.IsValid(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
 		command.RecordLockVersion == 0 || command.AuthorizationEpoch == 0 {
 		return ErrInvalidWatchCommand
 	}
@@ -236,7 +237,7 @@ func (service *WatchService) GetWatch(ctx context.Context, request WatchReadRequ
 }
 
 func (service *WatchService) resolve(ctx context.Context, actorInput recordauth.ActorScope, recordID string, capability recordauth.Capability) (recordauth.ActorScope, records.CurrentRecordAuthorization, error) {
-	if ctx == nil || service == nil || nilActionDependency(service.current) || nilActionDependency(service.store) || !validRecordID(recordID) {
+	if ctx == nil || service == nil || nilActionDependency(service.current) || nilActionDependency(service.store) || !recordidentity.IsValid(recordID) {
 		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, ErrInvalidWatchRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(actorInput)

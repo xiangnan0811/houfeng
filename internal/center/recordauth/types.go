@@ -388,8 +388,8 @@ func ParseCanonicalVisibilityScope(raw []byte) (VisibilityScope, error) {
 }
 
 // SourceAuthorization is a strict tagged union. A live source carries a
-// current scope; a tombstoned source carries its complete final floor and the
-// canonical last-live-scope witness needed to preserve transition monotonicity.
+// current scope; a tombstoned source carries its final floor and canonical
+// last-live scope. Historical capture may be narrower than the last-live scope.
 type SourceAuthorization struct {
 	Version       ScopeVersion
 	Kind          SourceKind
@@ -403,8 +403,8 @@ type SourceAuthorization struct {
 }
 
 // NormalizeSourceAuthorization returns canonical source evidence and its
-// digest. It refuses live and tombstone-transition widening before the
-// evidence can be persisted.
+// digest. It refuses live widening relative to capture and a tombstone floor
+// that widens the last-live scope before the evidence can be persisted.
 func NormalizeSourceAuthorization(input SourceAuthorization) (SourceAuthorization, error) {
 	if input.Version != SourceAuthorizationVersionV1 {
 		return SourceAuthorization{}, fmt.Errorf("%w: version", ErrInvalidSourceAuthorization)
@@ -457,9 +457,6 @@ func NormalizeSourceAuthorization(input SourceAuthorization) (SourceAuthorizatio
 		}
 		if lastLive.ProjectID != capture.ProjectID {
 			return SourceAuthorization{}, fmt.Errorf("%w: last live project", ErrInvalidSourceAuthorization)
-		}
-		if !scopeNoWiderThan(lastLive, capture) {
-			return SourceAuthorization{}, fmt.Errorf("%w: last live widening", ErrInvalidSourceAuthorization)
 		}
 		floor, err := NormalizeVisibilityScope(*input.FinalFloor)
 		if err != nil {

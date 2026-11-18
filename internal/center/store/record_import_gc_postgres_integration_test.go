@@ -18,6 +18,7 @@ import (
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/portability"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/vpsassets"
@@ -68,13 +69,15 @@ func newImportGCTestFixture(t *testing.T, backend attachments.BackendKind, rr bo
 
 func putImportGCObject(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, payload []byte) attachments.ObjectVersion {
 	t.Helper()
-	digest := sha256.Sum256(payload)
-	temporary := sha256.Sum256([]byte(t.Name()))
-	object, err := fixture.Blobs.Put(ctx, attachments.PutRequest{ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(payload)), TemporaryKey: fmt.Sprintf("temporary/%x", temporary)}, bytes.NewReader(payload))
-	if err != nil {
-		t.Fatal(err)
+	return fixture.SeedBlob(payload).Version
+}
+
+func putImportGCProducerObject(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, producer string, payload []byte) attachments.ObjectVersion {
+	t.Helper()
+	if fixture.Backend == attachments.BackendKindS3 && producer == "direct_purge" {
+		return fixture.SeedLegacyS3Blob(payload)
 	}
-	return object
+	return putImportGCObject(t, ctx, fixture, payload)
 }
 
 // Both paths delegate real GC, including durable completion and quota settlement.
@@ -86,11 +89,31 @@ func seedImportGCProducer(t *testing.T, ctx context.Context, fixture store.Impor
 	}
 	fixture.SeedOrphan(object)
 	return func(deleter attachments.BlobGCDeleter) (bool, error) {
-		worker, err := attachments.NewBlobGCWorker(fixture.Repository, deleter, attachments.BlobGCWorkerOptions{BackendKind: fixture.Backend})
+		worker, err := attachments.NewBlobGCWorker(fixture.Repository, deleter, attachments.BlobGCWorkerOptions{BackendKind: fixture.Backend, LocalCleanup: fixture.LocalCleanup})
 		if err != nil {
 			return false, err
 		}
 		return worker.RunOnce(ctx)
+	}
+}
+
+func importGCSourceRecordID(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture) string {
+	t.Helper()
+	var recordID string
+	if err := fixture.Runtime.QueryRow(ctx, `select record_id from public.record_attachments where attachment_id='att_gcsource'`).Scan(&recordID); err != nil || recordID == "" {
+		t.Fatalf("load actual purge source record: %q %v", recordID, err)
+	}
+	return recordID
+}
+
+func assertImportGCSourcePurged(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, recordID string) {
+	t.Helper()
+	var refs, attachments int
+	if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.record_revision_attachments where record_id=$1), (select count(*) from public.record_attachments where record_id=$1)`, recordID).Scan(&refs, &attachments); err != nil {
+		t.Fatal(err)
+	}
+	if refs != 0 || attachments != 0 {
+		t.Fatalf("source purge incomplete: refs=%d attachments=%d", refs, attachments)
 	}
 }
 
@@ -148,11 +171,15 @@ func planImportGC(t *testing.T, ctx context.Context, service *portability.Servic
 }
 
 func runImportGCClaimFirst(t *testing.T, backend attachments.BackendKind, producer, scenario string, rr bool) {
+	if backend == attachments.BackendKindLocal {
+		runLocalImportGCClaimFirst(t, producer, scenario, rr)
+		return
+	}
 	ctx, fixture := newImportGCTestFixture(t, backend, rr)
 	payload := []byte("import GC fence real attachment\n")
-	object := putImportGCObject(t, ctx, fixture, payload)
+	object := putImportGCProducerObject(t, ctx, fixture, producer, payload)
 	runGC := seedImportGCProducer(t, ctx, fixture, producer, object)
-	put := newImportGCPutBarrier(fixture.Blobs)
+	put := newImportGCPutBarrier(fixture.Writer)
 	service, destination := newImportGCService(t, ctx, fixture, put)
 	archive := importGCArchive(t, payload)
 	if scenario == "active_before_put" {
@@ -175,7 +202,6 @@ func runImportGCClaimFirst(t *testing.T, backend attachments.BackendKind, produc
 		awaitImportGCSignal(t, ctx, commit.Entered)
 		assertImportGCHistory(t, ctx, fixture, object.Key, 0, 0)
 		applyDone = startImportGCApply(ctx, service, request)
-		awaitImportGCPut(t, ctx, put, applyDone, object)
 		close(put.release)
 		if err := fixture.WaitForGCSerialization(ctx); err != nil {
 			t.Fatal(err)
@@ -192,6 +218,27 @@ func runImportGCClaimFirst(t *testing.T, backend attachments.BackendKind, produc
 		applyDone = startImportGCApply(ctx, service, request)
 		awaitImportGCPut(t, ctx, put, applyDone, object)
 		gcDone = startImportGCDelete(runGC, deletion)
+		if backend == attachments.BackendKindS3 && producer == "direct_purge" {
+			gc := awaitImportGCDelete(t, ctx, gcDone)
+			var conflict *pgconn.PgError
+			if !errors.As(gc.err, &conflict) || conflict.Code != "55000" {
+				t.Fatalf("purge ignored the live import obligation: %v", gc.err)
+			}
+			select {
+			case <-deletion.entered:
+				t.Fatal("purge reached S3 while an import obligation was active")
+			default:
+			}
+			assertImportGCHistory(t, ctx, fixture, object.Key, 0, 0)
+			fixture.RefreshHeartbeat()
+			close(put.release)
+			got := awaitImportGCApply(t, ctx, applyDone)
+			if got.err != nil || got.result.JobState != "applied" {
+				t.Fatalf("live import after refused purge = %+v, %v", got.result, got.err)
+			}
+			assertImportGCBytes(t, ctx, fixture, object, payload)
+			return
+		}
 		awaitImportGCSignal(t, ctx, deletion.entered)
 		assertImportGCHistory(t, ctx, fixture, object.Key, 1, 0)
 		if scenario == "completed_after_put_rejects_late_registration" {
@@ -265,7 +312,7 @@ func runImportGCClaimFirst(t *testing.T, backend attachments.BackendKind, produc
 func runImportGCFresh(t *testing.T, backend attachments.BackendKind, producer string) {
 	ctx, fixture := newImportGCTestFixture(t, backend, false)
 	payload := []byte("fresh import after retained GC history\n")
-	old := putImportGCObject(t, ctx, fixture, payload)
+	old := putImportGCProducerObject(t, ctx, fixture, producer, payload)
 	runGC := seedImportGCProducer(t, ctx, fixture, producer, old)
 	if worked, err := runGC(fixture.Deleter); err != nil || !worked {
 		t.Fatalf("GC = %t, %v", worked, err)
@@ -274,7 +321,7 @@ func runImportGCFresh(t *testing.T, backend attachments.BackendKind, producer st
 	if _, err := fixture.Blobs.Stat(ctx, old); !errors.Is(err, attachments.ErrBlobNotFound) {
 		t.Fatalf("old exact version still present: %v", err)
 	}
-	capture := &importGCPutCapture{BlobStore: fixture.Blobs}
+	capture := &importGCPutCapture{BlobWriter: fixture.Writer}
 	service, destination := newImportGCService(t, ctx, fixture, capture)
 	archive := importGCArchive(t, payload)
 	plan, request := planImportGC(t, ctx, service, destination, archive, "import-gc-fresh")
@@ -286,11 +333,8 @@ func runImportGCFresh(t *testing.T, backend attachments.BackendKind, producer st
 		t.Fatalf("fresh Put count=%d", len(capture.objects))
 	}
 	fresh := capture.objects[0]
-	if backend == attachments.BackendKindS3 && fresh.VersionID == old.VersionID {
-		t.Fatal("fresh S3 Put reused deleted version")
-	}
-	if backend == attachments.BackendKindLocal && fresh != old {
-		t.Fatalf("local digest identity changed: %+v / %+v", fresh, old)
+	if fresh.VersionID == old.VersionID || fresh.Key != old.Key || fresh.SHA256 != old.SHA256 || fresh.SizeBytes != old.SizeBytes {
+		t.Fatalf("fresh Put did not preserve content with a new materialization: %+v / %+v", fresh, old)
 	}
 	assertImportGCBytes(t, ctx, fixture, fresh, payload)
 	snapshot := importGCSnapshot(t, ctx, fixture, plan, archive)
@@ -308,6 +352,9 @@ type importGCRevisionBarrier struct {
 }
 
 func (*importGCRevisionBarrier) Name() string { return "import_gc_commit_barrier" }
+func (*importGCRevisionBarrier) MutationResources(context.Context, pgx.Tx, records.RevisionCommitCommand) (records.RevisionMutationResources, error) {
+	return records.RevisionMutationResources{}, nil
+}
 func (barrier *importGCRevisionBarrier) ApplyRevision(ctx context.Context, _ pgx.Tx, _ records.RevisionCommitted) error {
 	close(barrier.entered)
 	select {
@@ -321,10 +368,14 @@ func (barrier *importGCRevisionBarrier) ApplyRevision(ctx context.Context, _ pgx
 func runImportGCImportFirst(t *testing.T, backend attachments.BackendKind, producer string, rr bool) {
 	ctx, fixture := newImportGCTestFixture(t, backend, rr)
 	payload := []byte("shared retained by import-first commit\n")
-	object := putImportGCObject(t, ctx, fixture, payload)
+	object := putImportGCProducerObject(t, ctx, fixture, producer, payload)
 	runGC := seedImportGCProducer(t, ctx, fixture, producer, object)
+	var sourceRecordID string
+	if producer == "direct_purge" {
+		sourceRecordID = importGCSourceRecordID(t, ctx, fixture)
+	}
 	commit := &importGCRevisionBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-	service, destination := newImportGCService(t, ctx, fixture, fixture.Blobs, commit)
+	service, destination := newImportGCService(t, ctx, fixture, fixture.Writer, commit)
 	archive := importGCArchive(t, payload)
 	plan, request := planImportGC(t, ctx, service, destination, archive, "import-gc-import-first")
 	applyDone := startImportGCApply(ctx, service, request)
@@ -344,10 +395,15 @@ func runImportGCImportFirst(t *testing.T, backend attachments.BackendKind, produ
 		t.Fatalf("import-first Apply = %+v, %v", got.result, got.err)
 	}
 	gc := awaitImportGCDelete(t, ctx, gcDone)
-	if gc.err != nil || (producer == "worker" && gc.worked) {
+	if gc.err != nil || (backend == attachments.BackendKindLocal && !gc.worked) || (backend == attachments.BackendKindS3 && producer == "worker" && gc.worked) {
 		t.Fatalf("GC after import = %t, %v", gc.worked, gc.err)
 	}
-	assertImportGCHistory(t, ctx, fixture, object.Key, 0, 0)
+	completed := 0
+	if backend == attachments.BackendKindLocal {
+		completed = 1
+		assertImportGCRetained(t, ctx, fixture, object.Key)
+	}
+	assertImportGCHistory(t, ctx, fixture, object.Key, 0, completed)
 	assertImportGCBytes(t, ctx, fixture, object, payload)
 	snapshot := importGCSnapshot(t, ctx, fixture, plan, archive)
 	wantLogical := object.SizeBytes
@@ -355,13 +411,7 @@ func runImportGCImportFirst(t *testing.T, backend attachments.BackendKind, produ
 		t.Fatalf("retained shared import effects=%+v", snapshot)
 	}
 	if producer == "direct_purge" {
-		var sourceRefs, sourceAttachments int
-		if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.record_revision_attachments where record_id='rec_gcsource'), (select count(*) from public.record_attachments where record_id='rec_gcsource')`).Scan(&sourceRefs, &sourceAttachments); err != nil {
-			t.Fatal(err)
-		}
-		if sourceRefs != 0 || sourceAttachments != 0 {
-			t.Fatalf("source purge incomplete: refs=%d attachments=%d", sourceRefs, sourceAttachments)
-		}
+		assertImportGCSourcePurged(t, ctx, fixture, sourceRecordID)
 	}
 }
 
@@ -371,10 +421,10 @@ func runImportGCAccounting(t *testing.T, backend attachments.BackendKind) {
 	other := putImportGCObject(t, ctx, fixture, []byte("unrelated durable GC history\n"))
 	fixture.SeedOrphan(other)
 	fixture.SetQuota(0, 11, other.SizeBytes, 1)
-	capture := &importGCPutCapture{BlobStore: fixture.Blobs}
+	capture := &importGCPutCapture{BlobWriter: fixture.Writer}
 	// Another key's complete lifecycle occurs after this import's baseline.
 	observer := &importGCObserverHook{delegate: fixture.Repository, after: func() error {
-		worker, err := attachments.NewBlobGCWorker(fixture.Repository, fixture.Deleter, attachments.BlobGCWorkerOptions{BackendKind: backend})
+		worker, err := attachments.NewBlobGCWorker(fixture.Repository, fixture.Deleter, attachments.BlobGCWorkerOptions{BackendKind: backend, LocalCleanup: fixture.LocalCleanup})
 		if err != nil {
 			return err
 		}
@@ -443,7 +493,7 @@ func runImportGCFailures(t *testing.T, backend attachments.BackendKind) {
 			case "second_record_rolls_back_first":
 				fixture.SetQuota(math.MaxInt64-int64(len(payload))*2, 9, 0, 1)
 			}
-			capture := &importGCPutCapture{BlobStore: fixture.Blobs}
+			capture := &importGCPutCapture{BlobWriter: fixture.Writer}
 			var observer attachments.ImportBlobGCObserver = fixture.Repository
 			if scenario == "zero_token" || scenario == "wrong_key_token" {
 				observer = &importGCInvalidObserver{delegate: fixture.Repository, wrongKey: scenario == "wrong_key_token"}
@@ -514,15 +564,31 @@ func runImportGCCommitPaths(t *testing.T, backend attachments.BackendKind) {
 			edges = append(edges, "second_record_failure")
 		}
 		for _, edge := range edges {
-			t.Run(path+"/"+edge, func(t *testing.T) {
+			name := edge
+			if backend == attachments.BackendKindLocal {
+				switch edge {
+				case "uncommitted_claim_worker":
+					name = "live_write_defers_worker"
+				case "uncommitted_claim_direct_purge":
+					name = "live_write_defers_direct_purge"
+				}
+			}
+			t.Run(path+"/"+name, func(t *testing.T) {
+				if (backend == attachments.BackendKindLocal && (edge == "uncommitted_claim_worker" || edge == "uncommitted_claim_direct_purge")) ||
+					(backend == attachments.BackendKindS3 && edge == "uncommitted_claim_direct_purge") {
+					producer := "worker"
+					if edge == "uncommitted_claim_direct_purge" {
+						producer = "direct_purge"
+					}
+					runRawImportCleanupDefers(t, backend, path, producer)
+					return
+				}
 				ctx, fixture := newImportGCTestFixture(t, backend, true)
 				payload := []byte("direct revision commit GC fence\n")
-				object := putImportGCObject(t, ctx, fixture, payload)
-				observations, err := fixture.Repository.ObserveImportBlobGC(ctx, [][sha256.Size]byte{object.SHA256})
-				if err != nil {
-					t.Fatal(err)
-				}
-				item := attachments.ImportedAvailableAttachment{AttachmentID: "att_gccommitone", DisplayName: "fence.txt", MediaType: "text/plain", LogicalSizeBytes: object.SizeBytes, Object: object, BackendKind: backend, CreatedBy: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", GCObservation: observations[0]}
+				write, allocations := newImportGCRawWriter(t, ctx, fixture, payload)
+				item := write(allocations[0].RecordID, "att_gccommitone")
+				object := item.Object
+				var err error
 				items := []attachments.ImportedAvailableAttachment{item}
 				var gcDone <-chan importGCDeleteOutcome
 				var barrier *store.ImportAttachmentCommitBarrier
@@ -544,20 +610,18 @@ func runImportGCCommitPaths(t *testing.T, backend attachments.BackendKind) {
 				case "duplicate_attachment_id":
 					items = append(items, item)
 				case "duplicate_key_second_token":
-					second := item
-					second.AttachmentID = "att_gccommittwo"
+					second := write(allocations[0].RecordID, "att_gccommittwo")
 					second.GCObservation, _ = attachments.NewImportBlobGCObservation(object.SHA256, 1)
 					items = append(items, second)
 				}
 				batches := [][]attachments.ImportedAvailableAttachment{items}
 				if edge == "second_record_failure" {
-					bad := item
-					bad.AttachmentID = "att_gccommittwo"
+					bad := write(allocations[1].RecordID, "att_gccrossrecord")
 					bad.GCObservation, _ = attachments.NewImportBlobGCObservation(object.SHA256, 1)
 					batches = append(batches, []attachments.ImportedAvailableAttachment{bad})
 				}
 				done := make(chan error, 1)
-				go func() { done <- fixture.CommitImported(ctx, path, batches) }()
+				go func() { done <- fixture.CommitImported(ctx, path, batches, allocations) }()
 				if barrier != nil {
 					if err := fixture.WaitForGCSerialization(ctx); err != nil {
 						t.Fatal(err)
@@ -584,7 +648,7 @@ func runImportGCCommitPaths(t *testing.T, backend attachments.BackendKind) {
 					}
 				}
 				var roots, refs, available int
-				if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.records where record_id like 'rec_gccommit%'), (select count(*) from public.record_revision_attachments), (select count(*) from public.record_attachments)`).Scan(&roots, &refs, &available); err != nil {
+				if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.records where record_id=any($1::text[])), (select count(*) from public.record_revision_attachments), (select count(*) from public.record_attachments)`, []string{allocations[0].RecordID, allocations[1].RecordID}).Scan(&roots, &refs, &available); err != nil {
 					t.Fatal(err)
 				}
 				if roots != 0 || refs != 0 || available != 0 {
@@ -611,16 +675,20 @@ func runImportGCCommitPaths(t *testing.T, backend attachments.BackendKind) {
 func runImportGCRawImportFirst(t *testing.T, backend attachments.BackendKind, path, producer string) {
 	ctx, fixture := newImportGCTestFixture(t, backend, true)
 	payload := []byte("default RR raw import-first shared identity\n")
-	object := putImportGCObject(t, ctx, fixture, payload)
+	write, allocations := newImportGCRawWriter(t, ctx, fixture, payload)
+	item := write(allocations[0].RecordID, "att_gccommitone")
+	object := item.Object
 	runGC := seedImportGCProducer(t, ctx, fixture, producer, object)
-	observations, err := fixture.Repository.ObserveImportBlobGC(ctx, [][sha256.Size]byte{object.SHA256})
-	if err != nil {
-		t.Fatal(err)
+	var sourceRecordID string
+	if producer == "direct_purge" {
+		sourceRecordID = importGCSourceRecordID(t, ctx, fixture)
 	}
-	item := attachments.ImportedAvailableAttachment{AttachmentID: "att_gccommitone", DisplayName: "fence.txt", MediaType: "text/plain", LogicalSizeBytes: object.SizeBytes, Object: object, BackendKind: backend, CreatedBy: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", GCObservation: observations[0]}
+	var err error
 	barrier := fixture.BlockNextImportCommit()
 	done := make(chan error, 1)
-	go func() { done <- fixture.CommitImported(ctx, path, [][]attachments.ImportedAvailableAttachment{{item}}) }()
+	go func() {
+		done <- fixture.CommitImported(ctx, path, [][]attachments.ImportedAvailableAttachment{{item}}, allocations)
+	}()
 	awaitImportGCSignal(t, ctx, barrier.Entered)
 	gcDone := startImportGCDelete(runGC, fixture.Deleter)
 	if err := fixture.WaitForGCSerialization(ctx); err != nil {
@@ -636,14 +704,22 @@ func runImportGCRawImportFirst(t *testing.T, backend attachments.BackendKind, pa
 		t.Fatalf("%s import-first = %v", path, err)
 	}
 	gc := awaitImportGCDelete(t, ctx, gcDone)
-	if gc.err != nil || (producer == "worker" && gc.worked) {
+	if gc.err != nil || (backend == attachments.BackendKindLocal && !gc.worked) || (backend == attachments.BackendKindS3 && producer == "worker" && gc.worked) {
 		t.Fatalf("%s producer=%s GC=%+v", path, producer, gc)
 	}
-	assertImportGCHistory(t, ctx, fixture, object.Key, 0, 0)
+	if producer == "direct_purge" {
+		assertImportGCSourcePurged(t, ctx, fixture, sourceRecordID)
+	}
+	completed := 0
+	if backend == attachments.BackendKindLocal {
+		completed = 1
+		assertImportGCRetained(t, ctx, fixture, object.Key)
+	}
+	assertImportGCHistory(t, ctx, fixture, object.Key, 0, completed)
 	assertImportGCBytes(t, ctx, fixture, object, payload)
 	var refs, available int
 	var logical, physical, reserved int64
-	if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.record_revision_attachments where record_id='rec_gccommit0'), (select count(*) from public.record_attachments where record_id='rec_gccommit0' and attachment_state='available'), logical_bytes, physical_bytes, reserved_bytes from public.attachment_quota_accounts where project_id='default'`).Scan(&refs, &available, &logical, &physical, &reserved); err != nil {
+	if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.record_revision_attachments where record_id=$1), (select count(*) from public.record_attachments where record_id=$1 and attachment_state='available'), logical_bytes, physical_bytes, reserved_bytes from public.attachment_quota_accounts where project_id='default'`, allocations[0].RecordID).Scan(&refs, &available, &logical, &physical, &reserved); err != nil {
 		t.Fatal(err)
 	}
 	if refs != 1 || available != 1 || logical != object.SizeBytes || physical != object.SizeBytes || reserved != 0 {
@@ -688,6 +764,9 @@ func (observer *importGCInvalidObserver) ObserveImportBlobGC(ctx context.Context
 type importGCDatabaseFailureParticipant struct{}
 
 func (importGCDatabaseFailureParticipant) Name() string { return "import_gc_database_failure" }
+func (importGCDatabaseFailureParticipant) MutationResources(context.Context, pgx.Tx, records.RevisionCommitCommand) (records.RevisionMutationResources, error) {
+	return records.RevisionMutationResources{}, nil
+}
 func (importGCDatabaseFailureParticipant) ApplyRevision(ctx context.Context, tx pgx.Tx, committed records.RevisionCommitted) error {
 	var attachmentsCount, refsCount int
 	var logical, physical int64
@@ -707,6 +786,9 @@ type importGCRevisionWitness struct {
 }
 
 func (*importGCRevisionWitness) Name() string { return "import_gc_revision_witness" }
+func (*importGCRevisionWitness) MutationResources(context.Context, pgx.Tx, records.RevisionCommitCommand) (records.RevisionMutationResources, error) {
+	return records.RevisionMutationResources{}, nil
+}
 func (witness *importGCRevisionWitness) ApplyRevision(_ context.Context, _ pgx.Tx, committed records.RevisionCommitted) error {
 	if len(committed.ImportedAttachments) != witness.expectedAttachments {
 		return fmt.Errorf("unexpected first-record attachment count=%d", len(committed.ImportedAttachments))
@@ -800,31 +882,31 @@ func awaitImportGCPut(t *testing.T, ctx context.Context, barrier *importGCPutBar
 }
 
 type importGCPutBarrier struct {
-	attachments.BlobStore
+	attachments.BlobWriter
 	calls    atomic.Int64
 	returned chan attachments.ObjectVersion
 	release  chan struct{}
 }
 
-func newImportGCPutBarrier(blob attachments.BlobStore) *importGCPutBarrier {
-	return &importGCPutBarrier{BlobStore: blob, returned: make(chan attachments.ObjectVersion, 1), release: make(chan struct{})}
+func newImportGCPutBarrier(blob attachments.BlobWriter) *importGCPutBarrier {
+	return &importGCPutBarrier{BlobWriter: blob, returned: make(chan attachments.ObjectVersion, 1), release: make(chan struct{})}
 }
-func (barrier *importGCPutBarrier) Put(ctx context.Context, request attachments.PutRequest, reader io.Reader) (attachments.ObjectVersion, error) {
+func (barrier *importGCPutBarrier) Put(ctx context.Context, request attachments.WriteRequest, reader io.Reader) (attachments.WrittenBlob, error) {
 	barrier.calls.Add(1)
-	object, err := barrier.BlobStore.Put(ctx, request, reader)
+	object, err := barrier.BlobWriter.Put(ctx, request, reader)
 	if err != nil {
 		return object, err
 	}
 	select {
-	case barrier.returned <- object:
+	case barrier.returned <- object.Version:
 	case <-ctx.Done():
-		return attachments.ObjectVersion{}, ctx.Err()
+		return attachments.WrittenBlob{}, ctx.Err()
 	}
 	select {
 	case <-barrier.release:
 		return object, nil
 	case <-ctx.Done():
-		return attachments.ObjectVersion{}, ctx.Err()
+		return attachments.WrittenBlob{}, ctx.Err()
 	}
 }
 
@@ -848,35 +930,44 @@ func (barrier *importGCDeleteBarrier) DeleteGCVersion(ctx context.Context, objec
 }
 
 type importGCPutCapture struct {
-	attachments.BlobStore
+	attachments.BlobWriter
 	objects []attachments.ObjectVersion
 }
 
-func (capture *importGCPutCapture) Put(ctx context.Context, request attachments.PutRequest, reader io.Reader) (attachments.ObjectVersion, error) {
-	object, err := capture.BlobStore.Put(ctx, request, reader)
+func (capture *importGCPutCapture) Put(ctx context.Context, request attachments.WriteRequest, reader io.Reader) (attachments.WrittenBlob, error) {
+	object, err := capture.BlobWriter.Put(ctx, request, reader)
 	if err == nil {
-		capture.objects = append(capture.objects, object)
+		capture.objects = append(capture.objects, object.Version)
 	}
 	return object, err
 }
 
-func newImportGCService(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, blobs attachments.BlobStore, participants ...records.RevisionParticipant) (*portability.Service, records.SubjectReference) {
+func newImportGCService(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, blobs attachments.BlobWriter, participants ...records.RevisionParticipant) (*portability.Service, records.SubjectReference) {
 	return newImportGCServiceWithObserver(t, ctx, fixture, blobs, fixture.Repository, participants...)
 }
-func newImportGCServiceWithObserver(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, blobs attachments.BlobStore, observer attachments.ImportBlobGCObserver, participants ...records.RevisionParticipant) (*portability.Service, records.SubjectReference) {
+func newImportGCServiceWithObserver(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, blobs attachments.BlobWriter, observer attachments.ImportBlobGCObserver, participants ...records.RevisionParticipant) (*portability.Service, records.SubjectReference) {
 	t.Helper()
 	vpsRepository := store.NewPostgresVPSAssetRepository(fixture.Runtime)
 	subjects, err := records.NewSubjectAdapterRegistry([]records.SubjectSourceAdapter{store.NewVPSRecordSubjectAdapter(vpsRepository)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	current := store.NewPostgresCurrentRecordAuthorizationSource(fixture.Runtime, store.NewRecordSubjectReadResolver(subjects, nil), fixture.Gate)
-	allParticipants := append([]records.RevisionParticipant{store.NewRecordAttachmentRevisionParticipant()}, participants...)
-	revisionStore, err := store.NewPostgresRecordRepository(fixture.Runtime, fixture.Gate, allParticipants)
+	tombstones, err := store.NewWitnessedRecordSubjectTombstoneReader("", recordauth.ProjectIDDefault, nil, fixture.Runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisions, err := records.NewRevisionService(subjects, current, revisionStore)
+	current := store.NewPostgresCurrentRecordAuthorizationSource(fixture.Runtime, store.NewRecordSubjectReadResolver(subjects, tombstones), fixture.Gate)
+	allParticipants := append([]records.RevisionParticipant{store.NewRecordAttachmentRevisionParticipant()}, participants...)
+	revisionStore, err := store.NewPostgresRecordRepository(fixture.Runtime, fixture.Gate, allParticipants, current, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	birthRepository := store.NewPostgresRecordBirthRepository(fixture.Runtime, fixture.Gate, nil)
+	birth, err := recordbirth.NewCoordinator(birthRepository, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisions, err := records.NewRevisionService(subjects, current, revisionStore, birth)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -884,12 +975,8 @@ func newImportGCServiceWithObserver(t *testing.T, ctx context.Context, fixture s
 	if err != nil {
 		t.Fatal(err)
 	}
-	imports := store.NewPostgresRecordPortabilityRepository(fixture.Runtime, fixture.Gate)
-	staging, err := attachments.NewLocalBlobStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	service, err := portability.NewService(portability.Options{Enabled: true, BackendKind: string(fixture.Backend), Documents: importDestinationDocumentSource{}, Jobs: imports, Imports: imports, Importer: application, Subjects: subjects, Staging: portability.NewLeasedBlobStore(staging), AttachmentBlobs: blobs, ImportBlobGC: observer, Rebuilder: portability.NewAuthoritativeProjectionRebuilder()})
+	imports := store.NewPostgresRecordPortabilityRepository(fixture.Runtime, fixture.Gate, tombstones, nil)
+	service, err := portability.NewService(portability.Options{Enabled: true, BackendKind: string(fixture.Backend), Documents: importDestinationDocumentSource{}, Jobs: imports, Imports: imports, Importer: application, BirthCoordinator: birth, BirthAllocations: birthRepository, ImportAuthorization: current, Subjects: subjects, Staging: portability.NewLeasedBlobStore(fixture.Blobs, fixture.Writer), AttachmentBlobs: fixture.Blobs, AttachmentWriter: blobs, ImportBlobGC: observer, Rebuilder: portability.NewAuthoritativeProjectionRebuilder()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -928,4 +1015,253 @@ func importGCMultiArchive(t *testing.T, payload []byte, laterPayload ...[]byte) 
 		t.Fatal(err)
 	}
 	return archive
+}
+
+// Local managed writes register before touching bytes. Pause the observation
+// or durable preparation instead of asking cleanup to pass a live Put.
+func runLocalImportGCClaimFirst(t *testing.T, producer, scenario string, rr bool) {
+	ctx, fixture := newImportGCTestFixture(t, attachments.BackendKindLocal, rr)
+	payload := []byte("local import GC fence attachment\n")
+	object := putImportGCObject(t, ctx, fixture, payload)
+	runGC := seedImportGCProducer(t, ctx, fixture, producer, object)
+	capture := &importGCPutCapture{BlobWriter: fixture.Writer}
+	observed, resume := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { releaseImportGCSignal(resume) })
+	var observedOnce atomic.Bool
+	observer := &importGCObserverHook{delegate: fixture.Repository, after: func() error {
+		if !observedOnce.CompareAndSwap(false, true) {
+			return nil
+		}
+		close(observed)
+		select {
+		case <-resume:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}}
+	if scenario == "active_before_put" {
+		close(resume)
+	}
+	service, destination := newImportGCServiceWithObserver(t, ctx, fixture, capture, observer)
+	archive := importGCArchive(t, payload)
+	if scenario == "active_before_put" {
+		archive = importGCMultiArchive(t, []byte("unprotected earlier attachment\n"), payload)
+	}
+	plan, request := planImportGC(t, ctx, service, destination, archive, "local-import-gc-claim-first")
+	before := importGCSnapshot(t, ctx, fixture, plan, archive)
+	var barrier *store.ImportAttachmentCommitBarrier
+	var gcDone <-chan importGCDeleteOutcome
+	var applyDone <-chan importGCOutcome
+	if scenario == "uncommitted_claim" {
+		barrier = fixture.BlockLocalPreparation()
+		gcDone = startImportGCDelete(runGC, fixture.Deleter)
+		awaitLocalImportGCBarrier(t, ctx, barrier.Entered, gcDone)
+		assertImportGCHistory(t, ctx, fixture, object.Key, 0, 0)
+		applyDone = startImportGCApply(ctx, service, request)
+		awaitLocalImportObservation(t, ctx, observed, applyDone)
+		close(resume)
+		if err := fixture.WaitForGCSerialization(ctx); err != nil {
+			t.Fatal(err)
+		}
+		close(barrier.Release)
+	} else {
+		if scenario != "active_before_put" {
+			applyDone = startImportGCApply(ctx, service, request)
+			awaitLocalImportObservation(t, ctx, observed, applyDone)
+		}
+		barrier = fixture.BlockLocalPhysical()
+		gcDone = startImportGCDelete(runGC, fixture.Deleter)
+		awaitLocalImportGCBarrier(t, ctx, barrier.Entered, gcDone)
+		assertImportGCHistory(t, ctx, fixture, object.Key, 1, 0)
+		if scenario == "completed_after_put_rejects_late_registration" {
+			close(barrier.Release)
+			gc := awaitImportGCDelete(t, ctx, gcDone)
+			if gc.err != nil || !gc.worked {
+				t.Fatalf("local cleanup: %+v", gc)
+			}
+			gcDone = nil
+			if _, err := fixture.Blobs.Stat(ctx, object); !errors.Is(err, attachments.ErrBlobNotFound) {
+				t.Fatalf("old materialization remains: %v", err)
+			}
+		}
+		if scenario == "active_before_put" {
+			applyDone = startImportGCApply(ctx, service, request)
+		} else {
+			close(resume)
+		}
+	}
+	got := awaitImportGCApply(t, ctx, applyDone)
+	if !errors.Is(got.err, portability.ErrImportCASConflict) {
+		t.Fatalf("local late import: %+v %v", got.result, got.err)
+	}
+	assertImportGCNoEffects(t, importGCSnapshot(t, ctx, fixture, plan, archive))
+	if scenario == "active_before_put" && len(capture.objects) != 0 {
+		t.Fatal("active cleanup allowed attachment writes")
+	}
+	if gcDone != nil {
+		if scenario != "uncommitted_claim" {
+			close(barrier.Release)
+		}
+		gc := awaitImportGCDelete(t, ctx, gcDone)
+		if gc.err != nil || !gc.worked {
+			t.Fatalf("local cleanup: %+v", gc)
+		}
+	}
+	assertImportGCHistory(t, ctx, fixture, object.Key, 0, 1)
+	final := importGCSnapshot(t, ctx, fixture, plan, archive)
+	wantLogical := before.logical
+	if producer == "direct_purge" {
+		wantLogical -= object.SizeBytes
+	}
+	if final.logical != wantLogical || final.physical != before.physical-object.SizeBytes || final.reserved != before.reserved {
+		t.Fatalf("failed local import/cleanup quota: %+v, before %+v", final, before)
+	}
+	if scenario == "completed_after_put_rejects_late_registration" {
+		fixture.RefreshHeartbeat()
+		retried, err := service.Apply(ctx, request)
+		if err != nil || retried.JobState != "applied" {
+			t.Fatalf("fresh observation retry: %+v %v", retried, err)
+		}
+		fresh := capture.objects[len(capture.objects)-1]
+		if fresh.VersionID == object.VersionID {
+			t.Fatal("retry reused deleted local materialization")
+		}
+		assertImportGCBytes(t, ctx, fixture, fresh, payload)
+		after := importGCSnapshot(t, ctx, fixture, plan, archive)
+		if after.refs != 1 || after.available != 1 || after.origins != 1 || after.revisions != 1 || after.logical != final.logical+object.SizeBytes || after.physical != final.physical+object.SizeBytes || after.reserved != final.reserved {
+			t.Fatalf("retry effects: %+v", after)
+		}
+	}
+}
+
+func releaseImportGCSignal(signal chan struct{}) {
+	select {
+	case <-signal:
+	default:
+		close(signal)
+	}
+}
+
+func awaitLocalImportGCBarrier(t *testing.T, ctx context.Context, entered <-chan struct{}, done <-chan importGCDeleteOutcome) {
+	t.Helper()
+	select {
+	case <-entered:
+	case got := <-done:
+		t.Fatalf("cleanup exited before barrier: %+v", got)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func awaitLocalImportObservation(t *testing.T, ctx context.Context, observed <-chan struct{}, done <-chan importGCOutcome) {
+	t.Helper()
+	select {
+	case <-observed:
+	case got := <-done:
+		t.Fatalf("import exited before observation: %+v", got)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func assertImportGCRetained(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, key string) {
+	t.Helper()
+	var retained bool
+	if err := fixture.Runtime.QueryRow(ctx, `select count(*)=1 and bool_and(physical_delete_result='retained_referenced' and receipt_digest is not null) from public.blob_gc_deletions where blob_key=$1`, key).Scan(&retained); err != nil || !retained {
+		t.Fatalf("shared local cleanup lacks retained receipt: %t %v", retained, err)
+	}
+}
+
+func newImportGCRawWriter(t *testing.T, ctx context.Context, fixture store.ImportAttachmentGCFixture, payload []byte) (func(string, string) attachments.ImportedAvailableAttachment, []recordbirth.Allocation) {
+	t.Helper()
+	repository := store.NewPostgresRecordPortabilityRepository(fixture.Runtime, fixture.Gate, importDestinationWitness(t, fixture.Runtime), nil)
+	actor := importDestinationActor(t, recordauth.RoleProjectAdmin)
+	destination := importDestinationReference(records.SubjectKindVPS, "vps_0123456789abcdef")
+	archiveDigest := sha256.Sum256(importGCArchive(t, payload))
+	planDigest := sha256.Sum256([]byte("raw managed import plan"))
+	expires := time.Now().UTC().Add(time.Hour)
+	job, err := repository.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{ActorID: actor.UserID, IdempotencyKey: "raw-managed-import", ArchiveDigest: archiveDigest, DestinationSubject: destination, ExpiresAt: expires})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocations := []recordbirth.Allocation{
+		reserveImportFixture(t, ctx, fixture.Runtime, fixture.Gate, actor, job, "rec_sourceone"),
+		reserveImportFixture(t, ctx, fixture.Runtime, fixture.Gate, actor, job, "rec_sourcetwo"),
+	}
+	_, err = repository.SaveImportPlan(ctx, store.SaveRecordImportPlanInput{
+		ImportJobID: job.ImportJobID, PlanDigest: planDigest, ObjectCount: 5, RemapCount: 5,
+		Actor: actor, ArchiveDigest: archiveDigest,
+		Allocations: allocations,
+		Remaps: []store.ImportRemap{
+			{EntityKind: "record", SourceID: "rec_sourceone", TargetID: allocations[0].RecordID, BirthAllocationID: allocations[0].AllocationID},
+			{EntityKind: "record", SourceID: "rec_sourcetwo", TargetID: allocations[1].RecordID, BirthAllocationID: allocations[1].AllocationID},
+			{EntityKind: "attachment", SourceID: "att_sourceone", TargetID: "att_gccommitone", OwnerTargetRecordID: allocations[0].RecordID},
+			{EntityKind: "attachment", SourceID: "att_sourcetwo", TargetID: "att_gccommittwo", OwnerTargetRecordID: allocations[0].RecordID},
+			{EntityKind: "attachment", SourceID: "att_sourcethree", TargetID: "att_gccrossrecord", OwnerTargetRecordID: allocations[1].RecordID},
+		},
+		Documents:          []store.ImportDocumentPlan{{SourceID: "rec_sourceone", TargetID: allocations[0].RecordID, Title: "One", Body: "One"}, {SourceID: "rec_sourcetwo", TargetID: allocations[1].RecordID, Title: "Two", Body: "Two"}},
+		DestinationSubject: destination, ExpiresAt: expires,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.AdvanceImportJob(ctx, store.AdvanceRecordImportJobInput{ImportJobID: job.ImportJobID, LockVersion: job.LockVersion, JobState: store.RecordImportJobStatePlanned}); err != nil {
+		t.Fatal(err)
+	}
+	job, err = repository.LoadImportJob(ctx, job.ImportJobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planHex, archiveHex := fmt.Sprintf("%x", planDigest), fmt.Sprintf("%x", archiveDigest)
+	return func(recordID, attachmentID string) attachments.ImportedAvailableAttachment {
+		t.Helper()
+		digest := sha256.Sum256(payload)
+		observations, err := fixture.Repository.ObserveImportBlobGC(ctx, [][sha256.Size]byte{digest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		temporary, err := attachments.NewBlobTemporaryKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		written, err := fixture.Writer.Put(ctx, attachments.WriteRequest{ProjectID: "default", Content: attachments.PutRequest{ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(payload)), TemporaryKey: temporary}, Origin: attachments.WriteOrigin{Kind: "import_attachment", ID: job.ImportJobID, Generation: int64(job.LockVersion), PlanDigest: &planHex, ArchiveDigest: &archiveHex, TargetRecordID: &recordID, TargetAttachmentID: &attachmentID}}, bytes.NewReader(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return attachments.ImportedAvailableAttachment{AttachmentID: attachmentID, DisplayName: "fence.txt", MediaType: "text/plain", LogicalSizeBytes: int64(len(payload)), Object: written.Version, NamespaceID: written.NamespaceID, ObligationID: written.ObligationID, BackendKind: fixture.Backend, CreatedBy: actor.UserID, GCObservation: observations[0]}
+	}, allocations
+}
+
+func runRawImportCleanupDefers(t *testing.T, backend attachments.BackendKind, path, producer string) {
+	ctx, fixture := newImportGCTestFixture(t, backend, true)
+	payload := []byte("live raw import prevents a blocking cleanup task\n")
+	write, allocations := newImportGCRawWriter(t, ctx, fixture, payload)
+	item := write(allocations[0].RecordID, "att_gccommitone")
+	runGC := seedImportGCProducer(t, ctx, fixture, producer, item.Object)
+	var sourceRecordID string
+	if producer == "direct_purge" {
+		sourceRecordID = importGCSourceRecordID(t, ctx, fixture)
+	}
+	_, err := runGC(fixture.Deleter)
+	var conflict *pgconn.PgError
+	if !errors.As(err, &conflict) || conflict.Code != "55000" ||
+		(backend == attachments.BackendKindLocal && conflict.Message != "writable responsibility prevents local GC") {
+		t.Fatalf("cleanup ignored live raw import: %v", err)
+	}
+	assertImportGCHistory(t, ctx, fixture, item.Object.Key, 0, 0)
+	if err := fixture.CommitImported(ctx, path, [][]attachments.ImportedAvailableAttachment{{item}}, allocations); err != nil {
+		t.Fatalf("cleanup refusal blocked valid raw import: %v", err)
+	}
+	assertImportGCBytes(t, ctx, fixture, item.Object, payload)
+	if sourceRecordID != "" {
+		var sourceAttachments, sourceRefs int
+		if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.record_attachments where record_id=$1), (select count(*) from public.record_revision_attachments where record_id=$1)`, sourceRecordID).Scan(&sourceAttachments, &sourceRefs); err != nil || sourceAttachments != 1 || sourceRefs != 1 {
+			t.Fatalf("deferred purge changed source: attachments=%d refs=%d err=%v", sourceAttachments, sourceRefs, err)
+		}
+	}
+	var available, refs int
+	if err := fixture.Runtime.QueryRow(ctx, `select (select count(*) from public.record_attachments where record_id=$1 and attachment_state='available'),(select count(*) from public.record_revision_attachments where record_id=$1)`, allocations[0].RecordID).Scan(&available, &refs); err != nil || available != 1 || refs != 1 {
+		t.Fatalf("raw import effects: available=%d refs=%d err=%v", available, refs, err)
+	}
 }

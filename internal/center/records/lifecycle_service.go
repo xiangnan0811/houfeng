@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -22,6 +23,22 @@ var ErrInvalidRecordLifecycleRequest = errors.New("invalid record lifecycle requ
 type RecordLifecycleRequest struct {
 	Actor              recordauth.ActorScope
 	RecordID           string
+	TargetLifecycle    Lifecycle
+	IdempotencyKey     string
+	IdempotencyOwnerID string
+	OwnerLeaseDuration time.Duration
+	IdempotencyTTL     time.Duration
+	OutboxTTL          time.Duration
+}
+
+// RecordTrashStateRequest binds the caller's original CAS expectation. Unlike
+// archive/unarchive, a retry must not derive a new fingerprint from current state.
+type RecordTrashStateRequest struct {
+	Actor              recordauth.ActorScope
+	RecordID           string
+	CurrentRevisionID  string
+	LockVersion        uint64
+	AuthorizationEpoch uint64
 	TargetLifecycle    Lifecycle
 	IdempotencyKey     string
 	IdempotencyOwnerID string
@@ -54,8 +71,8 @@ func (service *RecordLifecycleService) ChangeLifecycle(
 	request RecordLifecycleRequest,
 ) (RecordLifecycleResult, error) {
 	if ctx == nil || service == nil || nilRecordLifecycleDependency(service.current) ||
-		nilRecordLifecycleDependency(service.store) || !validRecordRootID(request.RecordID) ||
-		ValidateLifecycle(request.TargetLifecycle) != nil {
+		nilRecordLifecycleDependency(service.store) || !recordidentity.IsValid(request.RecordID) ||
+		(request.TargetLifecycle != LifecycleActive && request.TargetLifecycle != LifecycleArchived) {
 		return RecordLifecycleResult{}, ErrInvalidRecordLifecycleRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
@@ -80,7 +97,7 @@ func (service *RecordLifecycleService) ChangeLifecycle(
 	if err := validateCurrentRecordAuthorization(request.RecordID, actor.ProjectID, current); err != nil {
 		return RecordLifecycleResult{}, err
 	}
-	if current.Lifecycle == request.TargetLifecycle {
+	if current.Lifecycle == LifecycleTrashed || current.Lifecycle == request.TargetLifecycle {
 		return RecordLifecycleResult{}, ErrRecordRevisionConflict
 	}
 	if err := AuthorizeRecordResource(actor, recordauth.CapabilityRecordUpdate, current.Evidence); err != nil {
@@ -103,8 +120,9 @@ func (service *RecordLifecycleService) ChangeLifecycle(
 		CurrentRevisionID:  current.CurrentRevisionID,
 		LockVersion:        current.LockVersion,
 		AuthorizationEpoch: current.AuthorizationEpoch,
+		ExpectedLifecycle:  current.Lifecycle,
 		TargetLifecycle:    request.TargetLifecycle,
-		ActorID:            actor.UserID,
+		Actor:              actor.Clone(),
 		OutboxTTL:          request.OutboxTTL,
 		Idempotency: recordplatform.IdempotencyClaimInputV1{
 			Key:                key,
@@ -112,6 +130,77 @@ func (service *RecordLifecycleService) ChangeLifecycle(
 			OwnerID:            request.IdempotencyOwnerID,
 			OwnerLeaseDuration: request.OwnerLeaseDuration,
 			RecordTTL:          request.IdempotencyTTL,
+		},
+	}
+	if err := command.Validate(); err != nil {
+		return RecordLifecycleResult{}, err
+	}
+	return service.store.CommitRecordLifecycle(ctx, command)
+}
+
+func (service *RecordLifecycleService) ChangeTrashState(
+	ctx context.Context,
+	request RecordTrashStateRequest,
+) (RecordLifecycleResult, error) {
+	if ctx == nil || service == nil || nilRecordLifecycleDependency(service.current) ||
+		nilRecordLifecycleDependency(service.store) || !recordidentity.IsValid(request.RecordID) ||
+		!validRevisionID(request.CurrentRevisionID) || request.LockVersion == 0 || request.AuthorizationEpoch == 0 ||
+		(request.TargetLifecycle != LifecycleActive && request.TargetLifecycle != LifecycleTrashed) {
+		return RecordLifecycleResult{}, ErrInvalidRecordLifecycleRequest
+	}
+	actor, err := recordauth.NormalizeActorScope(request.Actor)
+	if err != nil {
+		return RecordLifecycleResult{}, fmt.Errorf("%w: actor", ErrInvalidRecordLifecycleRequest)
+	}
+	key := recordplatform.IdempotencyKey{
+		ProjectID: recordplatform.ProjectID(actor.ProjectID), OperationKind: recordplatform.OperationKindRecordUpdate,
+		Key: request.IdempotencyKey,
+	}
+	if key.Validate() != nil || request.OwnerLeaseDuration.Microseconds() <= 0 ||
+		request.IdempotencyTTL.Microseconds() <= request.OwnerLeaseDuration.Microseconds() ||
+		request.OutboxTTL.Microseconds() <= 0 {
+		return RecordLifecycleResult{}, fmt.Errorf("%w: idempotency or expiry", ErrInvalidRecordLifecycleRequest)
+	}
+	current, err := service.current.ResolveCurrentRecordAuthorization(ctx, actor.Clone(), request.RecordID)
+	if err != nil {
+		return RecordLifecycleResult{}, err
+	}
+	if err := validateCurrentRecordAuthorization(request.RecordID, actor.ProjectID, current); err != nil {
+		return RecordLifecycleResult{}, err
+	}
+	expectedLifecycle := LifecycleTrashed
+	capability := recordauth.CapabilityRecordUpdate
+	if request.TargetLifecycle == LifecycleTrashed {
+		expectedLifecycle = LifecycleActive
+		capability = recordauth.CapabilityRecordDelete
+	}
+	if err := AuthorizeRecordResource(actor, capability, current.Evidence); err != nil {
+		return RecordLifecycleResult{}, err
+	}
+	encoder := revisionCanonicalEncoder{}
+	encoder.string("houfeng.records.trash-state-request-scope.v1")
+	encoder.string(request.RecordID)
+	encoder.string(request.CurrentRevisionID)
+	encoder.uint64(request.LockVersion)
+	encoder.uint64(request.AuthorizationEpoch)
+	encoder.string(string(expectedLifecycle))
+	encoder.string(string(request.TargetLifecycle))
+	fingerprint, err := recordplatform.FingerprintRequestV1(recordplatform.RequestFingerprintInputV1{
+		Version: recordplatform.RequestFingerprintVersionV1, OperationKind: key.OperationKind,
+		ProjectID: key.ProjectID, ActorScopeDigest: actor.CanonicalHash(),
+		RequestScopeDigest: sha256.Sum256(encoder.bytes), PayloadDigest: lifecyclePayloadDigest(request.TargetLifecycle),
+	})
+	if err != nil {
+		return RecordLifecycleResult{}, fmt.Errorf("%w: fingerprint", ErrInvalidRecordLifecycleRequest)
+	}
+	command := RecordLifecycleCommand{
+		RecordID: request.RecordID, CurrentRevisionID: request.CurrentRevisionID,
+		LockVersion: request.LockVersion, AuthorizationEpoch: request.AuthorizationEpoch,
+		ExpectedLifecycle: expectedLifecycle, TargetLifecycle: request.TargetLifecycle, Actor: actor.Clone(),
+		OutboxTTL: request.OutboxTTL,
+		Idempotency: recordplatform.IdempotencyClaimInputV1{
+			Key: key, RequestFingerprint: fingerprint, OwnerID: request.IdempotencyOwnerID,
+			OwnerLeaseDuration: request.OwnerLeaseDuration, RecordTTL: request.IdempotencyTTL,
 		},
 	}
 	if err := command.Validate(); err != nil {

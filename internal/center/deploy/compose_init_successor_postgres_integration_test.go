@@ -5,6 +5,7 @@ package deploy
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -47,6 +48,12 @@ func TestPostgresIntegrationComposeInitializeUpgradesExactV0794Predecessor(t *te
 	}
 	t.Cleanup(func() { cleanupComposeIntegrationDatabase(t, context.Background(), bootstrapPool, config) })
 	openPostgres := composeIntegrationPostgresOpener(baseConfig)
+	deps := composeLaunchIsolatedInitDependencies(openPostgres)
+	// This negative fixture stops before launch publication and uses the actual database.
+	deps.withMaintenance = testComposeMaintenance
+	initialize := func(ctx context.Context, config ComposeInitConfig) error {
+		return initializeComposeWithDependencies(ctx, config, deps)
+	}
 
 	seedReleasedV0794ComposePredecessor(t, ctx, openPostgres, config)
 	passwordsBefore := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config)
@@ -55,8 +62,8 @@ func TestPostgresIntegrationComposeInitializeUpgradesExactV0794Predecessor(t *te
 		t.Fatalf("load exact predecessor authority state: %v", err)
 	}
 
-	if err := initializeCompose(ctx, config, openPostgres); err != nil {
-		t.Fatalf("upgrade exact v0.79.4 Compose predecessor through production wiring: %v", err)
+	if err := initialize(ctx, config); !errors.Is(err, ErrComposeColdUpgradeRequired) {
+		t.Fatalf("active ordinary V1 initialization error = %v, want cold upgrade required", err)
 	}
 	passwordsAfter := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config)
 	if !reflect.DeepEqual(passwordsAfter, passwordsBefore) {
@@ -66,34 +73,22 @@ func TestPostgresIntegrationComposeInitializeUpgradesExactV0794Predecessor(t *te
 	if err != nil {
 		t.Fatalf("load upgraded authority state: %v", err)
 	}
-	if authorityAfter.DeploymentID != authorityBefore.DeploymentID || authorityAfter.DatabasePassword() != authorityBefore.DatabasePassword() {
-		t.Fatal("Compose successor upgrade replaced Records authority state")
+	if !sameVerifiedComposeAuthorityState(authorityAfter, authorityBefore) || authorityAfter.MembershipVersion != 1 {
+		t.Fatal("rejected normal initialization changed the predecessor authority state")
 	}
-	assertExactComposeSuccessorState(t, ctx, openPostgres, config)
-	assertComposeSuccessorRecordsAndAttachments(t, ctx, openPostgres, config)
-	assertComposeIntegrationCatalog(t, ctx, bootstrapPool, openPostgres, config)
-	assertComposeIntegrationAuthorityProof(t, ctx, openPostgres, config)
-
-	beforeRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
-	if err := initializeCompose(ctx, config, openPostgres); err != nil {
-		t.Fatalf("repeat exact Compose successor initialization through production wiring: %v", err)
-	}
-	afterRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
-	if afterRepeat != beforeRepeat {
-		t.Fatalf("Compose successor repeat counts = %#v, want unchanged %#v", afterRepeat, beforeRepeat)
-	}
-	if got := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config); !reflect.DeepEqual(got, passwordsAfter) {
-		t.Fatal("Compose successor repeat rewrote role password verifiers")
+	if _, err := os.Stat(filepath.Join(config.AuthorityStateRoot, "private", "membership-successor.json")); !os.IsNotExist(err) {
+		t.Fatalf("rejected normal initialization published a successor: %v", err)
 	}
 }
 
 func exactComposeIntegrationConfig(t *testing.T, bootstrapPassword string) ComposeInitConfig {
 	t.Helper()
 	config, err := NewComposeInitConfig(ComposeInitPasswords{
-		Bootstrap:     bootstrapPassword,
-		Runtime:       "exact-runtime-secret",
-		PlatformAdmin: "exact-admin-secret",
-		Migrator:      "exact-migrator-secret",
+		Bootstrap:      bootstrapPassword,
+		Runtime:        "exact-runtime-secret",
+		PlatformAdmin:  "exact-admin-secret",
+		DeletionWorker: "exact-deletion-worker-secret",
+		Migrator:       "exact-migrator-secret",
 	})
 	if err != nil {
 		t.Fatalf("build exact Compose integration config: %v", err)
@@ -109,10 +104,10 @@ func exactComposeIntegrationConfig(t *testing.T, bootstrapPassword string) Compo
 
 func composeIntegrationPostgresOpener(baseConfig *pgxpool.Config) func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error) {
 	return func(ctx context.Context, endpoint composePostgresEndpoint) (*pgxpool.Pool, error) {
-		config := baseConfig.Copy()
-		config.ConnConfig.Database = endpoint.Database
-		config.ConnConfig.User = endpoint.Role
-		config.ConnConfig.Password = endpoint.Password
+		config, err := composeIntegrationEndpointConfig(baseConfig, endpoint)
+		if err != nil {
+			return nil, err
+		}
 		pool, err := pgxpool.NewWithConfig(ctx, config)
 		if err != nil {
 			return nil, err
@@ -140,7 +135,7 @@ func seedReleasedV0794ComposePredecessor(
 	if err != nil {
 		t.Fatalf("open Compose predecessor bootstrap: %v", err)
 	}
-	authorityState, err := prepareComposeAuthorityState(ctx, bootstrapPool, config.AuthorityStateRoot)
+	authorityState, err := reconcileComposeAuthorityState(config.AuthorityStateRoot, composeDatabaseContractState{})
 	if err != nil {
 		bootstrapPool.Close()
 		t.Fatalf("prepare Compose predecessor authority: %v", err)
@@ -151,10 +146,11 @@ func seedReleasedV0794ComposePredecessor(
 		AuthorityRole: config.AuthorityRole,
 		Roles:         config.Roles,
 		Passwords: platformmigrate.ComposeRolePasswords{
-			Runtime:       config.Passwords.Runtime,
-			PlatformAdmin: config.Passwords.PlatformAdmin,
-			Migrator:      config.Passwords.Migrator,
-			Authority:     authorityState.DatabasePassword(),
+			Runtime:        config.Passwords.Runtime,
+			PlatformAdmin:  config.Passwords.PlatformAdmin,
+			DeletionWorker: config.Passwords.DeletionWorker,
+			Migrator:       config.Passwords.Migrator,
+			Authority:      authorityState.DatabasePassword(),
 		},
 	}); err != nil {
 		bootstrapPool.Close()
@@ -208,7 +204,7 @@ func seedReleasedV0794ComposePredecessor(
 		migratorPool.Close()
 		t.Fatalf("seed released predecessor settings and heartbeat rows: %v", err)
 	}
-	if err := activateComposeAuthorityState(ctx, migratorPool, config.AuthorityStateRoot, authorityState); err != nil {
+	if err := activateComposeAuthorityState(ctx, migratorPool, config.AuthorityStateRoot, authorityState, config.Roles); err != nil {
 		migratorPool.Close()
 		t.Fatalf("activate released predecessor authority: %v", err)
 	}

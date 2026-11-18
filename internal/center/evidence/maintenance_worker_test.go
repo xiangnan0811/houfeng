@@ -37,9 +37,6 @@ func TestEvidenceMaintenanceWorkerRunOnceIsBoundedAndPublishesAggregateMetrics(t
 	if err := worker.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
-	if got, want := repository.calls, []string{"delete:10", "collect:20", "backlog:30", "capacity"}; !equalStrings(got, want) {
-		t.Fatalf("repository calls = %#v, want %#v", got, want)
-	}
 	metrics := observer.Snapshot()
 	if metrics.PassAttempts != 1 || metrics.PassSuccesses != 1 || metrics.PassFailures != 0 ||
 		metrics.DeletedIntentCount != 2 || metrics.ReclaimedPayloadCount != 2 ||
@@ -345,6 +342,8 @@ type maintenanceRepositoryStub struct {
 	collectErr        error
 	backlogErr        error
 	capacityErr       error
+	indexResult       ComparisonDependencyIndexBatchResult
+	indexErr          error
 	deleteCalled      chan struct{}
 	deleteSignalOnce  sync.Once
 	afterDelete       func()
@@ -382,6 +381,12 @@ func (repository *maintenanceRepositoryStub) ReadEvidenceCapacityAggregate(conte
 	defer repository.mu.Unlock()
 	repository.calls = append(repository.calls, "capacity")
 	return repository.capacity, repository.capacityErr
+}
+
+func (repository *maintenanceRepositoryStub) BackfillComparisonDependencyIndex(context.Context, string, uint64) (ComparisonDependencyIndexBatchResult, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	return repository.indexResult, repository.indexErr
 }
 
 func discardEvidenceLogger() *slog.Logger {

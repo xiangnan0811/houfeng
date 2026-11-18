@@ -12,12 +12,12 @@ import (
 var ErrInvalidDeletionAdapter = errors.New("invalid evidence deletion adapter")
 
 type EvidenceDeletionCommand struct {
-	Operation     recorddeletion.DeletionOperation
+	recorddeletion.PurgeTarget
 	SurfaceDigest [sha256.Size]byte
 }
 
 func (command EvidenceDeletionCommand) Validate() error {
-	if (recorddeletion.PurgeTarget{Operation: command.Operation}).Validate() != nil ||
+	if command.PurgeTarget.Validate() != nil ||
 		command.SurfaceDigest != RecordEvidenceSurfaceDigest() {
 		return ErrInvalidDeletionAdapter
 	}
@@ -95,7 +95,7 @@ func (adapter *DeletionAdapter) PurgeDeletion(
 	if ctx == nil || adapter == nil || nilRevisionPreparationDependency(adapter.store) || target.Validate() != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, ErrInvalidDeletionAdapter
 	}
-	command := EvidenceDeletionCommand{Operation: target.Operation, SurfaceDigest: RecordEvidenceSurfaceDigest()}
+	command := EvidenceDeletionCommand{PurgeTarget: target, SurfaceDigest: RecordEvidenceSurfaceDigest()}
 	if command.Validate() != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, ErrInvalidDeletionAdapter
 	}
@@ -120,7 +120,7 @@ func (adapter *DeletionAdapter) VerifyDeletion(
 	if err := recorddeletion.ValidateAdapterPurgeReceipt(receipt, target, adapter.descriptor); err != nil {
 		return err
 	}
-	command := EvidenceDeletionCommand{Operation: target.Operation, SurfaceDigest: RecordEvidenceSurfaceDigest()}
+	command := EvidenceDeletionCommand{PurgeTarget: target, SurfaceDigest: RecordEvidenceSurfaceDigest()}
 	return adapter.store.VerifyRecordEvidencePurge(ctx, command, receipt)
 }
 

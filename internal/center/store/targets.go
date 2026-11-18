@@ -204,6 +204,9 @@ func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, tar
 		return targets.TargetRecord{}, fmt.Errorf("begin target metadata transaction for %q: %w", targetID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "target", targetID); err != nil {
+		return targets.TargetRecord{}, err
+	}
 
 	args := []any{targetID}
 	if input.Group != nil {
@@ -288,8 +291,12 @@ func (r *PostgresTargetRepository) GetTargetLifecycleReview(ctx context.Context,
 }
 
 func (r *PostgresTargetRepository) loadTargetRecordSubject(ctx context.Context, targetID string) (targetRecordSubject, error) {
+	return loadTargetRecordSubject(ctx, r.db, targetID)
+}
+
+func loadTargetRecordSubject(ctx context.Context, db currentRecordAuthorizationDB, targetID string) (targetRecordSubject, error) {
 	var subject targetRecordSubject
-	err := r.db.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		select target_id, name, target_type
 		from targets
 		where target_id = $1`, targetID).Scan(
@@ -317,6 +324,9 @@ func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targe
 		return targets.TargetRecord{}, fmt.Errorf("begin create target transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "target", targetID); err != nil {
+		return targets.TargetRecord{}, err
+	}
 
 	record, err := scanTarget(tx.QueryRow(ctx, `
 		insert into targets (
@@ -625,6 +635,9 @@ func (r *PostgresTargetRepository) runTargetLifecycleAction(ctx context.Context,
 		return targets.TargetRecord{}, fmt.Errorf("begin target %s transaction for %q: %w", action, targetID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertSourceWritable(ctx, tx, "target", targetID); err != nil {
+		return targets.TargetRecord{}, err
+	}
 
 	current, impacts, digest, err := loadTargetLifecycleReviewTx(ctx, tx, targetID)
 	if err != nil {
@@ -663,6 +676,9 @@ func (r *PostgresTargetRepository) runTargetLifecycleAction(ctx context.Context,
 func transitionTargetTx(ctx context.Context, tx pgx.Tx, targetID, action string) (targets.TargetRecord, bool, error) {
 	if !validTargetRuntimeAction(action) {
 		return targets.TargetRecord{}, false, fmt.Errorf("%w: %q", ErrInvalidTargetRuntimeAction, action)
+	}
+	if err := assertSourceWritable(ctx, tx, "target", targetID); err != nil {
+		return targets.TargetRecord{}, false, err
 	}
 
 	current, err := scanTarget(tx.QueryRow(ctx, `
@@ -775,7 +791,12 @@ func (r *PostgresTargetRepository) GetProbeMetadata(ctx context.Context, probeIt
 }
 
 func (r *PostgresTargetRepository) CreateProbeItem(ctx context.Context, targetID string, input targets.CreateProbeItemInput) (targets.ProbeItemRecord, error) {
-	if _, err := r.GetTarget(ctx, targetID); err != nil {
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return targets.ProbeItemRecord{}, fmt.Errorf("begin create probe item transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertTargetProbeWritable(ctx, tx, targetID); err != nil {
 		return targets.ProbeItemRecord{}, err
 	}
 
@@ -789,7 +810,7 @@ func (r *PostgresTargetRepository) CreateProbeItem(ctx context.Context, targetID
 		config = json.RawMessage(`{}`)
 	}
 
-	record, err := scanProbeItem(r.db.QueryRow(ctx, `
+	record, err := scanProbeItem(tx.QueryRow(ctx, `
 		insert into probe_items (
 			probe_item_id,
 			target_id,
@@ -819,18 +840,29 @@ func (r *PostgresTargetRepository) CreateProbeItem(ctx context.Context, targetID
 	if err != nil {
 		return targets.ProbeItemRecord{}, fmt.Errorf("create probe item for target %q: %w", targetID, err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return targets.ProbeItemRecord{}, fmt.Errorf("commit create probe item transaction: %w", err)
+	}
 	return record, nil
 }
 
 // Use the database wall clock for a new probe generation rather than a
 // transaction-start timestamp.
 func (r *PostgresTargetRepository) UpdateProbeItem(ctx context.Context, targetID string, probeItemID string, input targets.UpdateProbeItemInput) (targets.ProbeItemRecord, error) {
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return targets.ProbeItemRecord{}, fmt.Errorf("begin update probe item transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertTargetProbeWritable(ctx, tx, targetID); err != nil {
+		return targets.ProbeItemRecord{}, err
+	}
 	config := input.Config
 	if len(config) == 0 {
 		config = json.RawMessage(`{}`)
 	}
 
-	record, err := scanProbeItem(r.db.QueryRow(ctx, `
+	record, err := scanProbeItem(tx.QueryRow(ctx, `
 		update probe_items
 		set probe_kind = $3,
 			enabled = $4,
@@ -857,19 +889,27 @@ func (r *PostgresTargetRepository) UpdateProbeItem(ctx context.Context, targetID
 		[]byte(config),
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		if _, targetErr := r.GetTarget(ctx, targetID); targetErr != nil {
-			return targets.ProbeItemRecord{}, targetErr
-		}
 		return targets.ProbeItemRecord{}, fmt.Errorf("%w: probe item %q under target %q", targets.ErrProbeItemNotFound, probeItemID, targetID)
 	}
 	if err != nil {
 		return targets.ProbeItemRecord{}, fmt.Errorf("update probe item %q for target %q: %w", probeItemID, targetID, err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return targets.ProbeItemRecord{}, fmt.Errorf("commit update probe item transaction: %w", err)
+	}
 	return record, nil
 }
 
 func (r *PostgresTargetRepository) DeleteProbeItem(ctx context.Context, targetID string, probeItemID string) error {
-	tag, err := r.db.Exec(ctx, `
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return fmt.Errorf("begin delete probe item transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := assertTargetProbeWritable(ctx, tx, targetID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
 		delete from probe_items
 		where target_id = $1
 			and probe_item_id = $2`, targetID, probeItemID)
@@ -877,10 +917,23 @@ func (r *PostgresTargetRepository) DeleteProbeItem(ctx context.Context, targetID
 		return fmt.Errorf("delete probe item %q for target %q: %w", probeItemID, targetID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		if _, targetErr := r.GetTarget(ctx, targetID); targetErr != nil {
-			return targetErr
-		}
 		return fmt.Errorf("%w: probe item %q under target %q", targets.ErrProbeItemNotFound, probeItemID, targetID)
+	}
+	return tx.Commit(ctx)
+}
+
+// Probe existence checks and writes share the graph snapshot, including deletes
+// whose database cascades remove raw observations and daily aggregates.
+func assertTargetProbeWritable(ctx context.Context, tx pgx.Tx, targetID string) error {
+	if err := assertSourceWritable(ctx, tx, "target", targetID); err != nil {
+		return err
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from targets where target_id=$1)`, targetID).Scan(&exists); err != nil {
+		return fmt.Errorf("check probe target: %w", err)
+	}
+	if !exists {
+		return targets.ErrTargetNotFound
 	}
 	return nil
 }

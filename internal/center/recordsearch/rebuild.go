@@ -44,10 +44,11 @@ var rebuildOwnerPattern = regexp.MustCompile(`^[a-z0-9_-]{1,128}$`)
 // the persisted job, so a worker that takes over an expired lease continues the
 // previous attempt instead of restarting it.
 type RebuildLease struct {
-	JobID       string
-	Generation  uint64
-	ResumeAfter string
-	Projected   uint64
+	JobID          string
+	Generation     uint64
+	ResumeAfter    string
+	Projected      uint64
+	LeaseExpiresAt time.Time
 }
 
 type RebuildClaim struct {
@@ -56,27 +57,30 @@ type RebuildClaim struct {
 }
 
 type RebuildBatch struct {
-	JobID       string
-	Generation  uint64
-	OwnerID     string
-	ResumeAfter string
-	Limit       uint32
+	JobID          string
+	Generation     uint64
+	OwnerID        string
+	ResumeAfter    string
+	Limit          uint32
+	LeaseExpiresAt time.Time
 	// LeaseDuration renews the lease in the same transaction that projects the
 	// batch, so a long rebuild cannot lose its claim while it is working.
 	LeaseDuration time.Duration
 }
 
 type RebuildBatchResult struct {
-	Projected   uint64
-	ResumeAfter string
-	Drained     bool
+	Projected      uint64
+	ResumeAfter    string
+	Drained        bool
+	LeaseExpiresAt time.Time
 }
 
 type RebuildPublish struct {
-	JobID      string
-	Generation uint64
-	OwnerID    string
-	Projected  uint64
+	JobID          string
+	Generation     uint64
+	OwnerID        string
+	Projected      uint64
+	LeaseExpiresAt time.Time
 }
 
 // RebuildCoverage is the audit trail a publish leaves: how many documents the
@@ -87,10 +91,11 @@ type RebuildCoverage struct {
 }
 
 type RebuildFailure struct {
-	JobID      string
-	Generation uint64
-	OwnerID    string
-	Reason     string
+	JobID          string
+	Generation     uint64
+	OwnerID        string
+	Reason         string
+	LeaseExpiresAt time.Time
 }
 
 type RebuildStore interface {
@@ -162,18 +167,18 @@ func (worker *RebuildWorker) RunOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if lease.JobID == "" || lease.Generation == 0 {
+	if lease.JobID == "" || lease.Generation == 0 || lease.LeaseExpiresAt.IsZero() {
 		return false, fmt.Errorf("%w: lease", ErrInvalidRebuild)
 	}
 
-	projected, err := worker.drain(ctx, lease)
+	projected, err := worker.drain(ctx, &lease)
 	if err != nil {
 		worker.failRebuild(ctx, lease, rebuildFailureReason(err))
 		return false, err
 	}
 	if _, err := worker.store.PublishRecordSearchRebuild(ctx, RebuildPublish{
 		JobID: lease.JobID, Generation: lease.Generation,
-		OwnerID: worker.options.OwnerID, Projected: projected,
+		OwnerID: worker.options.OwnerID, Projected: projected, LeaseExpiresAt: lease.LeaseExpiresAt,
 	}); err != nil {
 		worker.failRebuild(ctx, lease, rebuildFailureReason(err))
 		return false, err
@@ -184,7 +189,7 @@ func (worker *RebuildWorker) RunOnce(ctx context.Context) (bool, error) {
 // drain returns the total projected count including whatever an earlier attempt
 // already did, because the published coverage describes the generation rather
 // than this pass.
-func (worker *RebuildWorker) drain(ctx context.Context, lease RebuildLease) (uint64, error) {
+func (worker *RebuildWorker) drain(ctx context.Context, lease *RebuildLease) (uint64, error) {
 	projected := lease.Projected
 	resumeAfter := lease.ResumeAfter
 	for pass := 0; pass < maxRebuildBatchesPerPass; pass++ {
@@ -194,11 +199,15 @@ func (worker *RebuildWorker) drain(ctx context.Context, lease RebuildLease) (uin
 		batch, err := worker.store.ProjectRecordSearchRebuildBatch(ctx, RebuildBatch{
 			JobID: lease.JobID, Generation: lease.Generation, OwnerID: worker.options.OwnerID,
 			ResumeAfter: resumeAfter, Limit: worker.options.BatchSize,
-			LeaseDuration: worker.options.OwnerLeaseDuration,
+			LeaseDuration: worker.options.OwnerLeaseDuration, LeaseExpiresAt: lease.LeaseExpiresAt,
 		})
 		if err != nil {
 			return 0, err
 		}
+		if batch.LeaseExpiresAt.IsZero() || !batch.LeaseExpiresAt.After(lease.LeaseExpiresAt) {
+			return 0, fmt.Errorf("%w: renewed lease", ErrInvalidRebuild)
+		}
+		lease.LeaseExpiresAt = batch.LeaseExpiresAt
 		projected += batch.Projected
 		if batch.Drained {
 			return projected, nil
@@ -217,7 +226,7 @@ func (worker *RebuildWorker) drain(ctx context.Context, lease RebuildLease) (uin
 func (worker *RebuildWorker) failRebuild(ctx context.Context, lease RebuildLease, reason string) {
 	if err := worker.store.FailRecordSearchRebuild(ctx, RebuildFailure{
 		JobID: lease.JobID, Generation: lease.Generation,
-		OwnerID: worker.options.OwnerID, Reason: reason,
+		OwnerID: worker.options.OwnerID, Reason: reason, LeaseExpiresAt: lease.LeaseExpiresAt,
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		worker.options.Logger.Error("record search rebuild job failure was not recorded")
 	}

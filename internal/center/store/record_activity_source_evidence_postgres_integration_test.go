@@ -2,19 +2,22 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/attachments"
+	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
 
 // seedEvidenceActivityFixture writes one snapshot per subject kind plus one whose
 // source kind is schema headroom rather than a subject.
-func seedEvidenceActivityFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, base time.Time) {
-	t.Helper()
+func seedEvidenceActivityFixture(ctx context.Context, conn *pgx.Conn, base time.Time) error {
 	statements := []struct {
 		sql       string
 		arguments []any
@@ -71,10 +74,11 @@ func seedEvidenceActivityFixture(t *testing.T, ctx context.Context, pool *pgxpoo
 		},
 	}
 	for _, statement := range statements {
-		if _, err := pool.Exec(ctx, statement.sql, statement.arguments...); err != nil {
-			t.Fatalf("seed evidence activity fixture: %v", err)
+		if _, err := conn.Exec(ctx, statement.sql, statement.arguments...); err != nil {
+			return fmt.Errorf("seed evidence activity fixture: %w", err)
 		}
 	}
+	return nil
 }
 
 func newEvidenceActivitySourceFixture(
@@ -83,13 +87,53 @@ func newEvidenceActivitySourceFixture(
 	base time.Time,
 ) (*EvidenceActivitySource, *pgxpool.Pool) {
 	t.Helper()
-	pool := openActivityTestPool(t, ctx)
-	seedEvidenceActivityFixture(t, ctx, pool, base)
+	// Seed the historical projection inputs in the real migrator transaction
+	// before C81, then use the provisioned and admitted runtime for projection.
+	fixture := newImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false,
+		func(ctx context.Context, conn *pgx.Conn, _ recordplatform.DeploymentID) error {
+			return seedEvidenceActivityFixture(ctx, conn, base)
+		})
+	pool := fixture.Runtime
+	if _, err := fixture.platform.db.Exec(ctx, `insert into public.record_activity_projection_heads
+		(project_id, projection_generation, published_ingest_sequence, allocated_ingest_sequence)
+		values ('default', 1, 0, 0)`); err != nil {
+		t.Fatalf("seed active generation: %v", err)
+	}
+	fixture.platform.db.Reset()
+	waitForEvidenceActivityFixtureSessions(t, ctx, pool)
 	source, err := NewEvidenceActivitySource(pool, activityTestNamespace())
 	if err != nil {
 		t.Fatalf("new evidence activity source: %v", err)
 	}
 	return source, pool
+}
+
+// Reset closes idle connections asynchronously. Wait until the constrained
+// runtime can see every remaining session before asking for a settled head.
+func waitForEvidenceActivityFixtureSessions(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var unreadable bool
+		err := pool.QueryRow(waitCtx, `select exists (
+			select 1 from pg_stat_activity session where session.datname=current_database()
+			and session.xact_start is null and session.state is distinct from 'idle'
+		)`).Scan(&unreadable)
+		if err != nil {
+			t.Fatalf("observe activity fixture sessions: %v", err)
+		}
+		if !unreadable {
+			return
+		}
+		select {
+		case <-waitCtx.Done():
+			t.Fatalf("owned activity setup sessions did not quiesce: %v", waitCtx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func TestPostgresIntegrationEvidenceSourceProjectsSubjectScopedCaptures(t *testing.T) {

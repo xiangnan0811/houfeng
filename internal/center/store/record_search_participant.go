@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordmarkdown"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
@@ -92,7 +93,7 @@ func recordSearchDocumentFactsFromRevision(
 	source recordSearchProjectionSource,
 ) (recordsearch.DocumentFacts, error) {
 	input := source.Input
-	if !records.ValidRecordRootID(source.RecordID) || !records.ValidRevisionID(source.RevisionID) {
+	if !recordidentity.IsValid(source.RecordID) || !records.ValidRevisionID(source.RevisionID) {
 		return recordsearch.DocumentFacts{}, fmt.Errorf("%w: search projection identity", records.ErrInvalidRevisionCommand)
 	}
 
@@ -343,7 +344,7 @@ func projectRecordSearchLifecycle(
 	authorizationEpoch uint64,
 	changedAt time.Time,
 ) error {
-	if ctx == nil || nilRecordSearchParticipantTx(tx) || !records.ValidRecordRootID(recordID) ||
+	if ctx == nil || nilRecordSearchParticipantTx(tx) || !recordidentity.IsValid(recordID) ||
 		records.ValidateLifecycle(lifecycle) != nil || changedAt.IsZero() {
 		return fmt.Errorf("%w: search lifecycle projection", records.ErrInvalidRecordLifecycleCommand)
 	}

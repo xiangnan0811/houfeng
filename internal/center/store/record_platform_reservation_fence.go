@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/recordplatform"
 )
@@ -35,15 +37,8 @@ const lockContentDeliveryEpochForFenceSQL = `
 	for update`
 
 const lockDeletionFenceLeaseForFenceSQL = `
-	select owner_id,
-	       owner_generation,
-	       expires_at,
-	       expires_at > transaction_timestamp()
-	from public.deletion_fence_leases
-	where project_id = $1
-	  and object_kind = $2
-	  and object_id = $3
-	for update`
+	select owner_id, owner_generation, expires_at, live
+	from public.record_serving_deletion_fence_lock($1::bytea)`
 
 const lockObjectContentLeaseForFenceSQL = `
 	select owner_id,
@@ -500,13 +495,25 @@ func lockContentDeliveryEpochForFence(ctx context.Context, tx pgx.Tx, object rec
 }
 
 func lockDeletionFenceLeaseForFence(ctx context.Context, tx pgx.Tx, object recordplatform.ObjectRef) (lockedDeletionFenceLeaseForFence, error) {
+	command, err := json.Marshal(struct {
+		ProjectID  string `json:"project_id"`
+		ObjectKind string `json:"object_kind"`
+		ObjectID   string `json:"object_id"`
+	}{object.ProjectID, object.ObjectKind, object.ObjectID})
+	if err != nil {
+		return lockedDeletionFenceLeaseForFence{}, fmt.Errorf("encode deletion fence object: %w", err)
+	}
 	var ownerID string
 	var generation int64
 	var expiresAt time.Time
 	var live bool
-	err := tx.QueryRow(ctx, lockDeletionFenceLeaseForFenceSQL, object.ProjectID, object.ObjectKind, object.ObjectID).Scan(&ownerID, &generation, &expiresAt, &live)
+	err = tx.QueryRow(ctx, lockDeletionFenceLeaseForFenceSQL, command).Scan(&ownerID, &generation, &expiresAt, &live)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedDeletionFenceLeaseForFence{}, nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "P0002" {
+		return lockedDeletionFenceLeaseForFence{}, recordplatform.ErrContentDeliveryEpochMissing
 	}
 	if err != nil {
 		return lockedDeletionFenceLeaseForFence{}, err

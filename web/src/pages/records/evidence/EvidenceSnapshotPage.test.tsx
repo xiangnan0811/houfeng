@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +7,12 @@ import * as authContext from '../../../lib/auth-context'
 import * as recordsApi from '../../../lib/recordsApi'
 import type { EvidenceSnapshotRead } from '../../../lib/types'
 import { EvidenceSnapshotPage } from './EvidenceSnapshotPage'
+import { broadcastRecordCleanup } from '../../../lib/recordSecurity'
+
+vi.mock('../draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../draftBuffer')>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 const quality = {
   status: 'complete' as const,
@@ -247,4 +253,21 @@ describe('EvidenceSnapshotPage', () => {
     expect(screen.getByText('当前客户端无法安全展示这种证据，已隐藏原始内容。')).toBeInTheDocument()
     expect(screen.queryByText('unsupported-payload')).not.toBeInTheDocument()
   })
+})
+
+it('closes a loaded evidence copy on exact owner cleanup without interpreting the epoch as a Number', async () => {
+  vi.spyOn(authContext, 'useAuth').mockReturnValue({
+    user: { user_id: 'usr_reader', username: 'reader', role: 'admin', display_name: '', runtime_capabilities: { records: true, comparison: true, portability: false }, management_capabilities: { access: false } },
+    loading: false, status: 'ready', error: null,
+    login: vi.fn(), logout: vi.fn(), refresh: vi.fn(), retry: vi.fn(),
+  })
+  vi.spyOn(recordsApi, 'getEvidenceSnapshot').mockResolvedValue(ipQualitySnapshot())
+  renderPage()
+  await screen.findByRole('heading', { level: 1, name: 'IP 质量报告' })
+  act(() => broadcastRecordCleanup('usr_reader', {
+    version: 1, cursor: '9007199254740993', operation_id: 'rpo_reader', record_id: 'rec_renderer',
+    cleanup_epoch: '9007199254740995', scopes: ['markdown_workspace'],
+  }))
+  expect(await screen.findByText('未找到证据')).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { level: 1, name: 'IP 质量报告' })).not.toBeInTheDocument()
 })

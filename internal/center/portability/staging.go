@@ -12,6 +12,7 @@ import (
 
 type LeasedBlobStore struct {
 	inner  attachments.BlobStore
+	writer attachments.BlobWriter
 	mu     sync.Mutex
 	leases map[string]*contentLease
 }
@@ -21,42 +22,48 @@ type contentLease struct {
 	version attachments.ObjectVersion
 }
 
-func NewLeasedBlobStore(inner attachments.BlobStore) *LeasedBlobStore {
-	return &LeasedBlobStore{inner: inner, leases: make(map[string]*contentLease)}
+func NewLeasedBlobStore(inner attachments.BlobStore, writer attachments.BlobWriter) *LeasedBlobStore {
+	return &LeasedBlobStore{inner: inner, writer: writer, leases: make(map[string]*contentLease)}
 }
 
-func (store *LeasedBlobStore) Stage(ctx context.Context, jobID string, payload []byte) (attachments.ObjectVersion, error) {
-	return store.stage(ctx, jobID, payload)
+func (store *LeasedBlobStore) Stage(ctx context.Context, request attachments.WriteRequest, payload []byte) (attachments.WrittenBlob, error) {
+	if request.Origin.Kind != "export_artifact" {
+		return attachments.WrittenBlob{}, ErrExportUnavailable
+	}
+	return store.stage(ctx, request, payload)
 }
 
-func (store *LeasedBlobStore) StageImport(ctx context.Context, jobID string, payload []byte) (attachments.ObjectVersion, error) {
-	return store.stage(ctx, jobID, payload)
+func (store *LeasedBlobStore) StageImport(ctx context.Context, request attachments.WriteRequest, payload []byte) (attachments.WrittenBlob, error) {
+	if request.Origin.Kind != "import_archive" {
+		return attachments.WrittenBlob{}, ErrExportUnavailable
+	}
+	return store.stage(ctx, request, payload)
 }
 
-func (store *LeasedBlobStore) stage(ctx context.Context, jobID string, payload []byte) (attachments.ObjectVersion, error) {
-	if ctx == nil || store == nil || store.inner == nil || jobID == "" || len(payload) == 0 {
-		return attachments.ObjectVersion{}, ErrExportUnavailable
+func (store *LeasedBlobStore) stage(ctx context.Context, request attachments.WriteRequest, payload []byte) (attachments.WrittenBlob, error) {
+	if ctx == nil || store == nil || store.inner == nil || store.writer == nil || request.Origin.ID == "" || request.ProjectID == "" || len(payload) == 0 {
+		return attachments.WrittenBlob{}, ErrExportUnavailable
 	}
 	temporaryKey, err := attachments.NewBlobTemporaryKey()
 	if err != nil {
-		return attachments.ObjectVersion{}, err
+		return attachments.WrittenBlob{}, err
 	}
 	digest := sha256.Sum256(payload)
-	version, err := store.inner.Put(ctx, attachments.PutRequest{
-		ExpectedSHA256:    digest,
-		ExpectedSizeBytes: int64(len(payload)),
-		TemporaryKey:      temporaryKey,
-	}, bytes.NewReader(payload))
+	request.Content = attachments.PutRequest{ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(payload)), TemporaryKey: temporaryKey}
+	written, err := store.writer.Put(ctx, request, bytes.NewReader(payload))
 	if err != nil {
-		return attachments.ObjectVersion{}, err
+		return attachments.WrittenBlob{}, err
+	}
+	if written.Version.Validate() != nil || written.Version.SHA256 != digest || written.Version.SizeBytes != int64(len(payload)) || written.NamespaceID != store.writer.NamespaceID() || written.ObligationID == "" {
+		return attachments.WrittenBlob{}, ErrExportUnavailable
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if existing, ok := store.leases[jobID]; ok && existing.revoked {
-		return attachments.ObjectVersion{}, ErrExportLeaseRevoked
+	if existing, ok := store.leases[request.Origin.ID]; ok && existing.revoked {
+		return attachments.WrittenBlob{}, ErrExportLeaseRevoked
 	}
-	store.leases[jobID] = &contentLease{version: version}
-	return version, nil
+	store.leases[request.Origin.ID] = &contentLease{version: written.Version}
+	return written, nil
 }
 
 func (store *LeasedBlobStore) OpenLeased(ctx context.Context, jobID string) (io.ReadCloser, attachments.ObjectVersion, error) {
@@ -87,8 +94,9 @@ func (store *LeasedBlobStore) OpenPublished(
 	ctx context.Context,
 	jobID string,
 	version attachments.ObjectVersion,
+	namespaceID string,
 ) (io.ReadCloser, attachments.ObjectVersion, error) {
-	if ctx == nil || store == nil || store.inner == nil || jobID == "" || version.Validate() != nil {
+	if ctx == nil || store == nil || store.inner == nil || store.writer == nil || jobID == "" || version.Validate() != nil || namespaceID != store.writer.NamespaceID() {
 		return nil, attachments.ObjectVersion{}, ErrExportUnavailable
 	}
 	store.mu.Lock()
@@ -97,9 +105,11 @@ func (store *LeasedBlobStore) OpenPublished(
 		store.mu.Unlock()
 		return nil, attachments.ObjectVersion{}, ErrExportLeaseRevoked
 	}
-	if lease != nil {
-		version = lease.version
-	} else {
+	if lease != nil && lease.version != version {
+		store.mu.Unlock()
+		return nil, attachments.ObjectVersion{}, ErrExportUnavailable
+	}
+	if lease == nil {
 		store.leases[jobID] = &contentLease{version: version}
 	}
 	store.mu.Unlock()

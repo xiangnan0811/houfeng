@@ -16,13 +16,11 @@ func TestProcessorWorkerCutpointsCoverClaimAndResultCommit(t *testing.T) {
 		HasPreview: true, MediaType: ManagedPreviewMediaTypeTextUTF8, Bytes: content,
 	}}
 	var got []ProcessorWorkerCutpoint
-	worker, err := NewProcessorWorker(repository, &workerBlobStub{data: content}, workspace, ProcessorWorkerConfig{
-		OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3,
+	worker, err := newWorkerWithFixtureWriter(repository, &workerBlobStub{data: content}, workspace, ProcessorWorkerConfig{OwnerID: "worker1", OwnerLeaseDuration: time.Minute, Limits: DefaultLimits(), PreviewBackendKind: BackendKindS3,
 		Cutpoint: func(cutpoint ProcessorWorkerCutpoint) error {
 			got = append(got, cutpoint)
 			return nil
-		},
-	})
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}

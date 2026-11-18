@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/recordauth"
@@ -19,13 +20,13 @@ import (
 
 func TestPostgresIntegrationRecordActionsLifecycleReplayAndRootIsolation(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgactions", "actions-parent-key")
+	parent := seedPostgresActionParent(t, ctx, fixture, "actions-parent-key")
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-actions-lifecycle", 3)
 	repository := NewPostgresRecordActionRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-		newPostgresWatchAuthorizationSource(t, runtimePool),
+		runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+		newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate),
 	)
 	rootBefore := readPostgresActionRoot(t, ctx, fixture, parent.RecordID)
 
@@ -76,6 +77,11 @@ func TestPostgresIntegrationRecordActionsLifecycleReplayAndRootIsolation(t *test
 	if result, err := repository.CommitAction(ctx, conflict); !errors.Is(err, recordplatform.ErrIdempotencyKeyReused) || result != (recordcollaboration.ActionMutationResult{}) {
 		t.Fatalf("same-key different-fingerprint result=%#v error=%v", result, err)
 	}
+	resultConflict := commands[0]
+	resultConflict.ResultFingerprint = mustStoreActionFingerprint(t, resultConflict.Idempotency.Key.OperationKind, 0x7e)
+	if result, err := repository.CommitAction(ctx, resultConflict); !errors.Is(err, recordplatform.ErrIdempotencyConflictState) || result != (recordcollaboration.ActionMutationResult{}) {
+		t.Fatalf("same request with a different result fingerprint = (%#v, %v)", result, err)
+	}
 
 	rootAfter := readPostgresActionRoot(t, ctx, fixture, parent.RecordID)
 	if !reflect.DeepEqual(rootAfter, rootBefore) {
@@ -101,95 +107,171 @@ func TestPostgresIntegrationRecordActionsLifecycleReplayAndRootIsolation(t *test
 	}
 }
 
-func TestPostgresIntegrationRecordActionsRefreshSourceAuthorizationInsideTransaction(t *testing.T) {
-	for _, failure := range []struct {
-		name    string
-		step    func(*testing.T, recordauth.SourceAuthorization) watchSubjectResolutionStep
-		wantErr error
-	}{
-		{
-			name: "revoked",
-			step: func(t *testing.T, capture recordauth.SourceAuthorization) watchSubjectResolutionStep {
-				denied := collaborationSourceAuthorization(t, capture.CaptureScope,
-					collaborationVisibility(t, recordauth.VisibilityKindRestricted, nil), recordauth.SourceStateLive)
-				return actionSubjectResolutionStep(t, denied)
-			},
-			wantErr: recordauth.ErrDenied,
-		},
-		{
-			name: "unavailable",
-			step: func(*testing.T, recordauth.SourceAuthorization) watchSubjectResolutionStep {
-				return watchSubjectResolutionStep{err: ErrRecordSubjectUnavailable}
-			},
-			wantErr: ErrRecordSubjectUnavailable,
-		},
-	} {
-		for _, operation := range []string{"create", "list", "replay"} {
-			t.Run(failure.name+"/"+operation, func(t *testing.T) {
-				ctx := context.Background()
-				fixture := newRecordsPostgresFixture(t, ctx)
-				seedCollaborationRevisionUsers(t, ctx, fixture)
-				parent := seedPostgresActionParent(t, ctx, fixture,
-					"rec_pgactionauth"+failure.name+operation, "actions-auth-parent-"+failure.name+"-"+operation)
-				runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-actions-auth-"+failure.name+"-"+operation, 3)
-				actor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
-				request := recordcollaboration.ActionCreateRequest{
-					Actor: actor, RecordID: parent.RecordID, Fields: recordcollaboration.ActionFieldValues{Title: "Refresh current source"},
-					IdempotencyKey: "actions-auth-" + failure.name + "-" + operation, IdempotencyOwnerID: "records_actions_api",
-					OwnerLeaseDuration: time.Minute, IdempotencyTTL: 24 * time.Hour, OutboxTTL: 24 * time.Hour,
-				}
-				if operation == "list" {
-					seed := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgauthlist", 0,
-						mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "List seed"}), request.IdempotencyKey+"-seed")
-					if _, err := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate).CommitAction(ctx, seed); err != nil {
-						t.Fatalf("CommitAction(list seed) error = %v", err)
-					}
-				} else if operation == "replay" {
-					seedAuthorization := newPostgresWatchAuthorizationSource(t, runtimePool)
-					seedRepository := NewPostgresRecordActionRepository(
-						runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(), seedAuthorization,
-					)
-					seedService, err := recordcollaboration.NewActionService(seedAuthorization, seedRepository)
-					if err != nil {
-						t.Fatalf("NewActionService(seed) error = %v", err)
-					}
-					if seeded, err := seedService.CreateAction(ctx, request); err != nil || seeded.Version != 1 {
-						t.Fatalf("CreateAction(replay seed) = (%#v, %v)", seeded, err)
-					}
-				}
-
-				_, evidence := storeActionAuthorization(t)
-				resolver := &sequencedWatchSubjectResolver{steps: []watchSubjectResolutionStep{
-					actionSubjectResolutionStep(t, evidence.Sources[0]), failure.step(t, evidence.Sources[0]),
-				}}
-				authorization := newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate)
-				repository := NewPostgresRecordActionRepository(
-					runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(), authorization,
-				)
-				service, err := recordcollaboration.NewActionService(authorization, repository)
-				if err != nil {
-					t.Fatalf("NewActionService() error = %v", err)
-				}
-				before := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
-				var operationErr error
-				switch operation {
-				case "list":
-					_, operationErr = service.ListActions(ctx, recordcollaboration.ActionListRequest{Actor: actor, RecordID: parent.RecordID, Limit: 25})
-				default:
-					_, operationErr = service.CreateAction(ctx, request)
-				}
-				if !errors.Is(operationErr, failure.wantErr) {
-					t.Fatalf("%s source authorization error = %v, want %v", operation, operationErr, failure.wantErr)
-				}
-				if resolver.calls != 2 {
-					t.Fatalf("%s source resolver calls = %d, want service then transaction refresh", operation, resolver.calls)
-				}
-				after := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
-				if after != before {
-					t.Fatalf("%s authorization failure durable counts = %#v, want unchanged %#v", operation, after, before)
-				}
-			})
+func TestPostgresIntegrationRecordActionsRejectInvalidTransitionsAndAssignees(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	parent := seedPostgresActionParent(t, ctx, fixture, "actions-policy-parent")
+	runtime := fixture.openDirectRuntimePool(t, ctx, "record-actions-policy", 3)
+	repository := newPostgresActionRepositoryForTest(t, runtime, fixture.admissionGate)
+	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgpolicy", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Action policy"}), "actions-policy-create")
+	if result, err := repository.CommitAction(ctx, create); err != nil || result.Version != 1 {
+		t.Fatalf("create action = (%#v, %v)", result, err)
+	}
+	complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 1,
+		recordcollaboration.ActionFields{}, "actions-policy-complete")
+	if result, err := repository.CommitAction(ctx, complete); err != nil || result.Status != recordcollaboration.ActionStatusCompleted || result.Version != 2 {
+		t.Fatalf("complete action = (%#v, %v)", result, err)
+	}
+	assertRejected := func(repository *PostgresRecordActionRepository, command recordcollaboration.ActionCommand, want error) {
+		t.Helper()
+		before := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, command.Idempotency.Key.Key)
+		if result, err := repository.CommitAction(ctx, command); !errors.Is(err, want) || result != (recordcollaboration.ActionMutationResult{}) {
+			t.Fatalf("rejected action = (%#v, %v), want %v", result, err, want)
 		}
+		if after := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, command.Idempotency.Key.Key); after != before {
+			t.Fatalf("rejected action changed durable counts: before=%#v after=%#v", before, after)
+		}
+	}
+	assertRejected(repository, postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 2,
+		recordcollaboration.ActionFields{}, "actions-policy-repeat-complete"), recordcollaboration.ErrInvalidActionStateTransition)
+	assertRejected(repository, postgresActionCommand(t, parent, recordcollaboration.ActionMutationReopen, create.ActionID, 1,
+		recordcollaboration.ActionFields{}, "actions-policy-stale"), recordcollaboration.ErrActionConflict)
+	for _, step := range []struct {
+		kind    recordcollaboration.ActionMutationKind
+		version uint64
+		status  recordcollaboration.ActionStatus
+		key     string
+	}{
+		{recordcollaboration.ActionMutationReopen, 2, recordcollaboration.ActionStatusOpen, "actions-policy-reopen-complete"},
+		{recordcollaboration.ActionMutationCancel, 3, recordcollaboration.ActionStatusCancelled, "actions-policy-cancel"},
+		{recordcollaboration.ActionMutationReopen, 4, recordcollaboration.ActionStatusOpen, "actions-policy-reopen-cancel"},
+	} {
+		command := postgresActionCommand(t, parent, step.kind, create.ActionID, step.version, recordcollaboration.ActionFields{}, step.key)
+		if result, err := repository.CommitAction(ctx, command); err != nil || result.Version != step.version+1 || result.Status != step.status {
+			t.Fatalf("transition %s = (%#v, %v)", step.kind, result, err)
+		}
+	}
+	assigneeCommand := func(userID, key string) recordcollaboration.ActionCommand {
+		return postgresActionCommand(t, parent, recordcollaboration.ActionMutationUpdate, create.ActionID, 5,
+			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Assigned action", AssigneeID: userID}), key)
+	}
+	assertRejected(repository, assigneeCommand("usr_eeeeeeeeeeeeeeeeeeeeeeee", "actions-policy-missing-assignee"), recordcollaboration.ErrMembershipDenied)
+	if _, err := fixture.db.Exec(ctx, `update public.users set role='viewer' where user_id=$1`, "usr_dddddddddddddddddddddddd"); err != nil {
+		t.Fatalf("demote assignee: %v", err)
+	}
+	assertRejected(repository, assigneeCommand("usr_dddddddddddddddddddddddd", "actions-policy-denied-assignee"), recordcollaboration.ErrMembershipDenied)
+	unavailable := &selectiveUnavailableActionMembershipReader{
+		delegate: NewPostgresCollaborationMembershipReader(), userID: "usr_cccccccccccccccccccccccc",
+	}
+	unavailableRepository := NewPostgresRecordActionRepository(runtime, fixture.admissionGate, unavailable, newRecordsPostgresAuthorization(t, runtime, fixture.admissionGate))
+	assertRejected(unavailableRepository, assigneeCommand(unavailable.userID, "actions-policy-unavailable-assignee"), recordcollaboration.ErrMembershipUnavailable)
+	var version int
+	var status string
+	if err := fixture.db.QueryRow(ctx, `select action_version::int, status from public.record_actions where action_id=$1`, create.ActionID).Scan(&version, &status); err != nil {
+		t.Fatalf("read action after rejected updates: %v", err)
+	}
+	if version != 5 || status != string(recordcollaboration.ActionStatusOpen) {
+		t.Fatalf("action after rejected updates version/status = %d/%q, want 5/open", version, status)
+	}
+}
+
+type selectiveUnavailableActionMembershipReader struct {
+	delegate CollaborationMembershipReader
+	userID   string
+}
+
+func (reader *selectiveUnavailableActionMembershipReader) ReadMemberActor(ctx context.Context, tx pgx.Tx, projectID recordauth.ProjectID, userID string) (recordauth.ActorScope, error) {
+	if userID == reader.userID {
+		return recordauth.ActorScope{}, recordcollaboration.ErrMembershipUnavailable
+	}
+	return reader.delegate.ReadMemberActor(ctx, tx, projectID, userID)
+}
+
+func TestPostgresIntegrationRecordActionLiveIdempotencyOwnerPreventsEffects(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	parent := seedPostgresActionParent(t, ctx, fixture, "actions-progress-parent")
+	runtime := fixture.openDirectRuntimePool(t, ctx, "record-actions-in-progress", 3)
+	command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginprogress", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Pending action"}), "actions-in-progress")
+	platform := NewPostgresRecordPlatformRepository(runtime, fixture.admissionGate)
+	if claim, err := platform.ClaimIdempotency(ctx, command.Idempotency); err != nil || claim.Owner == nil {
+		t.Fatalf("claim in-progress key = (%#v, %v)", claim, err)
+	}
+	before := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, command.Idempotency.Key.Key)
+	repository := newPostgresActionRepositoryForTest(t, runtime, fixture.admissionGate)
+	if result, err := repository.CommitAction(ctx, command); !errors.Is(err, recordplatform.ErrIdempotencyInProgress) || result != (recordcollaboration.ActionMutationResult{}) {
+		t.Fatalf("action with live idempotency owner = (%#v, %v)", result, err)
+	}
+	if after := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, command.Idempotency.Key.Key); after != before {
+		t.Fatalf("in-progress action changed durable counts: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestPostgresIntegrationRecordActionsRefreshSourceAuthorizationInsideTransaction(t *testing.T) {
+	for _, operation := range []string{"create", "list", "replay"} {
+		t.Run(operation, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
+			seedCollaborationRevisionUsers(t, ctx, fixture)
+			parent := seedPostgresActionParent(t, ctx, fixture, "actions-auth-parent-"+operation)
+			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-actions-auth-"+operation, 3)
+			actor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
+			request := recordcollaboration.ActionCreateRequest{
+				Actor: actor, RecordID: parent.RecordID, Fields: recordcollaboration.ActionFieldValues{Title: "Refresh current source"},
+				IdempotencyKey: "actions-auth-" + operation, IdempotencyOwnerID: "records_actions_api",
+				OwnerLeaseDuration: time.Minute, IdempotencyTTL: 24 * time.Hour, OutboxTTL: 24 * time.Hour,
+			}
+			authorization := newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)
+			seedRepository := NewPostgresRecordActionRepository(runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(), authorization)
+			if operation == "list" {
+				seed := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgauthlist", 0,
+					mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "List seed"}), request.IdempotencyKey+"-seed")
+				if _, err := seedRepository.CommitAction(ctx, seed); err != nil {
+					t.Fatalf("CommitAction(list seed) error = %v", err)
+				}
+			} else if operation == "replay" {
+				seedService, err := recordcollaboration.NewActionService(authorization, seedRepository)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if seeded, err := seedService.CreateAction(ctx, request); err != nil || seeded.Version != 1 {
+					t.Fatalf("CreateAction(replay seed) = (%#v, %v)", seeded, err)
+				}
+			}
+			repository := NewPostgresRecordActionRepository(runtimePool, postgresCollaborationSourceRevocationGate(fixture),
+				NewPostgresCollaborationMembershipReader(), authorization)
+			service, err := recordcollaboration.NewActionService(authorization, repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
+			var operationErr error
+			if operation == "list" {
+				var result []recordcollaboration.ActionRecord
+				result, operationErr = service.ListActions(ctx, recordcollaboration.ActionListRequest{Actor: actor, RecordID: parent.RecordID, Limit: 25})
+				if len(result) != 0 {
+					t.Fatalf("revoked ListActions returned content: %#v", result)
+				}
+			} else {
+				var result recordcollaboration.ActionMutationResult
+				result, operationErr = service.CreateAction(ctx, request)
+				if result != (recordcollaboration.ActionMutationResult{}) {
+					t.Fatalf("revoked CreateAction returned content: %#v", result)
+				}
+			}
+			if !errors.Is(operationErr, ErrRecordSubjectUnavailable) {
+				t.Fatalf("%s source revocation error = %v, want ErrRecordSubjectUnavailable", operation, operationErr)
+			}
+			assertPostgresCollaborationSourceRevoked(t, ctx, fixture)
+			after := readPostgresActionAuthorizationCounts(t, ctx, fixture, parent.RecordID, request.IdempotencyKey)
+			if after != before {
+				t.Fatalf("%s authorization failure durable counts = %#v, want unchanged %#v", operation, after, before)
+			}
+		})
 	}
 }
 
@@ -198,14 +280,13 @@ func TestPostgresIntegrationRecordActionsRequireCurrentActorMembership(t *testin
 		for _, operation := range []string{"create", "transition", "list"} {
 			t.Run(membership+"/"+operation, func(t *testing.T) {
 				ctx := context.Background()
-				fixture := newRecordsPostgresFixture(t, ctx)
+				fixture := newAdmittedCoreRecordFixture(t, ctx)
 				seedCollaborationRevisionUsers(t, ctx, fixture)
-				parent := seedPostgresActionParent(t, ctx, fixture,
-					"rec_pgactionmember"+membership+operation, "actions-member-parent-"+membership+"-"+operation)
+				parent := seedPostgresActionParent(t, ctx, fixture, "actions-member-parent-"+membership+"-"+operation)
 				runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-actions-member-"+membership+"-"+operation, 2)
 				repository := NewPostgresRecordActionRepository(
-					runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-					newPostgresWatchAuthorizationSource(t, runtimePool),
+					runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+					newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate),
 				)
 				allowedActor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
 				actor := allowedActor
@@ -280,15 +361,15 @@ func TestPostgresIntegrationRecordActionsRequireCurrentActorMembership(t *testin
 
 func TestPostgresIntegrationRecordActionsConcurrentSameVersionHasOneWinner(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgactionrace", "actions-race-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "actions-race-parent")
 	seedPool := fixture.openDirectRuntimePool(t, ctx, "record-actions-race-seed", 1)
 	seedRepository := NewPostgresRecordActionRepository(
 		seedPool,
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 		NewPostgresCollaborationMembershipReader(),
-		newPostgresWatchAuthorizationSource(t, seedPool),
+		newRecordsPostgresAuthorization(t, seedPool, fixture.admissionGate),
 	)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgrace", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Race"}), "actions-race-create")
@@ -311,9 +392,9 @@ func TestPostgresIntegrationRecordActionsConcurrentSameVersionHasOneWinner(t *te
 		pool := fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-actions-race-%d", index), 1)
 		repository := NewPostgresRecordActionRepository(
 			pool,
-			allowRecordPlatformAdmissionGate,
+			fixture.admissionGate,
 			NewPostgresCollaborationMembershipReader(),
-			newPostgresWatchAuthorizationSource(t, pool),
+			newRecordsPostgresAuthorization(t, pool, fixture.admissionGate),
 		)
 		command := command
 		go func() {
@@ -370,15 +451,15 @@ func TestPostgresIntegrationRecordActionsConcurrentSameVersionHasOneWinner(t *te
 
 func TestPostgresIntegrationRecordActionEventFailureRollsBackActionAndPlatformFacts(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgactionrollback", "actions-rollback-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "actions-rollback-parent")
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-actions-rollback", 1)
 	repository := NewPostgresRecordActionRepository(
 		runtimePool,
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 		NewPostgresCollaborationMembershipReader(),
-		newPostgresWatchAuthorizationSource(t, runtimePool),
+		newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate),
 	)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgrollback", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Rollback"}), "actions-rollback-create")
@@ -428,15 +509,15 @@ func TestPostgresIntegrationRecordActionEventFailureRollsBackActionAndPlatformFa
 
 func TestPostgresIntegrationRecordActionMaximumPersistedVersionConflictsWithoutWrites(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgactionmaxver", "actions-maxver-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "actions-maxver-parent")
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-actions-maxver", 1)
 	repository := NewPostgresRecordActionRepository(
 		runtimePool,
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 		NewPostgresCollaborationMembershipReader(),
-		newPostgresWatchAuthorizationSource(t, runtimePool),
+		newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate),
 	)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgmaxver", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Maximum version"}), "actions-maxver-create")
@@ -529,19 +610,6 @@ func assertPostgresActionAuthorizationFailureLeftNoWrites(
 	}
 }
 
-func actionSubjectResolutionStep(t *testing.T, authorization recordauth.SourceAuthorization) watchSubjectResolutionStep {
-	t.Helper()
-	identity, err := records.NewSubjectIdentitySnapshot(records.SubjectKindVPS, map[string]string{"display_name": "VPS"})
-	if err != nil {
-		t.Fatalf("NewSubjectIdentitySnapshot() error = %v", err)
-	}
-	return watchSubjectResolutionStep{resolved: records.ResolvedSubject{
-		ProjectID: recordauth.ProjectIDDefault, StableID: testStoreRecordVPSID,
-		IdentitySnapshot: identity, LiveRoute: "/vps/" + testStoreRecordVPSID,
-		CaptureAuthorization: authorization,
-	}}
-}
-
 type postgresActionAuthorizationCounts struct {
 	actions     int
 	events      int
@@ -573,17 +641,33 @@ func readPostgresActionAuthorizationCounts(
 	return counts
 }
 
-func seedPostgresActionParent(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, recordID, key string) records.RevisionCommitResult {
+func seedPostgresActionParent(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, key string) records.RevisionCommitResult {
 	t.Helper()
-	repository := newRecordsPostgresRepository(t, fixture.openDirectRuntimePool(t, ctx, key+"-seed", 1))
-	result, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, "Action parent"), key,
-	))
+	seedPostgresCollaborationSource(t, ctx, fixture)
+	runtime := fixture.openDirectRuntimePool(t, ctx, key+"-seed", 1)
+	repository, err := NewPostgresRecordRepository(runtime, fixture.admissionGate, nil, newRecordsPostgresAuthorization(t, runtime, fixture.admissionGate), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtime, Gate: fixture.admissionGate},
+		recordsPostgresCompleteRevisionInput(t, "Action parent"), key)
+	result, err := repository.CommitRevision(ctx, command)
 	if err != nil {
 		t.Fatalf("CommitRevision(parent) error = %v", err)
 	}
 	return result
+}
+
+// The stored collaboration revision refers to this real source. Bootstrap owns
+// fixture setup; runtime is not granted any authority-table write privilege.
+func seedPostgresCollaborationSource(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture) {
+	t.Helper()
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.vps_assets (vps_id, display_name, lifecycle_status)
+		values ($1, 'PostgreSQL VPS', 'active')
+		on conflict (vps_id) do nothing`, testStoreRecordVPSID); err != nil {
+		t.Fatalf("seed collaboration VPS source: %v", err)
+	}
 }
 
 func postgresActionCommand(
@@ -623,7 +707,7 @@ func newPostgresActionRepositoryForTest(
 ) *PostgresRecordActionRepository {
 	t.Helper()
 	return NewPostgresRecordActionRepository(
-		pool, gate, NewPostgresCollaborationMembershipReader(), newPostgresWatchAuthorizationSource(t, pool),
+		pool, gate, NewPostgresCollaborationMembershipReader(), newRecordsPostgresAuthorization(t, pool, gate),
 	)
 }
 

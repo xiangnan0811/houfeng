@@ -128,7 +128,7 @@ func TestPortabilityImportRestartMinIORejectsAlteredDestinationBeforeWrite(t *te
 	fixture.imports.plans[fixture.preview.PlanID] = plan
 	fixture.imports.mu.Unlock()
 
-	rejectImportRestartMinIOApply(t, fixture, ErrInvalidArchive)
+	rejectImportRestartMinIOApply(t, fixture, ErrImportCASConflict)
 }
 
 func TestPortabilityImportRestartMinIORejectsAlteredPlanDigestBeforeWrite(t *testing.T) {
@@ -141,7 +141,7 @@ func TestPortabilityImportRestartMinIORejectsAlteredPlanDigestBeforeWrite(t *tes
 	fixture.imports.plans[fixture.preview.PlanID] = plan
 	fixture.imports.mu.Unlock()
 
-	rejectImportRestartMinIOApply(t, fixture, ErrInvalidArchive)
+	rejectImportRestartMinIOApply(t, fixture, ErrImportCASConflict)
 }
 
 func TestPortabilityImportRestartMinIORejectsAlteredArchiveDigestBeforeWrite(t *testing.T) {
@@ -154,7 +154,7 @@ func TestPortabilityImportRestartMinIORejectsAlteredArchiveDigestBeforeWrite(t *
 	fixture.imports.jobs[job.ImportJobID] = job
 	fixture.imports.mu.Unlock()
 
-	rejectImportRestartMinIOApply(t, fixture, ErrInvalidArchive)
+	rejectImportRestartMinIOApply(t, fixture, ErrImportCASConflict)
 }
 
 func TestPortabilityImportRestartMinIORejectsLegacyMissingDestinationBeforeRestage(t *testing.T) {
@@ -287,10 +287,12 @@ func newImportRestartMinIOService(
 	service, _ := mustPortabilityService(t, portabilityHarness{enabled: true})
 	service.backendKind = "s3"
 	service.imports = imports
+	attachImportBirth(t, service, imports)
 	service.importer = importer
 	service.attachmentBlobs = blob
 	service.rebuilder = &importRebuildStub{}
-	service.staging = NewLeasedBlobStore(blob)
+	service.attachmentWriter = &portabilityMemoryWriter{blob: blob}
+	service.staging = NewLeasedBlobStore(blob, service.attachmentWriter)
 	return service
 }
 

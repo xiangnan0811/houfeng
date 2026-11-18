@@ -20,7 +20,7 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 
 	var seenStatuses []string
 	var seenLabels []string
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -76,7 +76,7 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 				}},
 			}}, nil
 		},
-	}}
+	})
 
 	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 func TestBuildSyncPlanIncludesIPQualityPlanFromSettings(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -150,7 +150,7 @@ func TestBuildSyncPlanIncludesIPQualityPlanFromSettings(t *testing.T) {
 				return nil
 			}}
 		},
-	}}
+	})
 
 	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
@@ -192,7 +192,7 @@ func TestBuildSyncPlanNegotiatesIPQualityProduct(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+			repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 					if sql != selectAgentPlanMonitoringInstanceLabelsSQL || args[0] != "mi_001" {
 						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -204,7 +204,7 @@ func TestBuildSyncPlanNegotiatesIPQualityProduct(t *testing.T) {
 						return nil
 					}}
 				},
-			}}
+			})
 			plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 			if err != nil {
 				t.Fatalf("BuildSyncPlan() error = %v", err)
@@ -227,7 +227,7 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 	tlsTier6h := agentapi.FrequencyTier6h
 	tlsTier5m := agentapi.FrequencyTier5m
 
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -314,7 +314,7 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 				}},
 			}}, nil
 		},
-	}}
+	})
 
 	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
@@ -338,7 +338,7 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -383,7 +383,7 @@ func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 				}},
 			}}, nil
 		},
-	}}
+	})
 
 	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
@@ -400,11 +400,11 @@ func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 func TestBuildSyncPlanReturnsMonitoringInstanceNotFound(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeAgentPlanRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 		},
-	}}
+	})
 
 	_, err := repo.BuildSyncPlan(context.Background(), "mi_missing")
 	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
@@ -415,7 +415,7 @@ func TestBuildSyncPlanReturnsMonitoringInstanceNotFound(t *testing.T) {
 func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessMonitoringInstance(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = nil
@@ -424,7 +424,7 @@ func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessMonitorin
 				return nil
 			}}
 		},
-	}}
+	})
 
 	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
@@ -438,22 +438,6 @@ func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessMonitorin
 	}
 }
 
-func TestBuildSyncPlanSQLIncludesEnabledAndLabelOverlapFilters(t *testing.T) {
-	t.Parallel()
-
-	if !json.Valid([]byte(`{"probe_kind":"http"}`)) {
-		t.Fatal("json sanity check failed")
-	}
-	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "p.enabled = true") {
-		t.Fatalf("selectAgentPlanAssignmentsSQL = %q, want enabled filter", selectAgentPlanAssignmentsSQL)
-	}
-	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "t.execution_monitoring_instance_labels && $2") {
-		t.Fatalf("selectAgentPlanAssignmentsSQL = %q, want label overlap filter", selectAgentPlanAssignmentsSQL)
-	}
-	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "t.run_status = any($1)") {
-		t.Fatalf("selectAgentPlanAssignmentsSQL = %q, want run_status filter", selectAgentPlanAssignmentsSQL)
-	}
-}
 func TestResolveAgentPlanSettingsUsesCanonicalDefaultsWhenRowMissing(t *testing.T) {
 	t.Parallel()
 
@@ -500,7 +484,7 @@ func TestBuildSyncPlanAcceptsOverrideAgainstPersistedIncidentDefaults(t *testing
 		}},
 	}
 
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -525,7 +509,7 @@ func TestBuildSyncPlanAcceptsOverrideAgainstPersistedIncidentDefaults(t *testing
 			}
 			return &fakeAgentPlanRows{}, nil
 		},
-	}}
+	})
 
 	if _, err := repo.BuildSyncPlan(context.Background(), "mi_001"); err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v, want valid persisted-policy snapshot", err)
@@ -571,7 +555,7 @@ func TestBuildSyncPlanRejectsMalformedPersistedPolicy(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+			repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 				queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
 					if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -596,7 +580,7 @@ func TestBuildSyncPlanRejectsMalformedPersistedPolicy(t *testing.T) {
 					}
 					return &fakeAgentPlanRows{}, nil
 				},
-			}}
+			})
 
 			_, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 			if err == nil {
@@ -815,7 +799,7 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T
 			t.Parallel()
 
 			queryCalled := false
-			repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+			repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 					if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -840,7 +824,7 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T
 					queryCalled = true
 					return &fakeAgentPlanRows{}, nil
 				},
-			}}
+			})
 
 			plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 			if err != nil {
@@ -868,7 +852,7 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T
 func TestBuildSyncPlanMarksMonitoringInstanceMaintenanceContext(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+	repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
@@ -922,7 +906,7 @@ func TestBuildSyncPlanMarksMonitoringInstanceMaintenanceContext(t *testing.T) {
 				}},
 			}}, nil
 		},
-	}}
+	})
 
 	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
@@ -954,12 +938,97 @@ func mustMarshalAgentPlanJSON(t *testing.T, value any) []byte {
 	return data
 }
 
+func TestBuildSyncPlanTransactionFailuresReturnNoPlan(t *testing.T) {
+	t.Parallel()
+	failure := errors.New("database authority unavailable")
+	for _, stage := range []string{"begin", "admission", "source", "snapshot", "commit"} {
+		t.Run(stage, func(t *testing.T) {
+			tx := &fakeCreateIdempotencyTx{
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					return fakeAgentPlanRow{scan: func(dest ...any) error {
+						if stage == "snapshot" {
+							return failure
+						}
+						return nil
+					}}
+				},
+			}
+			if stage == "admission" {
+				tx.sourceState.admissionErr = failure
+			}
+			if stage == "source" {
+				tx.sourceState.queryErr = failure
+			}
+			if stage == "commit" {
+				tx.commit = func(context.Context) error { return failure }
+			}
+			repo := &PostgresAgentPlanRepository{beginTx: func(_ context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+				if options.IsoLevel != pgx.ReadCommitted {
+					t.Fatalf("isolation = %q, want read committed", options.IsoLevel)
+				}
+				if stage == "begin" {
+					return nil, failure
+				}
+				return tx, nil
+			}}
+			plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
+			if !errors.Is(err, failure) {
+				t.Fatalf("BuildSyncPlan() error = %v, want database failure", err)
+			}
+			if plan.HostSampleFrequencyTier != "" || plan.IPQualityPlan != nil || len(plan.ProbeAssignments) != 0 {
+				t.Fatalf("failed transaction returned a usable plan: %#v", plan)
+			}
+			if stage != "begin" && tx.rollbackCalls == 0 {
+				t.Fatal("failed plan transaction was not rolled back")
+			}
+			if stage != "commit" && tx.commitCalls != 0 {
+				t.Fatal("failed plan transaction attempted commit")
+			}
+		})
+	}
+}
+
+func TestBuildSyncPlanRejectsUnavailableInstanceAndParent(t *testing.T) {
+	t.Parallel()
+	for _, blocked := range []string{"monitoring_instance/mi_001", "vps/vps_001"} {
+		t.Run(blocked, func(t *testing.T) {
+			repo := newFakeAgentPlanRepository(fakeAgentPlanQueryer{
+				sourceState: fakeSourceWriterState{
+					blocked: map[string]bool{blocked: true},
+					parents: map[string]string{"mi_001": "vps_001"},
+				},
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					t.Fatal("unavailable source reached plan snapshot")
+					return nil
+				},
+			})
+			if _, err := repo.BuildSyncPlan(context.Background(), "mi_001"); !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+				t.Fatalf("BuildSyncPlan() error = %v, want source unavailable", err)
+			}
+		})
+	}
+}
+
+func newFakeAgentPlanRepository(queryer fakeAgentPlanQueryer) *PostgresAgentPlanRepository {
+	return &PostgresAgentPlanRepository{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+		return &fakeVPSAssetTx{
+			sourceState: queryer.sourceState,
+			queryRow:    queryer.QueryRow,
+			query:       queryer.Query,
+		}, nil
+	}}
+}
+
 type fakeAgentPlanQueryer struct {
-	queryRow func(context.Context, string, ...any) pgx.Row
-	query    func(context.Context, string, ...any) (pgx.Rows, error)
+	sourceState fakeSourceWriterState
+	queryRow    func(context.Context, string, ...any) pgx.Row
+	query       func(context.Context, string, ...any) (pgx.Rows, error)
 }
 
 func (f fakeAgentPlanQueryer) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if row, ok := f.sourceState.queryRow(sql, args...); ok {
+		return row
+	}
 	return f.queryRow(ctx, sql, args...)
 }
 

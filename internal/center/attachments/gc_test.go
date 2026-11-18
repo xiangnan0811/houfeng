@@ -5,52 +5,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 )
 
-func TestBlobGCWorkerCommitsClaimBeforePhysicalDeleteAndCompletion(t *testing.T) {
-	now := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
-	claim := blobGCTestClaim(now, blobGCTestObject(0x11, "local-gc-v1", 9, BackendKindLocal))
-	events := make([]string, 0, 3)
-	repository := &blobGCRepositoryStub{claim: &claim, events: &events}
-	blob := &blobGCStoreStub{events: &events}
-	worker, err := NewBlobGCWorker(repository, blob, BlobGCWorkerOptions{
-		ProjectID: "default", BackendKind: BackendKindLocal, OwnerID: "gc_worker_1",
-		Now: func() time.Time { return now },
-	})
-	if err != nil {
-		t.Fatalf("NewBlobGCWorker() error = %v", err)
-	}
-
-	collected, err := worker.RunOnce(context.Background())
-	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
-	}
-	if !collected {
-		t.Fatal("RunOnce() collected = false, want true")
-	}
-	wantEvents := []string{"claim_committed", "physical_delete", "completion_committed"}
-	if !reflect.DeepEqual(events, wantEvents) {
-		t.Fatalf("RunOnce() events = %#v, want %#v", events, wantEvents)
-	}
-	if len(repository.claimRequests) != 1 {
-		t.Fatalf("claim requests = %d, want 1", len(repository.claimRequests))
-	}
-	request := repository.claimRequests[0]
-	if request.Mode != BlobGCPurgeModeOrdinary || request.ProjectID != "default" ||
-		request.BackendKind != BackendKindLocal || request.OwnerID != "gc_worker_1" ||
-		request.OwnerLeaseDuration != DefaultBlobGCLeaseDuration ||
-		!request.OrphanedBefore.Equal(now.Add(-DefaultBlobGCOrphanGracePeriod)) ||
-		request.Object != (BlobObject{}) {
-		t.Fatalf("ordinary claim request = %#v", request)
-	}
-	if len(repository.completions) != 1 || repository.completions[0].Claim != claim ||
-		repository.completions[0].Receipt.Version != objectVersionFromBlobObject(claim.Candidate.Object) {
-		t.Fatalf("completion = %#v", repository.completions)
-	}
-}
+// These cases exercise the remote exact-version worker. Local cleanup uses
+// LocalCleanupCoordinator and its managed PostgreSQL/process regression tests.
 
 func TestBlobGCWorkerPermanentPurgeBypassesOnlyWatermark(t *testing.T) {
 	now := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
@@ -83,13 +43,13 @@ func TestBlobGCWorkerPermanentPurgeBypassesOnlyWatermark(t *testing.T) {
 
 func TestBlobGCWorkerSchedulesRetryAfterPhysicalDeleteFailure(t *testing.T) {
 	now := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
-	claim := blobGCTestClaim(now, blobGCTestObject(0x33, "local-gc-v3", 12, BackendKindLocal))
+	claim := blobGCTestClaim(now, blobGCTestObject(0x33, "s3-gc-v3", 12, BackendKindS3))
 	claim.OwnerID = "gc_worker_3"
 	deleteErr := errors.New("injected delete failure")
 	repository := &blobGCRepositoryStub{claim: &claim}
 	blob := &blobGCStoreStub{deleteErr: deleteErr}
 	worker, err := NewBlobGCWorker(repository, blob, BlobGCWorkerOptions{
-		ProjectID: "default", BackendKind: BackendKindLocal, OwnerID: "gc_worker_3",
+		ProjectID: "default", BackendKind: BackendKindS3, OwnerID: "gc_worker_3",
 		Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -111,12 +71,12 @@ func TestBlobGCWorkerSchedulesRetryAfterPhysicalDeleteFailure(t *testing.T) {
 
 func TestBlobGCWorkerCompletesAlreadyAbsentExactObject(t *testing.T) {
 	now := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
-	claim := blobGCTestClaim(now, blobGCTestObject(0x44, "local-gc-v4", 12, BackendKindLocal))
+	claim := blobGCTestClaim(now, blobGCTestObject(0x44, "s3-gc-v4", 12, BackendKindS3))
 	claim.OwnerID = "gc_worker_4"
 	repository := &blobGCRepositoryStub{claim: &claim}
 	blob := &blobGCStoreStub{alreadyAbsent: true}
 	worker, err := NewBlobGCWorker(repository, blob, BlobGCWorkerOptions{
-		ProjectID: "default", BackendKind: BackendKindLocal, OwnerID: "gc_worker_4",
+		ProjectID: "default", BackendKind: BackendKindS3, OwnerID: "gc_worker_4",
 		Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -159,13 +119,13 @@ func TestBlobGCWorkerResolvesCompletionCommitAmbiguity(t *testing.T) {
 
 func TestBlobGCWorkerRejectsMismatchedPhysicalDeleteReceipt(t *testing.T) {
 	now := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
-	claim := blobGCTestClaim(now, blobGCTestObject(0x66, "local-gc-v6", 12, BackendKindLocal))
+	claim := blobGCTestClaim(now, blobGCTestObject(0x66, "s3-gc-v6", 12, BackendKindS3))
 	claim.OwnerID = "gc_worker_6"
-	wrong := objectVersionFromBlobObject(blobGCTestObject(0x77, "local-wrong-v1", 12, BackendKindLocal))
+	wrong := objectVersionFromBlobObject(blobGCTestObject(0x77, "s3-wrong-v1", 12, BackendKindS3))
 	repository := &blobGCRepositoryStub{claim: &claim}
 	blob := &blobGCStoreStub{receiptVersion: wrong}
 	worker, err := NewBlobGCWorker(repository, blob, BlobGCWorkerOptions{
-		ProjectID: "default", BackendKind: BackendKindLocal, OwnerID: "gc_worker_6", Now: func() time.Time { return now },
+		ProjectID: "default", BackendKind: BackendKindS3, OwnerID: "gc_worker_6", Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("NewBlobGCWorker() error = %v", err)
@@ -182,7 +142,7 @@ func TestBlobGCWorkerRejectsMismatchedPhysicalDeleteReceipt(t *testing.T) {
 func TestBlobGCWorkerDoesNotClaimAfterCancellation(t *testing.T) {
 	repository := &blobGCRepositoryStub{}
 	worker, err := NewBlobGCWorker(repository, &blobGCStoreStub{}, BlobGCWorkerOptions{
-		ProjectID: "default", BackendKind: BackendKindLocal, OwnerID: "gc_worker_7",
+		ProjectID: "default", BackendKind: BackendKindS3, OwnerID: "gc_worker_7",
 	})
 	if err != nil {
 		t.Fatalf("NewBlobGCWorker() error = %v", err)

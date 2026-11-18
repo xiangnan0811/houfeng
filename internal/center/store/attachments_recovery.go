@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -74,11 +75,12 @@ func (repository *PostgresAttachmentRepository) VerifyRestoredAttachmentBlob(
 	var version string
 	var sizeBytes int64
 	var backendKind attachments.BackendKind
+	var namespaceID string
 	err = tx.QueryRow(ctx, `
-		select sha256_digest, object_version, size_bytes, backend_kind
+		select sha256_digest, object_version, size_bytes, backend_kind, coalesce(namespace_id::text, '')
 		from public.blob_objects
 		where blob_key = $1`, object.Key,
-	).Scan(&digest, &version, &sizeBytes, &backendKind)
+	).Scan(&digest, &version, &sizeBytes, &backendKind, &namespaceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return attachments.ErrRestoredBlobMismatch
 	}
@@ -86,7 +88,7 @@ func (repository *PostgresAttachmentRepository) VerifyRestoredAttachmentBlob(
 		return fmt.Errorf("read restored attachment Blob metadata: %w", err)
 	}
 	if len(digest) != sha256.Size || version != object.ObjectVersion || sizeBytes != object.SizeBytes ||
-		backendKind != object.BackendKind || !bytes.Equal(digest, object.SHA256[:]) {
+		backendKind != object.BackendKind || namespaceID != object.NamespaceID || !bytes.Equal(digest, object.SHA256[:]) {
 		return attachments.ErrRestoredBlobMismatch
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -99,7 +101,7 @@ func readAttachmentRecoveryInventory(
 	ctx context.Context,
 	tx attachmentTx,
 ) (attachments.AttachmentRecoveryInventory, error) {
-	var blobKeys, blobVersions, blobBackends []string
+	var blobKeys, blobVersions, blobBackends, blobNamespaces []string
 	var blobDigests [][]byte
 	var blobSizes []int64
 	if err := tx.QueryRow(ctx, `
@@ -107,13 +109,14 @@ func readAttachmentRecoveryInventory(
 		       coalesce(array_agg(object_version order by blob_key, object_version), array[]::text[]),
 		       coalesce(array_agg(sha256_digest order by blob_key, object_version), array[]::bytea[]),
 		       coalesce(array_agg(size_bytes order by blob_key, object_version), array[]::bigint[]),
-		       coalesce(array_agg(backend_kind order by blob_key, object_version), array[]::text[])
+		       coalesce(array_agg(backend_kind order by blob_key, object_version), array[]::text[]),
+		       coalesce(array_agg(coalesce(namespace_id::text, '') order by blob_key, object_version), array[]::text[])
 		from public.blob_objects`,
-	).Scan(&blobKeys, &blobVersions, &blobDigests, &blobSizes, &blobBackends); err != nil {
+	).Scan(&blobKeys, &blobVersions, &blobDigests, &blobSizes, &blobBackends, &blobNamespaces); err != nil {
 		return attachments.AttachmentRecoveryInventory{}, fmt.Errorf("enumerate attachment recovery Blobs: %w", err)
 	}
 	if len(blobKeys) != len(blobVersions) || len(blobKeys) != len(blobDigests) ||
-		len(blobKeys) != len(blobSizes) || len(blobKeys) != len(blobBackends) {
+		len(blobKeys) != len(blobSizes) || len(blobKeys) != len(blobBackends) || len(blobKeys) != len(blobNamespaces) {
 		return attachments.AttachmentRecoveryInventory{}, fmt.Errorf(
 			"%w: inconsistent Blob inventory", attachments.ErrRecoveryContractFailure,
 		)
@@ -136,6 +139,7 @@ func readAttachmentRecoveryInventory(
 			ObjectVersion: blobVersions[index],
 			SizeBytes:     blobSizes[index],
 			BackendKind:   attachments.BackendKind(blobBackends[index]),
+			NamespaceID:   blobNamespaces[index],
 		}
 		copy(inventory.Blobs[index].SHA256[:], blobDigests[index])
 	}
@@ -149,6 +153,13 @@ func readAttachmentRecoveryInventory(
 		                 from public.content_processor_workspaces), array[]::text[])`,
 	).Scan(&inventory.UploadIDs, &inventory.ProcessorJobIDs, &inventory.WorkspaceIDs); err != nil {
 		return attachments.AttachmentRecoveryInventory{}, fmt.Errorf("enumerate attachment recovery partials: %w", err)
+	}
+	var localRows []byte
+	if err := tx.QueryRow(ctx, `select public.local_blob_recovery_inventory()`).Scan(&localRows); err != nil {
+		return attachments.AttachmentRecoveryInventory{}, fmt.Errorf("enumerate local recovery responsibilities: %w", err)
+	}
+	if err := json.Unmarshal(localRows, &inventory.LocalDB); err != nil {
+		return attachments.AttachmentRecoveryInventory{}, fmt.Errorf("decode local recovery responsibilities: %w", err)
 	}
 	return inventory, nil
 }

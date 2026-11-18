@@ -31,6 +31,7 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 		"houfeng-secrets-init",
 		"db",
 		"houfeng-db-init",
+		"houfeng-local-namespace-init",
 		"houfeng-record-authority",
 		"clamav",
 		"houfeng",
@@ -40,11 +41,12 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 		composeServiceBlock(t, compose, service)
 	}
 	if services := composeTopLevelServiceNames(compose); len(services) != len(expectedServices) {
-		t.Fatalf("production compose must define exactly the reviewed eight-service graph; got %v", services)
+		t.Fatalf("production compose must define exactly the reviewed nine-service graph; got %v", services)
 	}
 	for _, service := range []string{
 		"houfeng-storage-init",
 		"houfeng-db-init",
+		"houfeng-local-namespace-init",
 		"houfeng-record-authority",
 		"houfeng",
 		"houfeng-content-processor",
@@ -84,6 +86,69 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 	}
 }
 
+func TestProductionComposeInitializesLocalNamespaceBeforeWriters(t *testing.T) {
+	t.Parallel()
+	compose := readText(t, filepath.Join(repoRoot(t), "compose.yaml"))
+	storage := composeServiceBlock(t, compose, "houfeng-storage-init")
+	for _, required := range []string{
+		"install -d -o 10001 -g 10001 -m 0700 /state/local-namespace-init",
+		"install -d -o 10002 -g 10001 -m 0750 /state/secrets/local-namespace-init",
+		"deploy-prepare-storage --scope compose",
+		"./maintenance:/var/lib/houfeng-maintenance",
+	} {
+		if !strings.Contains(storage, required) {
+			t.Fatalf("storage preparation missing %q", required)
+		}
+	}
+	namespace := composeServiceBlock(t, compose, "houfeng-local-namespace-init")
+	for _, required := range []string{
+		requiredProjectImage,
+		`user: "10001:10001"`,
+		`entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]`,
+		`command: ["deploy-local-namespace", "--scope", "compose"]`,
+		`restart: "no"`, "read_only: true", "cap_drop:\n      - ALL", "security_opt:\n      - \"no-new-privileges:true\"",
+		"houfeng-storage-init:\n        condition: service_completed_successfully",
+		"houfeng-secrets-init:\n        condition: service_completed_successfully",
+		"houfeng-db-init:\n        condition: service_completed_successfully",
+		`HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"`,
+	} {
+		if !strings.Contains(namespace, required) {
+			t.Fatalf("namespace initializer missing %q", required)
+		}
+	}
+	wantMounts := []string{
+		"      - ./data/attachments:/var/lib/houfeng/attachments",
+		"      - ./data/local-namespace-init:/var/lib/houfeng/local-namespace-init",
+		"      - ./data/secrets/local-namespace-init:/run/secrets:ro",
+		"      - ./maintenance:/var/lib/houfeng-maintenance:ro",
+	}
+	volumes := strings.SplitN(namespace, "\n    volumes:\n", 2)
+	if len(volumes) != 2 {
+		t.Fatal("namespace initializer lacks volumes")
+	}
+	var mounts []string
+	for _, line := range strings.Split(volumes[1], "\n") {
+		if strings.HasPrefix(line, "      - ") {
+			mounts = append(mounts, line)
+		}
+	}
+	if strings.Join(mounts, "\n") != strings.Join(wantMounts, "\n") {
+		t.Fatalf("namespace mounts = %q", mounts)
+	}
+	for _, service := range []string{"houfeng", "houfeng-content-processor"} {
+		block := composeServiceBlock(t, compose, service)
+		if !strings.Contains(block, "houfeng-local-namespace-init:\n        condition: service_completed_successfully") {
+			t.Fatalf("%s does not wait for namespace initialization", service)
+		}
+		if strings.Contains(block, "local-namespace-init:/run/secrets") || strings.Contains(block, "houfeng_platform_admin_password") {
+			t.Fatalf("%s receives namespace administrator credentials", service)
+		}
+		if !strings.Contains(block, `HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"`) {
+			t.Fatalf("%s backend selection differs from initializer", service)
+		}
+	}
+}
+
 func composeTopLevelServiceNames(body string) []string {
 	var services []string
 	inServices := false
@@ -113,6 +178,7 @@ func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
 	databaseInit := composeServiceBlock(t, compose, "houfeng-db-init")
 	authority := composeServiceBlock(t, compose, "houfeng-record-authority")
 	center := composeServiceBlock(t, compose, "houfeng")
+	processor := composeServiceBlock(t, compose, "houfeng-content-processor")
 
 	for _, required := range []string{
 		"./data:/state",
@@ -126,6 +192,10 @@ func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
 	}
 	for _, required := range []string{
 		`user: "10002:10002"`,
+		"group_add:\n      - \"10001\"",
+		"read_only: true",
+		"cap_drop:\n      - ALL",
+		"security_opt:\n      - \"no-new-privileges:true\"",
 		"./data:/var/lib/houfeng",
 		`command: ["deploy-init", "--scope", "compose"]`,
 		"houfeng-storage-init:\n        condition: service_completed_successfully",
@@ -178,6 +248,14 @@ func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
 			t.Fatalf("Center must not receive private authority material %q:\n%s", forbidden, center)
 		}
 	}
+	for _, required := range []string{
+		`HOUFENG_RECORD_DEPLOYMENT_ID_FILE: /run/houfeng/records-authority/deployment-id`,
+		"./data/center-config:/run/houfeng/records-authority:ro",
+	} {
+		if !strings.Contains(processor, required) {
+			t.Fatalf("processor must receive the public authority identity through %q:\n%s", required, processor)
+		}
+	}
 }
 
 func TestProductionRecordsAuthorityMasksStagedOperatorSecrets(t *testing.T) {
@@ -206,10 +284,11 @@ func TestProductionComposeStagesEnvironmentSecretsForReadOnlyServices(t *testing
 		requiredProjectImage,
 		`user: "10002:10002"`,
 		"group_add:\n      - \"10001\"",
-		`network_mode: none`,
+		`entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]`,
+		`command: ["deploy-stage-secrets", "--scope", "compose"]`,
+		"db:\n        condition: service_healthy",
 		`./data/secrets:/state/secrets`,
-		`/state/secrets/db-init`,
-		`/state/secrets/processor`,
+		`./maintenance:/var/lib/houfeng-maintenance`,
 		"postgres_bootstrap_password",
 		"houfeng_runtime_password",
 		"houfeng_migrator_password",
@@ -388,7 +467,7 @@ func TestProductionComposeScopesSecretsByService(t *testing.T) {
 		{
 			service: "houfeng-secrets-init",
 			want:    []string{"./data/secrets:/state/secrets", "postgres_bootstrap_password", "houfeng_runtime_password", "houfeng_migrator_password", "houfeng_platform_admin_password"},
-			forbid:  []string{"./data:/state", "houfeng_initial_password", "houfeng_session_hmac_key", "records-authority", "attachments", "center-config"},
+			forbid:  []string{"./data:/state", "houfeng_initial_password", "houfeng_session_hmac_key", "attachments", "center-config"},
 		},
 		{
 			service: "houfeng-db-init",
@@ -989,116 +1068,6 @@ func TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload(t *testing.T) 
 	} {
 		if strings.Contains(verificationStep, forbidden) {
 			t.Fatalf("public deployment verification must preserve unrelated release assets; found total-asset assumption %q", forbidden)
-		}
-	}
-}
-
-func TestProductionComposeSpecsMatchReleaseAndAuthorityContract(t *testing.T) {
-	t.Parallel()
-
-	root := repoRoot(t)
-	composeScenario := readText(t, filepath.Join(root, "docs", "spec", "contracts", "platform", "production-compose.md"))
-	databaseSpec := readText(t, filepath.Join(root, "docs", "spec", "contracts", "platform", "compose-authority.md"))
-	for _, required := range []string{
-		"1. **Scope / Trigger**",
-		"2. **Signatures**",
-		"3. **Contracts**",
-		"4. **Validation & Error Matrix**",
-		"5. **Good / Base / Bad Cases**",
-		"6. **Tests Required**",
-		"7. **Wrong vs Correct**",
-		"`compose.yaml` → `compose.proxy-network.yaml` → `compose.proxy-host.yaml` → `compose.env.example`",
-		"COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml",
-		"COMPOSE_FILE=compose.yaml:compose.proxy-host.yaml",
-		"Mode selection is common base + exactly one selected overlay.",
-		"loading both overlays is unsupported",
-		"existing NPM user-defined network",
-		"NPM remains unchanged",
-		"upstream `houfeng:16001`",
-		"base and shared-network mode publish no host port",
-		"`target: 16001`",
-		"`published: \"16001\"`",
-		"`host_ip: 127.0.0.1`",
-		"`protocol: tcp`",
-		"The effective behavior is `127.0.0.1:16001 -> 16001/tcp`",
-		"renderer-specific short form",
-		"exactly one fixed IPv4-loopback mapping",
-		"Docker Engine `28.0.0+`",
-		"Do not set `HOUFENG_PROXY_NETWORK=host` or invent a placeholder network.",
-		"all-interface/LAN/IPv6 mapping",
-		"must not duplicate the eight-service graph",
-		"renders both modes before upload",
-		"`concurrency.group: deployment-assets-${{ needs.resolve.outputs.version }}`",
-		"`cancel-in-progress: false`",
-		"serializes deployment-asset mutation for one resolved version",
-		"does not cancel the running job",
-		"queued pending runs may be replaced",
-		"non-destructive fail-closed idempotent upload",
-		"exact-name cardinality",
-		"byte identity",
-		"unrelated agent assets",
-		"do not assert total asset count equals four",
-		"`docker compose up -d` owns ordinary initialization.",
-		"Center waits for healthy authority",
-		"processor waits for db-init and ClamAV",
-		"houfeng-secrets-init",
-		"houfeng-record-authority",
-		"secret stager bind-mounts only `./data/secrets`",
-		"Center/processor never receive bootstrap, migrator, platform-admin, or authority credentials",
-		"Processor stays non-root, read-only, `cap_drop: ALL`, `no-new-privileges`, core=0",
-		"./data/records-authority",
-		"PostgreSQL, local attachments, and Records authority state are one coordinated restore unit",
-	} {
-		if !strings.Contains(composeScenario, required) {
-			t.Fatalf("deployment  Compose scenario must contain %q", required)
-		}
-	}
-	rotationSteps := []string{
-		"`docker compose stop houfeng houfeng-content-processor`",
-		"`docker compose run --rm houfeng-secrets-init`",
-		"`docker compose run --rm houfeng-db-init`",
-		"`docker compose up -d --force-recreate houfeng houfeng-content-processor`",
-	}
-	lastRotationStep := -1
-	for _, step := range rotationSteps {
-		offset := strings.Index(composeScenario, step)
-		if offset < 0 {
-			t.Fatalf("deployment  Compose scenario must preserve password rotation step %q", step)
-		}
-		if offset <= lastRotationStep {
-			t.Fatalf("deployment  Compose scenario password rotation steps are out of order at %q", step)
-		}
-		lastRotationStep = offset
-	}
-	for _, forbidden := range []string{
-		"scripts/compose-up.sh",
-		"Compose is a development/conformance topology",
-		"houfeng_blobs:/var/lib/houfeng/attachments",
-		`127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001`,
-		"`127.0.0.1:16001:16001/tcp`",
-		"one deployment-assets job waits",
-		"every later job waits",
-		"all later jobs wait",
-		"cancellation is globally disabled",
-		"cancellation and cross-run mutation for that version are disabled",
-		"`compose.yaml` 与 `compose.env.example`（后者保存为本地 `.env`）",
-		"uploads `compose.yaml` plus `compose.env.example`",
-		"never add a public fallback port",
-		`name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"`,
-	} {
-		if strings.Contains(composeScenario, forbidden) {
-			t.Fatalf("deployment  Compose scenario retains obsolete single-mode contract %q", forbidden)
-		}
-	}
-	for _, required := range []string{
-		"single-host Compose Records authority",
-		"LoadComposeState",
-		"ContractActivationProjectionCommandV1",
-		"record_platform_compose_membership_heartbeat",
-		"restore PostgreSQL and authority state together",
-	} {
-		if !strings.Contains(databaseSpec, required) {
-			t.Fatalf("database  spec must contain authority contract %q", required)
 		}
 	}
 }

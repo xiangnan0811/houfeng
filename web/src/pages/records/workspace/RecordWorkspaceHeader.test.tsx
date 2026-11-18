@@ -18,6 +18,7 @@ function workspaceState(overrides: Partial<RecordWorkspaceState>): RecordWorkspa
     dirty: false,
     saving: false,
     publishing: false,
+    publicationPending: false,
     message: '',
     conflictPayload: null,
     conflictServer: null,
@@ -28,7 +29,7 @@ function workspaceState(overrides: Partial<RecordWorkspaceState>): RecordWorkspa
 }
 
 function renderHeader(state: RecordWorkspaceState, extra: { revisionId?: string } = {}) {
-  const callbacks = { onSave: vi.fn(), onPublish: vi.fn(), onExport: vi.fn(), onImport: vi.fn() }
+  const callbacks = { onSave: vi.fn(), onPublish: vi.fn(), onDiscardPublication: vi.fn(), onExport: vi.fn(), onImport: vi.fn() }
   render(
     <MemoryRouter>
       <RecordWorkspaceHeader
@@ -143,5 +144,24 @@ describe('RecordWorkspaceHeader', () => {
     expect(screen.queryByRole('link', { name: '横向比较' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '导出' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '导入' })).not.toBeInTheDocument()
+  })
+
+  it('offers only replay or explicit discard while a new-record publication is unresolved', () => {
+    const payload = { ...emptyRecordDraftPayload('usr_1'), title: '待确认的记录标题' }
+    const callbacks = renderHeader(workspaceState({ mode: 'new', publicationPending: true, payload, message: '上次发布结果尚未确认' }))
+
+    expect(screen.getByRole('heading', { name: '待确认的记录标题' })).toBeInTheDocument()
+    expect(screen.getByLabelText('待确认记录属性')).not.toHaveTextContent('主体')
+    expect(screen.getByLabelText('待确认记录属性')).toHaveTextContent('项目内')
+    expect(screen.getByRole('status')).toHaveTextContent('发布结果待确认')
+    expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
+    const retry = screen.getByRole('button', { name: '重试确认发布' })
+    retry.click()
+    const discard = screen.getByRole('button', { name: '放弃确认' })
+    discard.focus()
+    discard.click()
+    expect(retry).toHaveFocus()
+    expect(callbacks.onPublish).toHaveBeenCalledTimes(1)
+    expect(callbacks.onDiscardPublication).toHaveBeenCalledTimes(1)
   })
 })

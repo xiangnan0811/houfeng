@@ -44,7 +44,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 		runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 		assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-		successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+		successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 		if err != nil {
 			t.Fatalf("ConvergeAppACLCurrent() P64 custom genesis upgrade: %v", err)
 		}
@@ -58,7 +58,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 		afterUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 		assertAppACLCurrentManifestHistoryPrefix(t, beforeUpgrade.Manifest.Manifests, afterUpgrade.Manifest.Manifests)
 		beforeRepeat := afterUpgrade
-		repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+		repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 		if err != nil {
 			t.Fatalf("ConvergeAppACLCurrent() P64 custom genesis repeat: %v", err)
 		}
@@ -90,7 +90,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 		runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 		assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-		successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+		successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 		if err != nil {
 			t.Fatalf("ConvergeAppACLCurrent() P62 to P64 chain upgrade: %v", err)
 		}
@@ -104,7 +104,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 		afterUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 		assertAppACLCurrentManifestHistoryPrefix(t, beforeUpgrade.Manifest.Manifests, afterUpgrade.Manifest.Manifests)
 		beforeRepeat := afterUpgrade
-		repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+		repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 		if err != nil {
 			t.Fatalf("ConvergeAppACLCurrent() P62 to P64 chain repeat: %v", err)
 		}
@@ -201,18 +201,10 @@ func testAppACLCurrentReleasedTransitionRollback(t *testing.T, profile appACLCur
 			}
 
 			attempts := 0
-			_, err := convergeAppACLCurrentWithDependencies(
-				ctx,
-				func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-					attempts++
-					return begin(ctx, options)
-				},
-				fixture.runtimeRole,
-				fixture.adminRole,
-				migrations.FS,
-				appACLCurrentMigrationFragments,
-				dependencies,
-			)
+			_, err := convergeAppACLCurrentWithDependencies(ctx, func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+				attempts++
+				return begin(ctx, options)
+			}, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 			if !errors.Is(err, cutpoint) {
 				t.Fatalf("ConvergeAppACLCurrent() %s error = %v, want controlled rollback cutpoint", tc.kind, err)
 			}
@@ -235,7 +227,7 @@ func testAppACLCurrentReleasedTransitionRollback(t *testing.T, profile appACLCur
 			}
 			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-			retried, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			retried, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("ConvergeAppACLCurrent() retry after %s rollback: %v", tc.kind, err)
 			}
@@ -339,17 +331,9 @@ func seedAppACLCurrentReleasedGenesis(
 	if _, hasSweepColumn := profile.source.sources.sources[appACLCurrentP75Migration]; !hasSweepColumn {
 		dependencies.verifySweepColumn = func(context.Context, pgx.Tx) error { return nil }
 	}
-	manifest, err := convergeAppACLCurrentWithDependencies(
-		ctx,
-		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-			return migratorDB.BeginTx(ctx, options)
-		},
-		fixture.runtimeRole,
-		fixture.adminRole,
-		profile.fs,
-		profile.fragments,
-		dependencies,
-	)
+	manifest, err := convergeAppACLCurrentWithDependencies(ctx, func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+		return migratorDB.BeginTx(ctx, options)
+	}, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, profile.fs, profile.fragments, dependencies)
 	if err != nil {
 		t.Fatalf("converge exact P64 release profile genesis: %v", err)
 	}

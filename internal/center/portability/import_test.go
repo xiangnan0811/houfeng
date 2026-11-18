@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -150,7 +151,7 @@ func TestPortabilityImportPreservesUnsupportedReferenceWarning(t *testing.T) {
 func TestPortabilityImportRebindsIncludedAttachmentReference(t *testing.T) {
 	t.Parallel()
 
-	service, _, _ := mustImportService(t)
+	service, _, repository := mustImportService(t)
 	const sourceAttachmentID = "att_source00001"
 	archive := mustImportArchive(t, []ArchiveEntry{{
 		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
@@ -164,11 +165,8 @@ func TestPortabilityImportRebindsIncludedAttachmentReference(t *testing.T) {
 		t.Fatalf("DryRun() error = %v", err)
 	}
 	var targetAttachmentID string
-	remaps := make([]store.ImportRemap, 0, len(preview.Remaps))
+	remaps := repository.plans[preview.PlanID].Remaps
 	for _, remap := range preview.Remaps {
-		remaps = append(remaps, store.ImportRemap{
-			EntityKind: remap.EntityKind, SourceID: remap.SourceID, TargetID: remap.TargetID,
-		})
 		if remap.EntityKind == "attachment" && remap.SourceID == sourceAttachmentID {
 			targetAttachmentID = remap.TargetID
 		}
@@ -497,6 +495,7 @@ func mustImportService(t *testing.T) (*Service, *importWriterStub, *memoryImport
 	imports := newMemoryImportRepository()
 	writer.repo = imports
 	base.imports = imports
+	attachImportBirth(t, base, imports)
 	base.importer = writer
 	base.evidenceImports = &evidenceImportStub{}
 	base.rebuilder = rebuilder
@@ -504,14 +503,15 @@ func mustImportService(t *testing.T) (*Service, *importWriterStub, *memoryImport
 }
 
 type importWriterStub struct {
-	mu           sync.Mutex
-	writes       int
-	failOn       int
-	repo         *memoryImportRepository
-	preparations []evidence.RevisionPreparation
-	attachments  [][]string
-	importedAtts [][]attachments.ImportedAvailableAttachment
-	lastFinish   records.RevisionCommitFinish
+	mu            sync.Mutex
+	writes        int
+	failOn        int
+	repo          *memoryImportRepository
+	preparations  []evidence.RevisionPreparation
+	attachments   [][]string
+	importedAtts  [][]attachments.ImportedAvailableAttachment
+	allocationIDs []string
+	lastFinish    records.RevisionCommitFinish
 }
 
 func (stub *importWriterStub) ImportDocuments(ctx context.Context, requests []records.ImportDocumentRequest) ([]records.ImportedDocument, error) {
@@ -539,10 +539,16 @@ func (stub *importWriterStub) ImportDocumentsFinishing(
 	stub.preparations = stub.preparations[:0]
 	stub.attachments = stub.attachments[:0]
 	stub.importedAtts = stub.importedAtts[:0]
+	stub.allocationIDs = stub.allocationIDs[:0]
 	stub.lastFinish = finish
 	written := make([]records.ImportedDocument, 0, len(requests))
 	for _, request := range requests {
 		stub.writes++
+		if request.Allocation != nil {
+			stub.allocationIDs = append(stub.allocationIDs, request.Allocation.AllocationID)
+		} else {
+			stub.allocationIDs = append(stub.allocationIDs, "")
+		}
 		stub.preparations = append(stub.preparations, request.EvidencePreparation)
 		stub.attachments = append(stub.attachments, append([]string(nil), request.AttachmentIDs...))
 		stub.importedAtts = append(stub.importedAtts, append([]attachments.ImportedAvailableAttachment(nil), request.ImportedAttachments...))
@@ -563,6 +569,7 @@ func (stub *importWriterStub) ImportDocumentsFinishing(
 		}); err != nil {
 			return nil, err
 		}
+		stub.repo.birth.finish(requests)
 	}
 	return written, nil
 }
@@ -592,21 +599,25 @@ func (stub *importRebuildStub) RebuildImportedRecord(context.Context, string) er
 }
 
 type memoryImportRepository struct {
-	mu               sync.Mutex
-	jobs             map[string]store.RecordImportJob
-	byKey            map[string]string
-	plans            map[string]store.RecordImportPlan
-	artifacts        map[string]store.RecordImportArtifact
-	tombstones       map[[32]byte]struct{}
-	origins          map[[32]byte]store.RecordOrigin
-	failInsertOrigin bool
-	omitActorOnLoad  bool
+	mu                   sync.Mutex
+	jobs                 map[string]store.RecordImportJob
+	byKey                map[string]string
+	plans                map[string]store.RecordImportPlan
+	artifacts            map[string]store.RecordImportArtifact
+	tombstones           map[[32]byte]struct{}
+	origins              map[[32]byte]store.RecordOrigin
+	failInsertOrigin     bool
+	omitActorOnLoad      bool
+	birth                *memoryImportBirth
+	artifactReads        int
+	failSaveAfterPersist bool
 }
 
 func newMemoryImportRepository() *memoryImportRepository {
 	return &memoryImportRepository{
 		jobs: make(map[string]store.RecordImportJob), byKey: make(map[string]string),
 		plans: make(map[string]store.RecordImportPlan), artifacts: make(map[string]store.RecordImportArtifact),
+		birth:      newMemoryImportBirth(),
 		tombstones: make(map[[32]byte]struct{}), origins: make(map[[32]byte]store.RecordOrigin),
 	}
 }
@@ -634,7 +645,7 @@ func (repository *memoryImportRepository) ClaimImportJob(_ context.Context, inpu
 		return job, nil
 	}
 	job := store.RecordImportJob{
-		ImportJobID: "rij_memory1", ActorID: input.ActorID, JobState: store.RecordImportJobStateQuarantined,
+		ImportJobID: fmt.Sprintf("rij_memory%d", len(repository.jobs)+1), ActorID: input.ActorID, JobState: store.RecordImportJobStateQuarantined,
 		LockVersion: 1, ArchiveDigest: input.ArchiveDigest, DestinationSubject: input.DestinationSubject,
 		ExpiresAt: input.ExpiresAt,
 	}
@@ -647,17 +658,21 @@ func (repository *memoryImportRepository) SaveImportPlan(_ context.Context, inpu
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	job, ok := repository.jobs[input.ImportJobID]
-	if !ok || job.DestinationSubject != input.DestinationSubject {
+	if !ok || job.DestinationSubject != input.DestinationSubject || job.ActorID != input.Actor.UserID || job.ArchiveDigest != input.ArchiveDigest {
 		return store.RecordImportPlan{}, store.ErrRecordImportCASConflict
 	}
 	plan := store.RecordImportPlan{
-		ImportPlanID: "rip_memory1", ImportJobID: input.ImportJobID, PlanDigest: input.PlanDigest,
+		ImportPlanID: fmt.Sprintf("rip_memory%d", len(repository.plans)+1), ImportJobID: input.ImportJobID, PlanDigest: input.PlanDigest,
 		ObjectCount: input.ObjectCount, RemapCount: input.RemapCount, Remaps: input.Remaps,
 		Documents: input.Documents, DestinationSubject: input.DestinationSubject, ExpiresAt: input.ExpiresAt,
 	}
 	repository.plans[plan.ImportPlanID] = plan
 	job.PlanID = plan.ImportPlanID
 	repository.jobs[input.ImportJobID] = job
+	if repository.failSaveAfterPersist {
+		repository.failSaveAfterPersist = false
+		return store.RecordImportPlan{}, errors.New("plan commit response lost")
+	}
 	return plan, nil
 }
 
@@ -684,6 +699,13 @@ func (repository *memoryImportRepository) LoadImportJob(_ context.Context, jobID
 	return job, nil
 }
 
+func (repository *memoryImportRepository) CheckImportReplayReadFence(_ context.Context, _ recordauth.ActorScope, _ records.SubjectReference, current []records.CurrentRecordAuthorization) error {
+	if len(current) == 0 {
+		return store.ErrRecordImportCASConflict
+	}
+	return nil
+}
+
 func (repository *memoryImportRepository) PublishImportArtifact(_ context.Context, input store.PublishRecordImportArtifactInput) (store.RecordImportArtifact, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
@@ -696,6 +718,7 @@ func (repository *memoryImportRepository) PublishImportArtifact(_ context.Contex
 	artifact := store.RecordImportArtifact{
 		ArtifactID: "ria_memory1", ImportJobID: input.ImportJobID, ArtifactRole: input.ArtifactRole,
 		BackendKind: input.BackendKind, BlobKey: input.BlobKey, ObjectVersionID: input.ObjectVersionID,
+		NamespaceID: input.NamespaceID, ObligationID: input.ObligationID,
 		SHA256: input.SHA256, ByteSize: input.ByteSize, ExpiresAt: input.ExpiresAt,
 	}
 	repository.artifacts[input.ImportJobID] = artifact
@@ -705,6 +728,7 @@ func (repository *memoryImportRepository) PublishImportArtifact(_ context.Contex
 func (repository *memoryImportRepository) LoadImportArtifact(_ context.Context, jobID string) (store.RecordImportArtifact, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
+	repository.artifactReads++
 	artifact, ok := repository.artifacts[jobID]
 	if !ok {
 		return store.RecordImportArtifact{}, store.ErrRecordImportNotFound
@@ -894,6 +918,7 @@ func TestPortabilityApplyMapsFinalRevisionDestinationErrorsWithoutAdvancement(t 
 				subjects,
 				finalRecheckCurrentAuthorizationStub{},
 				revisionStore,
+				nil,
 			)
 			if err != nil {
 				t.Fatalf("NewRevisionService() error = %v", err)
@@ -917,7 +942,7 @@ func TestPortabilityApplyMapsFinalRevisionDestinationErrorsWithoutAdvancement(t 
 
 			archive := mustImportArchive(t, []ArchiveEntry{
 				{
-					Path:           "records/rec_source_final_recheck/document.md",
+					Path:           "records/rec_sourcefinalrecheck/document.md",
 					Classification: ArchiveClassMarkdown,
 					Payload:        []byte("# Final recheck\n"),
 				},
@@ -1165,8 +1190,15 @@ func TestOfficialArchiveApplyPutsKnownEvidenceOnFinishingRequest(t *testing.T) {
 	if len(imported) != 2 {
 		t.Fatalf("Imported() = %#v, want comparison + probe", imported)
 	}
+	wantRoute := evidence.ImportedSnapshotRoute{ImportJobID: importer.lastFinish.ImportJobID, ImportPlanID: plan.PlanID}
+	if wantRoute.ImportJobID == "" {
+		t.Fatal("finishing request omitted the import job")
+	}
 	exports := map[string][]byte{}
 	for _, item := range imported {
+		if route := item.ImportRoute(); route != wantRoute {
+			t.Fatalf("imported evidence route = %+v, want %+v", route, wantRoute)
+		}
 		kind, lookupErr := service.kinds.LookupKey(item.Snapshot().Envelope().Key)
 		if lookupErr != nil {
 			t.Fatalf("LookupKey(%s) error = %v", item.Snapshot().Envelope().Key, lookupErr)
@@ -1713,6 +1745,10 @@ func (finalRecheckLifecycleStub) ChangeLifecycle(
 	context.Context,
 	records.RecordLifecycleRequest,
 ) (records.RecordLifecycleResult, error) {
+	return records.RecordLifecycleResult{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckLifecycleStub) ChangeTrashState(context.Context, records.RecordTrashStateRequest) (records.RecordLifecycleResult, error) {
 	return records.RecordLifecycleResult{}, records.ErrInvalidApplicationRequest
 }
 

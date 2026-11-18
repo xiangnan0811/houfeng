@@ -17,6 +17,7 @@ import (
 
 const canonicalMigrationSetMagic = "HOUFENG-APP-MIGRATION-SET-V1"
 const canonicalPrivilegeSetMagic = "HOUFENG-APP-PRIVILEGE-SET-V1"
+const canonicalPrivilegeSetMagicV2 = "HOUFENG-APP-PRIVILEGE-SET-V2"
 const appACLManifestMagic = "HOUFENG-APP-ACL-MANIFEST-V1"
 const maxCanonicalACLManifestBodyBytes = 4 * 1024 * 1024
 
@@ -145,7 +146,31 @@ type AppACLSubject string
 const (
 	AppACLSubjectCenterRuntime AppACLSubject = "center_runtime"
 	AppACLSubjectPlatformAdmin AppACLSubject = "platform_admin"
+	// AppACLSubjectRecordDeletionWorker is the mandatory third subject of
+	// the v2 privilege body. It never appears in a v1 body.
+	AppACLSubjectRecordDeletionWorker AppACLSubject = "record_deletion_worker"
 )
+
+// AppACLPrivilegeSetVersion identifies one canonical privilege-body format.
+type AppACLPrivilegeSetVersion uint8
+
+const (
+	AppACLPrivilegeSetV1 AppACLPrivilegeSetVersion = 1
+	AppACLPrivilegeSetV2 AppACLPrivilegeSetVersion = 2
+)
+
+// appACLPrivilegeSetSubjectsV1 and appACLPrivilegeSetSubjectsV2 are the exact
+// binding subjects, in canonical byte order, admitted by each body version.
+var appACLPrivilegeSetSubjectsV1 = []AppACLSubject{
+	AppACLSubjectCenterRuntime,
+	AppACLSubjectPlatformAdmin,
+}
+
+var appACLPrivilegeSetSubjectsV2 = []AppACLSubject{
+	AppACLSubjectCenterRuntime,
+	AppACLSubjectPlatformAdmin,
+	AppACLSubjectRecordDeletionWorker,
+}
 
 // AppACLObjectClass identifies the PostgreSQL catalog surface in a privilege
 // tuple. Column entries remain decodable for catalog checks but v1 grants none.
@@ -202,7 +227,37 @@ type AppACLPrivilegeSet struct {
 // It accepts only the two semantic subjects, normalizes ordering, and rejects
 // grants that cannot be represented by the v1 catalog contract.
 func CanonicalPrivilegeSetBodyV1(bindings []AppACLRoleBinding, privileges []AppACLPrivilege) ([]byte, error) {
-	sortedBindings, err := canonicalRoleBindings(bindings)
+	return encodeCanonicalPrivilegeSetBody(canonicalPrivilegeSetMagic, appACLPrivilegeSetSubjectsV1, bindings, privileges)
+}
+
+// CanonicalPrivilegeSetBodyV2 serializes the mandatory-worker privilege set.
+// It uses the v1 framing under a distinct magic and accepts exactly the
+// runtime, platform-admin and record-deletion-worker bindings.
+func CanonicalPrivilegeSetBodyV2(bindings []AppACLRoleBinding, privileges []AppACLPrivilege) ([]byte, error) {
+	return encodeCanonicalPrivilegeSetBody(canonicalPrivilegeSetMagicV2, appACLPrivilegeSetSubjectsV2, bindings, privileges)
+}
+
+// canonicalPrivilegeSetBodyForBindings selects the only body version that
+// can represent the supplied binding set: two bindings are the historical v1
+// contract, three bindings are the mandatory-worker v2 contract.
+func canonicalPrivilegeSetBodyForBindings(bindings []AppACLRoleBinding, privileges []AppACLPrivilege) ([]byte, error) {
+	switch len(bindings) {
+	case len(appACLPrivilegeSetSubjectsV1):
+		return CanonicalPrivilegeSetBodyV1(bindings, privileges)
+	case len(appACLPrivilegeSetSubjectsV2):
+		return CanonicalPrivilegeSetBodyV2(bindings, privileges)
+	default:
+		return nil, fmt.Errorf("canonical privilege set has %d role bindings, want 2 (v1) or 3 (v2)", len(bindings))
+	}
+}
+
+func encodeCanonicalPrivilegeSetBody(
+	magic string,
+	subjects []AppACLSubject,
+	bindings []AppACLRoleBinding,
+	privileges []AppACLPrivilege,
+) ([]byte, error) {
+	sortedBindings, err := canonicalRoleBindingsForSubjects(bindings, subjects)
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +265,17 @@ func CanonicalPrivilegeSetBodyV1(bindings []AppACLRoleBinding, privileges []AppA
 	if err != nil {
 		return nil, err
 	}
+	for _, privilege := range sortedPrivileges {
+		if !appACLSubjectAdmitted(privilege.Subject, subjects) {
+			return nil, fmt.Errorf("ACL subject %q is not bound by this privilege set version", privilege.Subject)
+		}
+		if magic == canonicalPrivilegeSetMagic && privilege.ObjectClass == AppACLObjectClassFunction &&
+			!validFunctionIdentity(privilege.ObjectIdentity) {
+			return nil, fmt.Errorf("function ACL identity requires privilege set v2")
+		}
+	}
 
-	size := len(canonicalPrivilegeSetMagic) + 4 + 4
+	size := len(magic) + 4 + 4
 	for _, binding := range sortedBindings {
 		size += 4 + len(binding.Subject) + 4 + len(binding.CatalogRole)
 	}
@@ -222,7 +286,7 @@ func CanonicalPrivilegeSetBodyV1(bindings []AppACLRoleBinding, privileges []AppA
 	}
 
 	body := make([]byte, 0, size)
-	body = append(body, canonicalPrivilegeSetMagic...)
+	body = append(body, magic...)
 	body = appendUint32(body, uint32(len(sortedBindings)))
 	for _, binding := range sortedBindings {
 		body = appendLengthPrefixedString(body, string(binding.Subject))
@@ -244,16 +308,43 @@ func CanonicalPrivilegeSetBodyV1(bindings []AppACLRoleBinding, privileges []AppA
 // ParseCanonicalPrivilegeSetBodyV1 accepts only canonical v1 privilege body
 // bytes. It rejects duplicate or non-sorted tuples and any trailing bytes.
 func ParseCanonicalPrivilegeSetBodyV1(body []byte) (AppACLPrivilegeSet, error) {
-	if !bytes.HasPrefix(body, []byte(canonicalPrivilegeSetMagic)) {
+	return parseCanonicalPrivilegeSetBody(body, canonicalPrivilegeSetMagic, appACLPrivilegeSetSubjectsV1)
+}
+
+// ParseCanonicalPrivilegeSetBodyV2 accepts only canonical v2 privilege body
+// bytes: exactly the runtime, platform-admin and record-deletion-worker
+// bindings in that order, distinct roles, no grant option, no trailing bytes.
+func ParseCanonicalPrivilegeSetBodyV2(body []byte) (AppACLPrivilegeSet, error) {
+	return parseCanonicalPrivilegeSetBody(body, canonicalPrivilegeSetMagicV2, appACLPrivilegeSetSubjectsV2)
+}
+
+// parseCanonicalPrivilegeSetBodyAnyVersion dispatches strictly on the body
+// magic. It is the only reader for persisted manifest bodies whose version is
+// not fixed by the caller.
+func parseCanonicalPrivilegeSetBodyAnyVersion(body []byte) (AppACLPrivilegeSet, AppACLPrivilegeSetVersion, error) {
+	switch {
+	case bytes.HasPrefix(body, []byte(canonicalPrivilegeSetMagic)):
+		set, err := ParseCanonicalPrivilegeSetBodyV1(body)
+		return set, AppACLPrivilegeSetV1, err
+	case bytes.HasPrefix(body, []byte(canonicalPrivilegeSetMagicV2)):
+		set, err := ParseCanonicalPrivilegeSetBodyV2(body)
+		return set, AppACLPrivilegeSetV2, err
+	default:
+		return AppACLPrivilegeSet{}, 0, fmt.Errorf("invalid canonical privilege set magic")
+	}
+}
+
+func parseCanonicalPrivilegeSetBody(body []byte, magic string, subjects []AppACLSubject) (AppACLPrivilegeSet, error) {
+	if !bytes.HasPrefix(body, []byte(magic)) {
 		return AppACLPrivilegeSet{}, fmt.Errorf("invalid canonical privilege set magic")
 	}
-	offset := len(canonicalPrivilegeSetMagic)
+	offset := len(magic)
 	bindingCount, err := readCanonicalUint32(body, &offset, "role binding count")
 	if err != nil {
 		return AppACLPrivilegeSet{}, err
 	}
-	if bindingCount != 2 {
-		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set has %d role bindings, want 2", bindingCount)
+	if bindingCount != uint32(len(subjects)) {
+		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set has %d role bindings, want %d", bindingCount, len(subjects))
 	}
 	bindings := make([]AppACLRoleBinding, 0, bindingCount)
 	for range bindingCount {
@@ -267,11 +358,13 @@ func ParseCanonicalPrivilegeSetBodyV1(body []byte) (AppACLPrivilegeSet, error) {
 		}
 		bindings = append(bindings, AppACLRoleBinding{Subject: AppACLSubject(subject), CatalogRole: catalogRole})
 	}
-	if _, err := canonicalRoleBindings(bindings); err != nil {
+	if _, err := canonicalRoleBindingsForSubjects(bindings, subjects); err != nil {
 		return AppACLPrivilegeSet{}, err
 	}
-	if bindings[0].Subject != AppACLSubjectCenterRuntime || bindings[1].Subject != AppACLSubjectPlatformAdmin {
-		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege role bindings are not sorted")
+	for index, binding := range bindings {
+		if binding.Subject != subjects[index] {
+			return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege role bindings are not sorted")
+		}
 	}
 
 	privilegeCount, err := readCanonicalUint32(body, &offset, "privilege count")
@@ -313,7 +406,7 @@ func ParseCanonicalPrivilegeSetBodyV1(body []byte) (AppACLPrivilegeSet, error) {
 		grantOption := body[offset]
 		offset++
 		if grantOption != 0 {
-			return AppACLPrivilegeSet{}, fmt.Errorf("v1 privilege grant option must be false")
+			return AppACLPrivilegeSet{}, fmt.Errorf("privilege grant option must be false")
 		}
 		privileges = append(privileges, AppACLPrivilege{
 			Subject:        AppACLSubject(subject),
@@ -333,6 +426,13 @@ func ParseCanonicalPrivilegeSetBodyV1(body []byte) (AppACLPrivilegeSet, error) {
 		if err := validateAppACLPrivilege(privilege); err != nil {
 			return AppACLPrivilegeSet{}, err
 		}
+		if !appACLSubjectAdmitted(privilege.Subject, subjects) {
+			return AppACLPrivilegeSet{}, fmt.Errorf("ACL subject %q is not bound by this privilege set version", privilege.Subject)
+		}
+		if magic == canonicalPrivilegeSetMagic && privilege.ObjectClass == AppACLObjectClassFunction &&
+			!validFunctionIdentity(privilege.ObjectIdentity) {
+			return AppACLPrivilegeSet{}, fmt.Errorf("function ACL identity requires privilege set v2")
+		}
 		if index == 0 {
 			continue
 		}
@@ -346,24 +446,62 @@ func ParseCanonicalPrivilegeSetBodyV1(body []byte) (AppACLPrivilegeSet, error) {
 	return AppACLPrivilegeSet{RoleBindings: bindings, Privileges: privileges}, nil
 }
 
+// canonicalRoleBindings normalizes the historical two-binding v1 set.
 func canonicalRoleBindings(bindings []AppACLRoleBinding) ([]AppACLRoleBinding, error) {
-	if len(bindings) != 2 {
-		return nil, fmt.Errorf("canonical privilege set requires two role bindings")
+	return canonicalRoleBindingsForSubjects(bindings, appACLPrivilegeSetSubjectsV1)
+}
+
+// canonicalAppACLRoleBindings normalizes either a v1 or a v2 binding set,
+// chosen solely by its exact size.
+func canonicalAppACLRoleBindings(bindings []AppACLRoleBinding) ([]AppACLRoleBinding, error) {
+	switch len(bindings) {
+	case len(appACLPrivilegeSetSubjectsV1):
+		return canonicalRoleBindingsForSubjects(bindings, appACLPrivilegeSetSubjectsV1)
+	case len(appACLPrivilegeSetSubjectsV2):
+		return canonicalRoleBindingsForSubjects(bindings, appACLPrivilegeSetSubjectsV2)
+	default:
+		return nil, fmt.Errorf("canonical privilege set requires two (v1) or three (v2) role bindings")
+	}
+}
+
+func canonicalRoleBindingsForSubjects(bindings []AppACLRoleBinding, subjects []AppACLSubject) ([]AppACLRoleBinding, error) {
+	if len(bindings) != len(subjects) {
+		if len(subjects) == len(appACLPrivilegeSetSubjectsV1) {
+			return nil, fmt.Errorf("canonical privilege set requires two role bindings")
+		}
+		return nil, fmt.Errorf("canonical privilege set requires three role bindings")
 	}
 	sorted := append([]AppACLRoleBinding(nil), bindings...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Subject < sorted[j].Subject
 	})
-	if sorted[0].Subject != AppACLSubjectCenterRuntime || sorted[1].Subject != AppACLSubjectPlatformAdmin {
-		return nil, fmt.Errorf("canonical privilege set has invalid semantic role bindings")
+	for index, binding := range sorted {
+		if binding.Subject != subjects[index] {
+			return nil, fmt.Errorf("canonical privilege set has invalid semantic role bindings")
+		}
 	}
-	if !validCatalogRoleName(sorted[0].CatalogRole) || !validCatalogRoleName(sorted[1].CatalogRole) {
-		return nil, fmt.Errorf("canonical privilege set has invalid catalog role name")
+	for _, binding := range sorted {
+		if !validCatalogRoleName(binding.CatalogRole) {
+			return nil, fmt.Errorf("canonical privilege set has invalid catalog role name")
+		}
 	}
-	if sorted[0].CatalogRole == sorted[1].CatalogRole {
-		return nil, fmt.Errorf("canonical privilege set reuses a catalog role")
+	for left := range sorted {
+		for right := left + 1; right < len(sorted); right++ {
+			if sorted[left].CatalogRole == sorted[right].CatalogRole {
+				return nil, fmt.Errorf("canonical privilege set reuses a catalog role")
+			}
+		}
 	}
 	return sorted, nil
+}
+
+func appACLSubjectAdmitted(subject AppACLSubject, subjects []AppACLSubject) bool {
+	for _, admitted := range subjects {
+		if subject == admitted {
+			return true
+		}
+	}
+	return false
 }
 
 func canonicalPrivileges(privileges []AppACLPrivilege) ([]AppACLPrivilege, error) {
@@ -385,7 +523,8 @@ func canonicalPrivileges(privileges []AppACLPrivilege) ([]AppACLPrivilege, error
 }
 
 func validateAppACLPrivilege(privilege AppACLPrivilege) error {
-	if privilege.Subject != AppACLSubjectCenterRuntime && privilege.Subject != AppACLSubjectPlatformAdmin {
+	if privilege.Subject != AppACLSubjectCenterRuntime && privilege.Subject != AppACLSubjectPlatformAdmin &&
+		privilege.Subject != AppACLSubjectRecordDeletionWorker {
 		return fmt.Errorf("unknown ACL subject %q", privilege.Subject)
 	}
 	if privilege.GrantOption {
@@ -413,7 +552,9 @@ func validateAppACLPrivilege(privilege AppACLPrivilege) error {
 			return fmt.Errorf("invalid sequence ACL tuple")
 		}
 	case AppACLObjectClassFunction:
-		if privilege.SchemaName != "" || privilege.ColumnName != "" || !validFunctionIdentity(privilege.ObjectIdentity) || privilege.Privilege != AppACLPrivilegeExecute {
+		if privilege.SchemaName != "" || privilege.ColumnName != "" ||
+			(!validFunctionIdentity(privilege.ObjectIdentity) && !validSuccessorFunctionIdentityV2(privilege.ObjectIdentity)) ||
+			privilege.Privilege != AppACLPrivilegeExecute {
 			return fmt.Errorf("invalid function ACL tuple")
 		}
 	case AppACLObjectClassColumn:
@@ -433,11 +574,11 @@ func validFunctionIdentity(identity string) bool {
 	if !strings.HasPrefix(identity, prefix) {
 		return false
 	}
-	// Preserve the existing public bytea grammar and admit exactly one approved
-	// current parser identity. Current source/transition contracts still reject
-	// identities outside the compiled surface or approved delta; do not accept
-	// arbitrary overloads here.
-	if identity == "public.houfeng_parse_host_address(text)" {
+	// Preserve the public bytea grammar and admit only the approved pure
+	// parsers used by source constraints. The catalog contract still checks
+	// each exact identity; this does not admit arbitrary overloads.
+	if identity == "public.houfeng_parse_host_address(text)" ||
+		identity == "public.record_text_set_is_canonical(text[])" {
 		return true
 	}
 	const suffix = "(bytea)"
@@ -445,6 +586,31 @@ func validFunctionIdentity(identity string) bool {
 		return false
 	}
 	return validBareCatalogName(strings.TrimSuffix(strings.TrimPrefix(identity, prefix), suffix))
+}
+
+// These exact command entrypoints belong only to the mandatory-worker successor body.
+// Keep the historical V1 grammar unchanged and reject unlisted overloads.
+func validSuccessorFunctionIdentityV2(identity string) bool {
+	switch identity {
+	case "public.source_application_admit()",
+		"public.record_birth_current_binding()",
+		"public.record_birth_continuity_binding()",
+		"public.source_maintenance_status()",
+		"public.source_legacy_retirement_blocked(text, text)",
+		"public.record_birth_launch_inspect(bigint, bytea)",
+		"public.record_processor_worker_admit(text, text, text, text)",
+		"public.record_revision_blob_fence()",
+		"public.local_blob_recovery_inventory()",
+		"public.record_comparison_index_write(bytea, bytea)",
+		"public.record_collaboration_start_inventory(text, bigint)",
+		"public.record_collaboration_delivery_inventory(text, bigint)",
+		"public.source_retirement_preview(text, text, text)",
+		"public.source_retirement_commit(bigint, text, text, text, text, text, bytea, bytea, bytea, bytea)",
+		"public.source_retirement_install_pin(bigint, text, bigint, bytea, bytea, bytea, bigint)":
+		return true
+	default:
+		return false
+	}
 }
 
 func validBareCatalogName(value string) bool {
@@ -618,6 +784,7 @@ func ValidateAppACLManifestChainV1(manifests []AppACLManifestPersistedV1, head A
 		return fmt.Errorf("app ACL manifest chain has too many revisions")
 	}
 
+	var previousVersion AppACLPrivilegeSetVersion
 	for index, manifest := range manifests {
 		expectedRevision := uint64(index + 1)
 		if manifest.ManifestRevision != expectedRevision {
@@ -629,6 +796,17 @@ func ValidateAppACLManifestChainV1(manifests []AppACLManifestPersistedV1, head A
 		if index > 0 && manifest.PreviousManifestDigest != manifests[index-1].ManifestDigest {
 			return fmt.Errorf("app ACL manifest revision %d does not bind the previous manifest digest", expectedRevision)
 		}
+		// Privilege bodies may only advance from v1 to v2. A v2 revision
+		// followed by a v1 revision would silently drop the mandatory
+		// record-deletion worker binding.
+		_, version, err := parseCanonicalPrivilegeSetBodyAnyVersion(manifest.CanonicalPrivilegeSet)
+		if err != nil {
+			return fmt.Errorf("parse app ACL manifest revision %d privilege set: %w", expectedRevision, err)
+		}
+		if version < previousVersion {
+			return fmt.Errorf("app ACL manifest revision %d regresses privilege set version %d to %d", expectedRevision, previousVersion, version)
+		}
+		previousVersion = version
 	}
 
 	latest := manifests[len(manifests)-1]
@@ -660,7 +838,7 @@ func (manifest AppACLManifestPersistedV1) validateFields() error {
 	if _, err := ParseCanonicalMigrationSetBodyV1(manifest.CanonicalMigrationSet); err != nil {
 		return fmt.Errorf("parse canonical migration set: %w", err)
 	}
-	if _, err := ParseCanonicalPrivilegeSetBodyV1(manifest.CanonicalPrivilegeSet); err != nil {
+	if _, _, err := parseCanonicalPrivilegeSetBodyAnyVersion(manifest.CanonicalPrivilegeSet); err != nil {
 		return fmt.Errorf("parse canonical privilege set: %w", err)
 	}
 	if manifest.MigrationSetDigest != sha256.Sum256(manifest.CanonicalMigrationSet) {

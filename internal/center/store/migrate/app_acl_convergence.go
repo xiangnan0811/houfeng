@@ -1525,11 +1525,11 @@ func appACLConvergenceDCLStatements(contract AppACLEffectiveCatalogContractR1) (
 }
 
 func appACLConvergenceDCLStatementsForContract(contract appACLEffectiveCatalogContract) ([]string, error) {
-	canonicalBody, err := CanonicalPrivilegeSetBodyV1(contract.RoleBindings, contract.Privileges)
+	canonicalBody, err := canonicalPrivilegeSetBodyForBindings(contract.RoleBindings, contract.Privileges)
 	if err != nil {
 		return nil, fmt.Errorf("canonicalize app ACL convergence contract: %w", err)
 	}
-	canonicalSet, err := ParseCanonicalPrivilegeSetBodyV1(canonicalBody)
+	canonicalSet, _, err := parseCanonicalPrivilegeSetBodyAnyVersion(canonicalBody)
 	if err != nil {
 		return nil, fmt.Errorf("parse app ACL convergence contract: %w", err)
 	}

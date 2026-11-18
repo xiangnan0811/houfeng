@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 const notificationIdentityDomainV1 = "houfeng.record-collaboration.notification.v1"
@@ -91,7 +92,7 @@ type NotificationEventFacts struct {
 
 func (facts NotificationEventFacts) Validate() error {
 	expected, ok := notificationSubjectForEvent(facts.Kind)
-	if !ok || facts.SubjectKind != expected || !validRecordID(facts.RecordID) ||
+	if !ok || facts.SubjectKind != expected || !recordidentity.IsValid(facts.RecordID) ||
 		facts.SourceVersion == 0 || facts.SourceVersion > math.MaxInt64 ||
 		facts.AuthorizationEpoch == 0 || facts.AuthorizationEpoch > math.MaxInt64 ||
 		facts.RecordFenceEpoch > math.MaxInt64 || recordauth.ValidateActorUserID(facts.ActorID) != nil || facts.OccurredAt.IsZero() {
@@ -237,7 +238,7 @@ func (facts NotificationRecipientFacts) Validate() error {
 func validNotificationSubjectIdentity(kind NotificationSubjectKind, subjectID string) bool {
 	switch kind {
 	case NotificationSubjectRecord:
-		return validRecordID(subjectID)
+		return recordidentity.IsValid(subjectID)
 	case NotificationSubjectAction:
 		return ValidateActionID(subjectID) == nil
 	case NotificationSubjectComment:

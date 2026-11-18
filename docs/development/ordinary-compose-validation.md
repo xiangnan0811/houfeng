@@ -1,0 +1,20 @@
+# Ordinary Compose management verification
+
+`scripts/test-compose-management.sh --outer` runs the protected ordinary Compose producer and database integration fixtures against the current checkout. It uses the ownership-checked record-platform PostgreSQL runner to create four isolated host-network databases, then builds the current center, content processor, admin, and deploy test executables with the current Go toolchain and `CGO_ENABLED=0`.
+
+Run on a Linux host with a rootful Docker daemon, Go, `jq`, and the other standard shell utilities used by the record-platform runner. The caller must first have an immutable, locally available Linux image for the host architecture and supply its exact image ID:
+
+```bash
+HOUFENG_COMPOSE_TEST_BASE_IMAGE_ID=sha256:1f2403136cb0aef651921f255f5155701f36083e64764b3134c573438e13b46a \
+  scripts/test-compose-management.sh --outer
+```
+
+The shown ID is the supplied local fixture base; the runner checks that the image exists locally and that its ID, OS, and architecture match. It does not pull an image. The checkout must have a real `tmp/agent` directory. Four loopback ports selected by the outer runner must be available, as must `127.0.0.2:5432` for the role-fence fixture. A separate root container runs the actual `deploy-prepare-storage --scope compose` command against a private maintenance volume, creating the root marker and ordinary guard. The test container mounts that same volume read-only, runs as UID 10002/GID 10001 with all capabilities dropped, and uses a read-only image, private writable tmpfs directories, and host networking. Neither container receives a Docker socket. The fixed `/usr/local/bin` paths contain the newly built executables; they are fixture executables and are not a production image deployment.
+
+The selected tests are `TestPostgresIntegrationComposeInitialize`, `TestPostgresIntegrationComposeBirthLaunchPublication`, `TestPostgresIntegrationComposeLocalNamespace`, `TestPostgresIntegrationSourceMaintenanceInterlock`, and `TestPostgresIntegrationRecordLedgerApplicationRoleFence`. The runner converts the test binary's verbose stream with `go tool test2json` and requires RUN and PASS evidence for each selected test and every observed descendant; skips, failures, missing parents, and execution or evidence-conversion errors fail the run. It reports test names rather than printing PostgreSQL URLs or credentials. Temporary resources have per-run ownership labels and are removed only after ownership checks.
+
+`--internal` is the outer runner's child entry point, not a substitute for it. It requires the outer runner's ownership and run identifiers, four matching running PostgreSQL containers, and their distinct loopback endpoints. The historical source fixture uses its explicitly isolated launch seam and covers its existing source interlock, not a new source deployment scenario. The protected ordinary fixture verifies the real current executables, launch publication, membership projection, and heartbeat; it does not establish the separate two-image cold-upgrade acceptance.
+
+The released predecessor fixture is a separate build-tagged case and is not selected by this runner. Its predecessor and cold-upgrade evidence must be run and assessed separately.
+
+The implemented cold-upgrade path has acceptance evidence from an owned nested Docker host, not a real-host installation. arm64 is cross-built only; lost-commit and pre-lock backend cases have component coverage only. Required repair coverage includes both published proxy overlays, wrong-checksum or unsupported predecessor refusal before changes, root-private secret commitments, strict released-skeleton refusal for a missing or empty BlobRoot, atomic marker publication under interruption, and verification-only namespace handling for an existing source-enrolled binding. These requirements do not assert that the repairs have already passed. G2 remains NOT_READY, permanent-deletion HTTP remains CLOSED, and the candidate has not been deployed.

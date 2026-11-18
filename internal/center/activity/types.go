@@ -57,6 +57,8 @@ const (
 	EventKindRecordRestored           EventKind = "record_restored"
 	EventKindRecordArchived           EventKind = "record_archived"
 	EventKindRecordUnarchived         EventKind = "record_unarchived"
+	EventKindRecordTrashed            EventKind = "record_trashed"
+	EventKindRecordTrashRestored      EventKind = "record_trash_restored"
 	EventKindRecordOwnerChanged       EventKind = "record_owner_changed"
 	EventKindRecordParticipantChanged EventKind = "record_participant_changed"
 	EventKindRecordFollowUpChanged    EventKind = "record_follow_up_changed"
@@ -80,6 +82,8 @@ var eventKinds = map[EventKind]bool{
 	EventKindRecordRestored:           true,
 	EventKindRecordArchived:           true,
 	EventKindRecordUnarchived:         true,
+	EventKindRecordTrashed:            true,
+	EventKindRecordTrashRestored:      true,
 	EventKindRecordOwnerChanged:       true,
 	EventKindRecordParticipantChanged: true,
 	EventKindRecordFollowUpChanged:    true,
@@ -110,6 +114,8 @@ var recordsViewEventKinds = []EventKind{
 	EventKindRecordRestored,
 	EventKindRecordArchived,
 	EventKindRecordUnarchived,
+	EventKindRecordTrashed,
+	EventKindRecordTrashRestored,
 	EventKindRecordOwnerChanged,
 	EventKindRecordParticipantChanged,
 	EventKindRecordFollowUpChanged,

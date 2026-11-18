@@ -45,6 +45,7 @@ type ComparisonIntentItem struct {
 	RevisionContext   RevisionContext `json:"revision_context"`
 	RecordID          string          `json:"record_id,omitempty"`
 	RevisionID        string          `json:"revision_id,omitempty"`
+	SourceRecordID    string          `json:"source_record_id,omitempty"`
 	ChosenSnapshotIDs []string        `json:"chosen_snapshot_ids,omitempty"`
 	RecordType        string          `json:"record_type,omitempty"`
 	BusinessStatus    string          `json:"business_status,omitempty"`
@@ -88,6 +89,7 @@ func BuildComparisonIntentClaims(input ComparisonIntentClaimsInput) ComparisonIn
 			RevisionContext: item.RevisionContext,
 			RecordID:        item.RecordID,
 			RevisionID:      item.RevisionID,
+			SourceRecordID:  item.SourceRecordID,
 		}
 		if item.SnapshotID != "" && item.RevisionContext == RevisionContextBound {
 			encoded.ChosenSnapshotIDs = []string{item.SnapshotID}

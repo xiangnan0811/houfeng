@@ -53,6 +53,50 @@ func TestComparisonParticipantRejectsForgedExpiredAndStaleIntent(t *testing.T) {
 	}
 }
 
+func TestComparisonParticipantRejectsMissingOrChangedOwnershipProvenance(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"legacy_missing_owner", "owner_changed_after_evaluation"} {
+		t.Run(mode, func(t *testing.T) {
+			actor := testActor(t)
+			now := time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+			source := comparisonSaveTestSource(t)
+			signer := mustComparisonSaveSigner(t)
+			resolved, err := ResolveFixedComparison(context.Background(), comparisonTestRegistry(t), source, signer, ComparisonEvaluateRequest{
+				Actor:         actor,
+				Items:         []ComparisonFixedItem{{SnapshotID: comparisonStringPtr("evs_fixeda")}, {SnapshotID: comparisonStringPtr("evs_fixedb")}},
+				BaselineIndex: 0, Alignment: CoverageActual, RequestedWindow: testWindow(), Now: now,
+			})
+			if err != nil || resolved.Intent == nil {
+				t.Fatalf("resolve comparison: %v", err)
+			}
+			token := resolved.Intent.Token
+			if mode == "legacy_missing_owner" {
+				claims, verifyErr := signer.Verify(token, now)
+				if verifyErr != nil {
+					t.Fatal(verifyErr)
+				}
+				claims.Items[0].SourceRecordID = ""
+				legacy, signErr := signer.Sign(claims)
+				if signErr != nil {
+					t.Fatal(signErr)
+				}
+				token = legacy.Token
+			} else {
+				changed := source.snapshots["evs_fixeda"]
+				changed.RecordID = "rec_anotherowner"
+				source.snapshots["evs_fixeda"] = changed
+			}
+			sink := &comparisonSavePayloadSink{}
+			_, err = PrepareComparisonSave(context.Background(), comparisonTestRegistry(t), source, signer, sink, ComparisonSaveRequest{
+				Actor: actor, RecordID: "rec_comparisonsave", Token: token, Now: now,
+			})
+			if !errors.Is(err, ErrComparisonIntentStale) || sink.calls != 0 {
+				t.Fatalf("save with unresolved ownership: err=%v payload writes=%d", err, sink.calls)
+			}
+		})
+	}
+}
+
 func TestComparisonParticipantBuildsLogicalCopiesAndResultWithoutConclusion(t *testing.T) {
 	t.Parallel()
 
@@ -74,10 +118,16 @@ func TestComparisonParticipantBuildsLogicalCopiesAndResultWithoutConclusion(t *t
 
 	sink := &comparisonSavePayloadSink{}
 	plan, err := PrepareComparisonSave(context.Background(), comparisonTestRegistry(t), source, signer, sink, ComparisonSaveRequest{
-		Actor: actor, RecordID: "rec_comparisonsave", Token: resolved.Intent.Token, Now: now.Add(time.Minute),
+		Actor: actor, AllocationID: "rqa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RecordID: "rec_comparisonsave", Token: resolved.Intent.Token, Now: now.Add(time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("PrepareComparisonSave() error = %v", err)
+	}
+	if sink.route.AllocationID != "rqa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || sink.route.RecordID != "rec_comparisonsave" || sink.route.SnapshotID != plan.Result.SnapshotID() ||
+		sink.route.CaptureIntentID != "" || sink.route.ComparisonClaims == nil ||
+		sink.route.ComparisonClaims.Digest != plan.Claims.Digest ||
+		sink.route.Actor.CanonicalHash() != actor.CanonicalHash() {
+		t.Fatalf("comparison payload route = %#v", sink.route)
 	}
 	if plan.Token != resolved.Intent.Token || len(plan.Copies) != 2 {
 		t.Fatalf("plan = copies:%d token:%q", len(plan.Copies), plan.Token)
@@ -381,8 +431,8 @@ func TestComparisonParticipantSavesMetadataOnlyWarningsWithoutCopies(t *testing.
 	scope := comparisonProjectRecordScope(t, ComparisonSubjectRef{Kind: "target", ID: "tg_0123456789abcdef"})
 	source := &comparisonSelectionSourceStub{
 		revisions: map[ComparisonRevisionKey]ComparisonLoadedRevision{
-			{RecordID: "rec_metaa", RevisionID: "rrv_metaa"}: {
-				RecordID: "rec_metaa", RevisionID: "rrv_metaa",
+			{RecordID: "rec2_70000000000000000000000000000000", RevisionID: "rrv_metaa"}: {
+				RecordID: "rec2_70000000000000000000000000000000", RevisionID: "rrv_metaa",
 				Metadata:    RevisionMetadataSnapshot{RecordType: "note", ImpactLevel: "low"},
 				RecordScope: scope,
 			},
@@ -397,7 +447,7 @@ func TestComparisonParticipantSavesMetadataOnlyWarningsWithoutCopies(t *testing.
 	resolved, err := ResolveFixedComparison(context.Background(), comparisonTestRegistry(t), source, signer, ComparisonEvaluateRequest{
 		Actor: actor,
 		Items: []ComparisonFixedItem{
-			{Revision: &ComparisonFixedRevision{RecordID: "rec_metaa", RevisionID: "rrv_metaa"}},
+			{Revision: &ComparisonFixedRevision{RecordID: "rec2_70000000000000000000000000000000", RevisionID: "rrv_metaa"}},
 			{Revision: &ComparisonFixedRevision{RecordID: "rec_metab", RevisionID: "rrv_metab"}},
 		},
 		BaselineIndex: 0, Alignment: CoverageActual, RequestedWindow: testWindow(), Now: now,
@@ -409,13 +459,25 @@ func TestComparisonParticipantSavesMetadataOnlyWarningsWithoutCopies(t *testing.
 		t.Fatalf("metadata-only eligibility = %#v, want eligible", resolved.SaveEligibility)
 	}
 	plan, err := PrepareComparisonSave(context.Background(), comparisonTestRegistry(t), source, signer, &comparisonSavePayloadSink{}, ComparisonSaveRequest{
-		Actor: actor, RecordID: "rec_comparisonsave", Token: resolved.Intent.Token, Now: now.Add(time.Minute),
+		Actor: actor, RecordID: "rec2_80000000000000000000000000000000", Token: resolved.Intent.Token, Now: now.Add(time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("PrepareComparisonSave(metadata-only) error = %v", err)
 	}
 	if len(plan.Copies) != 0 || plan.Result.Empty() || plan.Result.Snapshot().Envelope().Key != ComparisonResultV1Key() {
 		t.Fatalf("metadata-only plan = copies:%d result:%q", len(plan.Copies), plan.Result.Snapshot().Envelope().Key)
+	}
+	dependencies, err := ComparisonDependenciesFromNativeClaims(plan.Result, plan.Claims)
+	if err != nil || len(dependencies) != 2 ||
+		dependencies[0] != (ComparisonDependency{SourceRecordID: "rec2_70000000000000000000000000000000", SourceRevisionID: "rrv_metaa"}) ||
+		dependencies[1] != (ComparisonDependency{SourceRecordID: "rec_metab", SourceRevisionID: "rrv_metab"}) {
+		t.Fatalf("metadata-only dependencies = %#v, %v", dependencies, err)
+	}
+	wrongOwner := plan.Claims
+	wrongOwner.Items = append([]ComparisonIntentItem(nil), plan.Claims.Items...)
+	wrongOwner.Items[0].SourceRecordID = "rec_destination"
+	if _, err := ComparisonDependenciesFromNativeClaims(plan.Result, wrongOwner); !errors.Is(err, ErrComparisonIntentStale) {
+		t.Fatalf("revision owner mismatch = %v", err)
 	}
 	payload, err := decodeSnapshotPayload(plan.Result.Snapshot().Bytes())
 	if err != nil {
@@ -459,8 +521,8 @@ func staleComparisonClaims(t *testing.T, actor ActorScope, now time.Time, digest
 	return BuildComparisonIntentClaims(ComparisonIntentClaimsInput{
 		Actor: actor,
 		Items: []ResolvedComparisonItem{
-			{SnapshotID: left.SnapshotID, Hash: left.Hash, Kind: left.Kind, RevisionContext: RevisionContextNotApplicable},
-			{SnapshotID: right.SnapshotID, Hash: right.Hash, Kind: right.Kind, RevisionContext: RevisionContextNotApplicable},
+			{SnapshotID: left.SnapshotID, SourceRecordID: left.RecordID, Hash: left.Hash, Kind: left.Kind, RevisionContext: RevisionContextNotApplicable},
+			{SnapshotID: right.SnapshotID, SourceRecordID: right.RecordID, Hash: right.Hash, Kind: right.Kind, RevisionContext: RevisionContextNotApplicable},
 		},
 		BaselineIndex: 0, Alignment: CoverageActual, RequestedWindow: testWindow(),
 		Digest: hashed, Now: now, KeyID: "cmp_stale",
@@ -485,11 +547,13 @@ func (stub comparisonIntentVerifyStub) Verify(string, time.Time) (ComparisonInte
 
 type comparisonSavePayloadSink struct {
 	calls int
+	route CapturePayloadRoute
 }
 
-func (sink *comparisonSavePayloadSink) PersistCapturePayload(context.Context, CanonicalSnapshot) error {
+func (sink *comparisonSavePayloadSink) PersistCapturePayload(_ context.Context, route CapturePayloadRoute, _ CanonicalSnapshot) error {
 	if sink != nil {
 		sink.calls++
+		sink.route = route
 	}
 	return nil
 }

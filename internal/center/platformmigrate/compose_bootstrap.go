@@ -108,17 +108,18 @@ $app_acl_r2_pre_r1_verify$`
 var ErrInvalidComposeBootstrapConfig = errors.New("Compose database bootstrap configuration is invalid")
 
 type ComposeRolePasswords struct {
-	Runtime       string
-	PlatformAdmin string
-	Migrator      string
-	Authority     string
+	Runtime        string
+	PlatformAdmin  string
+	DeletionWorker string
+	Migrator       string
+	Authority      string
 }
 
 type ComposeBootstrapConfig struct {
 	DatabaseName  string
 	BootstrapRole string
 	AuthorityRole string
-	Roles         AppRoleSetV1
+	Roles         AppRoleSetV2
 	Passwords     ComposeRolePasswords
 }
 
@@ -136,14 +137,17 @@ func (config ComposeBootstrapConfig) Validate() error {
 		config.BootstrapRole == "" || !validAppRoleName(config.BootstrapRole) ||
 		config.BootstrapRole == config.Roles.CenterRuntime ||
 		config.BootstrapRole == config.Roles.PlatformAdmin ||
+		config.BootstrapRole == config.Roles.DeletionWorker ||
 		config.BootstrapRole == config.Roles.Migrator ||
 		!validAppRoleName(config.AuthorityRole) ||
 		config.AuthorityRole == config.BootstrapRole ||
 		config.AuthorityRole == config.Roles.CenterRuntime ||
 		config.AuthorityRole == config.Roles.PlatformAdmin ||
+		config.AuthorityRole == config.Roles.DeletionWorker ||
 		config.AuthorityRole == config.Roles.Migrator ||
 		!validComposeRolePassword(config.Passwords.Runtime) ||
 		!validComposeRolePassword(config.Passwords.PlatformAdmin) ||
+		!validComposeRolePassword(config.Passwords.DeletionWorker) ||
 		!validComposeRolePassword(config.Passwords.Migrator) ||
 		!validComposeRolePassword(config.Passwords.Authority) ||
 		!distinctComposeRolePasswords(config.Passwords) ||
@@ -154,8 +158,8 @@ func (config ComposeBootstrapConfig) Validate() error {
 }
 
 func distinctComposeRolePasswords(passwords ComposeRolePasswords) bool {
-	seen := make(map[string]struct{}, 4)
-	for _, password := range []string{passwords.Runtime, passwords.PlatformAdmin, passwords.Migrator, passwords.Authority} {
+	seen := make(map[string]struct{}, 5)
+	for _, password := range []string{passwords.Runtime, passwords.PlatformAdmin, passwords.DeletionWorker, passwords.Migrator, passwords.Authority} {
 		if _, duplicate := seen[password]; duplicate {
 			return false
 		}
@@ -170,10 +174,11 @@ func (config ComposeBootstrapConfig) roleNames() []string {
 
 func (config ComposeBootstrapConfig) rolePasswords() map[string]string {
 	return map[string]string{
-		config.Roles.CenterRuntime: config.Passwords.Runtime,
-		config.Roles.PlatformAdmin: config.Passwords.PlatformAdmin,
-		config.Roles.Migrator:      config.Passwords.Migrator,
-		config.AuthorityRole:       config.Passwords.Authority,
+		config.Roles.CenterRuntime:  config.Passwords.Runtime,
+		config.Roles.PlatformAdmin:  config.Passwords.PlatformAdmin,
+		config.Roles.DeletionWorker: config.Passwords.DeletionWorker,
+		config.Roles.Migrator:       config.Passwords.Migrator,
+		config.AuthorityRole:        config.Passwords.Authority,
 	}
 }
 
@@ -258,7 +263,7 @@ func provisionComposeBootstrapInTx(ctx context.Context, tx pgx.Tx, config Compos
 		membership := memberships[0]
 		return fmt.Errorf("Compose app role membership is forbidden: %q -> %q", membership.MemberRole, membership.ParentRole)
 	}
-	if err := rejectAppRoleOwnership(ctx, tx, []string{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.AuthorityRole}); err != nil {
+	if err := rejectAppRoleOwnership(ctx, tx, []string{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.DeletionWorker, config.AuthorityRole}); err != nil {
 		return err
 	}
 	passwordVerifiers, err := readComposeRolePasswordVerifiers(ctx, tx, config.roleNames())

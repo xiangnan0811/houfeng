@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -31,21 +30,12 @@ type recordSearchProjectedDocument struct {
 // queries, and searchable by words from its body rather than only its title.
 func TestPostgresIntegrationRecordSearchProjectionIndexesCommittedRevision(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-project", 1)
 	seedRecordSearchGeneration(t, ctx, fixture.db, 1, "published")
-	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 
-	committed, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgsearchproject",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "磁盘故障排查"),
-		"record-search-project-key",
-	))
+	committed, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "磁盘故障排查"), "record-search-project-key"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
@@ -79,10 +69,10 @@ func TestPostgresIntegrationRecordSearchProjectionIndexesCommittedRevision(t *te
 // because a search projection is part of the same transaction as publication.
 func TestPostgresIntegrationRecordSearchProjectionIndexesSparseCommittedRevision(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-sparse", 1)
 	seedRecordSearchGeneration(t, ctx, fixture.db, 1, "published")
-	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 
 	base := recordsPostgresCompleteRevisionInput(t, "Sparse search record")
 	sparse, err := records.NormalizeCompleteRevisionInput(records.CompleteRevisionValues{
@@ -104,16 +94,7 @@ func TestPostgresIntegrationRecordSearchProjectionIndexesSparseCommittedRevision
 	if err != nil {
 		t.Fatalf("NormalizeCompleteRevisionInput(sparse) error = %v", err)
 	}
-	committed, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgsearchsparse",
-		"",
-		0,
-		0,
-		sparse,
-		"record-search-sparse-key",
-	))
+	committed, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, sparse, "record-search-sparse-key"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
@@ -140,23 +121,14 @@ func TestPostgresIntegrationRecordSearchProjectionIndexesSparseCommittedRevision
 // publishing the rebuilt generation would silently drop the record.
 func TestPostgresIntegrationRecordSearchProjectionWritesPublishedAndBuildingGenerations(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-dual", 1)
 	seedRecordSearchGeneration(t, ctx, fixture.db, 1, "published")
 	seedRecordSearchGeneration(t, ctx, fixture.db, 2, "building")
 	seedRecordSearchGeneration(t, ctx, fixture.db, 3, "superseded")
-	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 
-	committed, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgsearchdual",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Dual generation record"),
-		"record-search-dual-key",
-	))
+	committed, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Dual generation record"), "record-search-dual-key"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
@@ -183,21 +155,13 @@ func TestPostgresIntegrationRecordSearchProjectionWritesPublishedAndBuildingGene
 // index back over a newer live commit.
 func TestPostgresIntegrationRecordSearchProjectionFenceRejectsStaleWrite(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-fence", 1)
 	seedRecordSearchGeneration(t, ctx, fixture.db, 1, "published")
-	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 
-	created, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgsearchfence",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Fence baseline"),
-		"record-search-fence-create",
-	))
+	initialInput := recordsPostgresCompleteRevisionInput(t, "Fence baseline")
+	created, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, initialInput, "record-search-fence-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision(create) error = %v", err)
 	}
@@ -222,7 +186,7 @@ func TestPostgresIntegrationRecordSearchProjectionFenceRejectsStaleWrite(t *test
 	if before.title != "Fence newer revision" {
 		t.Fatalf("projected title before stale write = %q, want the newer revision", before.title)
 	}
-	applyStaleRecordSearchProjection(t, ctx, pool, created.RecordID, created.RevisionID, created.LockVersion)
+	applyStaleRecordSearchProjection(t, ctx, pool, fixture.admissionGate, created, initialInput)
 	after := readRecordSearchProjectedDocument(t, ctx, fixture.db, created.RecordID, 1)
 	if after.title != before.title || after.revisionID != before.revisionID ||
 		after.lockVersion != before.lockVersion || after.subjectCount != before.subjectCount {
@@ -235,20 +199,11 @@ func TestPostgresIntegrationRecordSearchProjectionFenceRejectsStaleWrite(t *test
 // depend on search bootstrap order.
 func TestPostgresIntegrationRecordSearchProjectionWithoutGenerationStillCommits(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-nogen", 1)
-	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 
-	committed, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgsearchnogen",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "No generation record"),
-		"record-search-nogen-key",
-	))
+	committed, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "No generation record"), "record-search-nogen-key"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
@@ -268,21 +223,12 @@ func TestPostgresIntegrationRecordSearchProjectionWithoutGenerationStillCommits(
 // it or an archived record would keep appearing in an active-only search.
 func TestPostgresIntegrationRecordSearchProjectionFollowsLifecycle(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-lifecycle", 1)
 	seedRecordSearchGeneration(t, ctx, fixture.db, 1, "published")
-	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 
-	created, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t,
-		recordplatform.OperationKindRecordCreate,
-		"rec_pgsearchlifecycle",
-		"",
-		0,
-		0,
-		recordsPostgresCompleteRevisionInput(t, "Lifecycle record"),
-		"record-search-lifecycle-create",
-	))
+	created, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, recordsPostgresCompleteRevisionInput(t, "Lifecycle record"), "record-search-lifecycle-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision(create) error = %v", err)
 	}
@@ -430,9 +376,9 @@ func applyStaleRecordSearchProjection(
 	t *testing.T,
 	ctx context.Context,
 	pool *pgxpool.Pool,
-	recordID string,
-	revisionID string,
-	lockVersion uint64,
+	gate AdmissionGate,
+	result records.RevisionCommitResult,
+	input records.CompleteRevisionInput,
 ) {
 	t.Helper()
 	tx, err := pool.Begin(ctx)
@@ -440,17 +386,12 @@ func applyStaleRecordSearchProjection(
 		t.Fatalf("begin stale projection transaction: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := gate.Admit(ctx, tx); err != nil {
+		t.Fatalf("admit stale projection transaction: %v", err)
+	}
 	if err := NewRecordSearchRevisionParticipant().ApplyRevision(ctx, tx, records.RevisionCommitted{
-		Result: records.RevisionCommitResult{
-			RecordID:           recordID,
-			RevisionID:         revisionID,
-			RevisionNo:         1,
-			LockVersion:        lockVersion,
-			AuthorizationEpoch: lockVersion,
-			Lifecycle:          records.LifecycleActive,
-			CommittedAt:        time.Now().UTC(),
-		},
-		Input: recordsPostgresCompleteRevisionInput(t, "Fence stale revision"),
+		Result: result,
+		Input:  input,
 	}); err != nil {
 		t.Fatalf("ApplyRevision(stale) error = %v", err)
 	}

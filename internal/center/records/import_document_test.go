@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"houfeng/internal/center/evidence"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 )
 
 func testImportSubjectReferences() []SubjectReference {
@@ -25,6 +27,7 @@ func TestImportDocumentRejectsImportedAuthorizationAndUsesLocalActor(t *testing.
 	t.Parallel()
 
 	actor := mustRecordActor(t)
+	allocation := &recordbirth.Allocation{AllocationID: "rqa_00000000000000000000000000000001", ReservationID: "rba_00000000000000000000000000000001", RecordID: "rec2_00000000000000000000000000000001", Domain: recordidentity.Ordinary, State: recordbirth.StateAllocated, Request: recordbirth.Request{ProjectID: string(actor.ProjectID), ActorID: actor.UserID, ActorScopeDigest: actor.CanonicalHash(), Purpose: recordbirth.PurposeImport, IdempotencyKey: "import-document-test", RequestFingerprint: sha256.Sum256([]byte("import document"))}}
 	var saved RevisionSaveRequest
 	revisions := &recordApplicationRevisionStub{save: func(_ context.Context, request RevisionSaveRequest) (RevisionCommitResult, error) {
 		saved = request
@@ -53,18 +56,18 @@ func TestImportDocumentRejectsImportedAuthorizationAndUsesLocalActor(t *testing.
 		t.Fatalf("ImportDocument(auth) error = %v, want ErrUntrustedImportIdentity", err)
 	}
 	got, err := application.ImportDocument(context.Background(), ImportDocumentRequest{
-		Actor: actor, RecordID: "rec_imported01", Title: "Disk notes",
+		Actor: actor, RecordID: allocation.RecordID, Allocation: allocation, Title: "Disk notes",
 		BodyMarkdown: "# Body\n", IdempotencyKey: "import-1",
 		SubjectReferences: testImportSubjectReferences(),
 	})
 	if err != nil {
 		t.Fatalf("ImportDocument() error = %v", err)
 	}
-	if got.RecordID != "rec_imported01" || got.RevisionID != "rrv_imported" {
+	if got.RecordID != allocation.RecordID || got.RevisionID != "rrv_imported" {
 		t.Fatalf("ImportDocument() = %#v", got)
 	}
 	if saved.Values.OwnerID != actor.UserID || saved.Values.AuthorID != actor.UserID ||
-		saved.Values.RecordType != RecordTypeNote || saved.ActivityKind != DomainActivityRecordCreated {
+		saved.Values.RecordType != RecordTypeNote || saved.ActivityKind != DomainActivityRecordCreated || saved.Allocation != allocation {
 		t.Fatalf("SaveRevision() = %#v", saved)
 	}
 }
@@ -73,16 +76,17 @@ func TestImportDocumentsFinishingCarriesEvidencePreparation(t *testing.T) {
 	t.Parallel()
 
 	actor := mustRecordActor(t)
+	allocation := &recordbirth.Allocation{AllocationID: "rqa_00000000000000000000000000000002", ReservationID: "rba_00000000000000000000000000000002", RecordID: "rec2_00000000000000000000000000000002", Domain: recordidentity.Ordinary, State: recordbirth.StateAllocated, Request: recordbirth.Request{ProjectID: string(actor.ProjectID), ActorID: actor.UserID, ActorScopeDigest: actor.CanonicalHash(), Purpose: recordbirth.PurposeImport, IdempotencyKey: "import-finishing-test", RequestFingerprint: sha256.Sum256([]byte("import finishing"))}}
 	kind, err := evidence.NewComparisonResultKind()
 	if err != nil {
 		t.Fatalf("NewComparisonResultKind() error = %v", err)
 	}
 	snapshot := mustImportedComparisonSnapshot(t, kind)
-	imported, err := evidence.NewPreparedImportedSnapshot("rec_imported02", "evs_imported02", snapshot)
+	imported, err := evidence.NewPreparedImportedSnapshot(allocation.RecordID, "evs_imported02", snapshot, evidence.ImportedSnapshotRoute{ImportJobID: "rij_test", ImportPlanID: "rip_test"})
 	if err != nil {
 		t.Fatalf("NewPreparedImportedSnapshot() error = %v", err)
 	}
-	preparation, err := evidence.NewRevisionPreparation("rec_imported02", evidence.RevisionPreparationValues{
+	preparation, err := evidence.NewRevisionPreparation(allocation.RecordID, evidence.RevisionPreparationValues{
 		Imported:           []evidence.PreparedImportedSnapshot{imported},
 		OrderedSnapshotIDs: []string{imported.SnapshotID()},
 	})
@@ -110,18 +114,18 @@ func TestImportDocumentsFinishingCarriesEvidencePreparation(t *testing.T) {
 		t.Fatalf("NewApplication() error = %v", err)
 	}
 	written, err := application.ImportDocumentsFinishing(context.Background(), []ImportDocumentRequest{{
-		Actor: actor, RecordID: "rec_imported02", Title: "Disk notes",
+		Actor: actor, RecordID: allocation.RecordID, Allocation: allocation, Title: "Disk notes",
 		BodyMarkdown: "# Body\n", IdempotencyKey: "import-evidence",
 		SubjectReferences:   testImportSubjectReferences(),
 		EvidencePreparation: preparation,
 	}}, RevisionCommitFinish{
 		OriginKind: "import", OriginDigest: [32]byte{1}, ImportJobID: "rij_imported02",
-		JobLockVersion: 1, ActorID: actor.UserID,
+		JobLockVersion: 1, Actor: actor,
 	})
 	if err != nil {
 		t.Fatalf("ImportDocumentsFinishing() error = %v", err)
 	}
-	if len(written) != 1 || saved.RecordID != "rec_imported02" {
+	if len(written) != 1 || saved.RecordID != allocation.RecordID || saved.Allocation != allocation {
 		t.Fatalf("ImportDocumentsFinishing() = %#v saved=%#v", written, saved)
 	}
 	if !reflect.DeepEqual(saved.EvidencePreparation.SnapshotIDs(), []string{"evs_imported02"}) {

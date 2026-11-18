@@ -10,6 +10,9 @@ import (
 )
 
 func clearVPSPendingCommands(ctx context.Context, tx pgx.Tx, vpsID, reason string) error {
+	if err := assertVPSLifecycleSourcesWritable(ctx, tx, vpsID); err != nil {
+		return err
+	}
 	rows, err := tx.Query(ctx, `select `+monitoringInstanceSelectColumns+` from monitoring_instances where vps_id=$1 order by monitoring_instance_id for update`, vpsID)
 	if err != nil {
 		return err
@@ -37,6 +40,9 @@ func clearVPSPendingCommands(ctx context.Context, tx pgx.Tx, vpsID, reason strin
 }
 
 func archiveVPSMonitoringAndTargets(ctx context.Context, tx pgx.Tx, vpsID, reason string) error {
+	if err := assertVPSLifecycleSourcesWritable(ctx, tx, vpsID); err != nil {
+		return err
+	}
 	var archiveAt time.Time
 	if err := tx.QueryRow(ctx, `select now()`).Scan(&archiveAt); err != nil {
 		return err
@@ -150,6 +156,16 @@ func archiveVPSMonitoringAndTargets(ctx context.Context, tx pgx.Tx, vpsID, reaso
 }
 
 func closeArchiveIncidents(ctx context.Context, tx pgx.Tx, objectType, objectID, reason string) error {
+	switch objectType {
+	case "monitoring_instance":
+		if err := assertMonitoringSourceWritable(ctx, tx, objectID); err != nil {
+			return err
+		}
+	case "target":
+		if err := assertSourceWritable(ctx, tx, "target", objectID); err != nil {
+			return err
+		}
+	}
 	rows, err := tx.Query(ctx, `select incident_id,incident_class,severity from active_incidents where object_type=$1 and object_id=$2 order by incident_id for update`, objectType, objectID)
 	if err != nil {
 		return err

@@ -16,12 +16,12 @@ var ErrInvalidDeletionAdapter = errors.New("invalid record portability deletion 
 // travels with it so the store cannot be asked to purge under another adapter's
 // ownership claim.
 type DeletionCommand struct {
-	Operation     recorddeletion.DeletionOperation
+	recorddeletion.PurgeTarget
 	SurfaceDigest [sha256.Size]byte
 }
 
 func (command DeletionCommand) Validate() error {
-	if (recorddeletion.PurgeTarget{Operation: command.Operation}).Validate() != nil ||
+	if command.PurgeTarget.Validate() != nil ||
 		command.SurfaceDigest != recorddeletion.RecordPortabilitySurfaceDigest() {
 		return ErrInvalidDeletionAdapter
 	}
@@ -34,8 +34,8 @@ func (command DeletionCommand) Validate() error {
 type DeletionStore interface {
 	PortabilityDeletionHealth(context.Context) (recorddeletion.AdapterHealthSnapshot, error)
 	PreviewPortabilityDeletion(context.Context, recorddeletion.PreviewTarget) (recorddeletion.AdapterPreviewSnapshot, error)
-	PurgeRecordPortability(context.Context, recorddeletion.DeletionOperation, [sha256.Size]byte) (recorddeletion.AdapterPurgeReceipt, error)
-	VerifyRecordPortabilityPurge(context.Context, recorddeletion.DeletionOperation, [sha256.Size]byte, recorddeletion.AdapterPurgeReceipt) error
+	PurgeRecordPortability(context.Context, recorddeletion.PurgeTarget, [sha256.Size]byte) (recorddeletion.AdapterPurgeReceipt, error)
+	VerifyRecordPortabilityPurge(context.Context, recorddeletion.PurgeTarget, [sha256.Size]byte, recorddeletion.AdapterPurgeReceipt) error
 }
 
 // DeletionAdapter removes a purged record's export/import locators and origin
@@ -109,12 +109,12 @@ func (adapter *DeletionAdapter) PurgeDeletion(
 		return recorddeletion.AdapterPurgeReceipt{}, ErrInvalidDeletionAdapter
 	}
 	command := DeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordPortabilitySurfaceDigest(),
+		PurgeTarget: target, SurfaceDigest: recorddeletion.RecordPortabilitySurfaceDigest(),
 	}
 	if err := command.Validate(); err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
-	receipt, err := adapter.store.PurgeRecordPortability(ctx, command.Operation, command.SurfaceDigest)
+	receipt, err := adapter.store.PurgeRecordPortability(ctx, command.PurgeTarget, command.SurfaceDigest)
 	if err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
@@ -136,9 +136,9 @@ func (adapter *DeletionAdapter) VerifyDeletion(
 		return err
 	}
 	command := DeletionCommand{
-		Operation: target.Operation, SurfaceDigest: recorddeletion.RecordPortabilitySurfaceDigest(),
+		PurgeTarget: target, SurfaceDigest: recorddeletion.RecordPortabilitySurfaceDigest(),
 	}
-	return adapter.store.VerifyRecordPortabilityPurge(ctx, command.Operation, command.SurfaceDigest, receipt)
+	return adapter.store.VerifyRecordPortabilityPurge(ctx, command.PurgeTarget, command.SurfaceDigest, receipt)
 }
 
 func nilPortabilityDeletionDependency(value any) bool {

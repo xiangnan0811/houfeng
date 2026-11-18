@@ -11,13 +11,13 @@ import (
 
 func TestPostgresIntegrationRecordWatchVersionedDefaultAnchorRoundTripsThroughPortability(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
-	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchportable", "watch-portable-parent")
+	parent := seedPostgresActionParent(t, ctx, fixture, "watch-portable-parent")
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-portability", 2)
 	watches := NewPostgresRecordWatchRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-		newPostgresWatchAuthorizationSource(t, runtimePool),
+		runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+		newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate),
 	)
 	watch := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-portable-watch", 0x61)
 	if status, err := watches.SetWatch(ctx, watch); err != nil || status.Version != 1 {

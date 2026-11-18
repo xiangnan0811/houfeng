@@ -172,6 +172,26 @@ func TestPrepareCaptureRejectsPreviewBoundDrift(t *testing.T) {
 	}
 }
 
+func TestPrepareCaptureAcceptsRecordIdentityDomains(t *testing.T) {
+	for _, recordID := range []string{
+		"rec_capture",
+		"rec2_70000000000000000000000000000000",
+		"rec2_80000000000000000000000000000000",
+	} {
+		t.Run(recordID, func(t *testing.T) {
+			inputs := newPreparedCaptureTestInputs(t)
+			inputs.recordID = recordID
+			prepared, err := prepareCaptureFromTestInputs(inputs)
+			if err != nil || prepared.RecordID() != recordID {
+				t.Fatalf("PrepareCapture(%q) = %q, %v", recordID, prepared.RecordID(), err)
+			}
+			if err := prepared.Validate(); err != nil {
+				t.Fatalf("PreparedCapture.Validate() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestPrepareCaptureRejectsInvalidIdentities(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -181,10 +201,14 @@ func TestPrepareCaptureRejectsInvalidIdentities(t *testing.T) {
 		{name: "record prefix only", mutate: func(input *preparedCaptureTestInputs) { input.recordID = "rec_" }},
 		{name: "record uppercase", mutate: func(input *preparedCaptureTestInputs) { input.recordID = "rec_CAPTURE" }},
 		{name: "record too long", mutate: func(input *preparedCaptureTestInputs) { input.recordID = "rec_" + strings.Repeat("a", 65) }},
+		{name: "new record nonhex", mutate: func(input *preparedCaptureTestInputs) { input.recordID = "rec2_7000000000000000000000000000000g" }},
+		{name: "new record wrong length", mutate: func(input *preparedCaptureTestInputs) { input.recordID = "rec2_7000000000000000000000000000000" }},
+		{name: "revision as record", mutate: func(input *preparedCaptureTestInputs) { input.recordID = "rrv_capture" }},
 		{name: "empty snapshot", mutate: func(input *preparedCaptureTestInputs) { input.snapshotID = "" }},
 		{name: "snapshot prefix only", mutate: func(input *preparedCaptureTestInputs) { input.snapshotID = "evs_" }},
 		{name: "snapshot uppercase", mutate: func(input *preparedCaptureTestInputs) { input.snapshotID = "evs_CAPTURE" }},
 		{name: "snapshot too long", mutate: func(input *preparedCaptureTestInputs) { input.snapshotID = "evs_" + strings.Repeat("a", 65) }},
+		{name: "record as snapshot", mutate: func(input *preparedCaptureTestInputs) { input.snapshotID = "rec2_70000000000000000000000000000000" }},
 		{name: "intent prefix only", mutate: func(input *preparedCaptureTestInputs) {
 			input.preview.IntentID = "evi_"
 			input.intent.ID = input.preview.IntentID

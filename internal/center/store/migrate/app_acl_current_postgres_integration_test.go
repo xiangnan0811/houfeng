@@ -41,6 +41,7 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("missing_settings_p67_rollback_and_drift", testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift)
 	t.Run("missing_settings_concurrent_initialization", testPostgresIntegrationAppACLCurrentMissingSettingsConcurrentInitialization)
 	t.Run("missing_settings_snapshot_fence", testPostgresIntegrationAppACLCurrentMissingSettingsSnapshotFence)
+	t.Run("ordinary_membership", testPostgresIntegrationOrdinaryMembership)
 	t.Run("agent_replay_migration", TestPostgresIntegrationAgentReplayMigration)
 }
 
@@ -143,17 +144,9 @@ func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {
 				}
 				return cutpoint
 			}
-			_, err := convergeAppACLCurrentWithDependencies(
-				ctx,
-				func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-					return migratorDB.BeginTx(ctx, options)
-				},
-				fixture.runtimeRole,
-				fixture.adminRole,
-				migrations.FS,
-				appACLCurrentMigrationFragments,
-				dependencies,
-			)
+			_, err := convergeAppACLCurrentWithDependencies(ctx, func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+				return migratorDB.BeginTx(ctx, options)
+			}, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 			if !errors.Is(err, cutpoint) {
 				t.Fatalf("P67 to current rollback error = %v, want controlled cutpoint", err)
 			}
@@ -174,7 +167,7 @@ func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {
 				}
 			}
 
-			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("P67 to current upgrade: %v", err)
 			}
@@ -227,7 +220,7 @@ func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {
 			}
 
 			afterUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
-			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("repeat P67 to current upgrade: %v", err)
 			}
@@ -404,7 +397,7 @@ func testPostgresIntegrationAppACLCurrentSettingsPresenceMatrix(t *testing.T) {
 			before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("P67 %s settings convergence: %v", state, err)
 			}
@@ -421,7 +414,7 @@ func testPostgresIntegrationAppACLCurrentSettingsPresenceMatrix(t *testing.T) {
 			assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
 
 			beforeRepeat := after
-			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("repeat P67 %s settings convergence: %v", state, err)
 			}
@@ -469,7 +462,7 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsPredecessorSuffixes(t *t
 			before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("missing-settings %s convergence: %v", profileCase.name, err)
 			}
@@ -486,7 +479,7 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsPredecessorSuffixes(t *t
 				t.Fatalf("missing-settings %s convergence inserted center_settings row", profileCase.name)
 			}
 			beforeRepeat := after
-			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			if err != nil {
 				t.Fatalf("repeat missing-settings %s convergence: %v", profileCase.name, err)
 			}
@@ -528,17 +521,9 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift(t *t
 		}
 		return cutpoint
 	}
-	_, err := convergeAppACLCurrentWithDependencies(
-		ctx,
-		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-			return migratorDB.BeginTx(ctx, options)
-		},
-		fixture.runtimeRole,
-		fixture.adminRole,
-		migrations.FS,
-		appACLCurrentMigrationFragments,
-		dependencies,
-	)
+	_, err := convergeAppACLCurrentWithDependencies(ctx, func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+		return migratorDB.BeginTx(ctx, options)
+	}, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if !errors.Is(err, cutpoint) {
 		t.Fatalf("P67 missing-settings rollback error = %v, want controlled cutpoint", err)
 	}
@@ -551,7 +536,7 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift(t *t
 	}
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 
-	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("P67 missing-settings convergence after rollback: %v", err)
 	}
@@ -622,7 +607,7 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsConcurrentInitialization
 		go func() {
 			defer waitGroup.Done()
 			<-start
-			manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+			manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 			results <- result{manifest: manifest, err: err}
 		}()
 	}
@@ -709,7 +694,7 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsSnapshotFence(t *testing
 	}
 
 	firstDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
-	first, err := ConvergeAppACLCurrent(ctx, firstDB, fixture.runtimeRole, fixture.adminRole)
+	first, err := ConvergeAppACLCurrent(ctx, firstDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("first snapshot-fence convergence: %v", err)
 	}
@@ -739,15 +724,7 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsSnapshotFence(t *testing
 		}
 		return retryDB.BeginTx(ctx, options)
 	}
-	recovered, err := convergeAppACLCurrentWithDependencies(
-		ctx,
-		begin,
-		fixture.runtimeRole,
-		fixture.adminRole,
-		migrations.FS,
-		appACLCurrentMigrationFragments,
-		dependencies,
-	)
+	recovered, err := convergeAppACLCurrentWithDependencies(ctx, begin, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if err != nil {
 		t.Fatalf("stale snapshot-fence convergence retry: %v", err)
 	}
@@ -770,18 +747,10 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsSnapshotFence(t *testing
 	}
 	negativeAttempts := 0
 	negativeDependencies := defaultAppACLCurrentConvergenceDependencies()
-	_, err = convergeAppACLCurrentWithDependencies(
-		ctx,
-		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-			negativeAttempts++
-			return firstDB.BeginTx(ctx, options)
-		},
-		fixture.runtimeRole,
-		fixture.adminRole,
-		migrations.FS,
-		appACLCurrentMigrationFragments,
-		negativeDependencies,
-	)
+	_, err = convergeAppACLCurrentWithDependencies(ctx, func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+		negativeAttempts++
+		return firstDB.BeginTx(ctx, options)
+	}, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, negativeDependencies)
 	if err == nil ||
 		!strings.Contains(err.Error(), "unexpected") ||
 		!strings.Contains(err.Error(), "record_access_groups") {
@@ -800,7 +769,7 @@ func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {
 	fixture := newAppACLConvergencePostgresFixture(t, ctx)
 	migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
 
-	manifest, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin)
+	manifest, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin, fixture.deletionWorker)
 	if err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() fresh error = %v", err)
 	}
@@ -843,6 +812,40 @@ func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {
 		t.Fatalf("AdmitAppACLCurrentRuntime() direct runtime error = %v", err)
 	}
 	assertRecordsCoreAppACLCurrentRolePrivileges(t, ctx, &fixture, runtimeDB)
+	workerDB := fixture.openDirectRolePool(t, ctx, fixture.deletionWorker)
+	if err := AdmitAppACLCurrentDeletionWorker(ctx, workerDB); err != nil {
+		t.Fatalf("AdmitAppACLCurrentDeletionWorker() direct worker error = %v", err)
+	}
+	if err := AdmitAppACLCurrentDeletionWorker(ctx, runtimeDB); err == nil {
+		t.Fatal("worker admission accepted the runtime identity")
+	}
+	if err := AdmitAppACLCurrentRuntime(ctx, workerDB); err == nil {
+		t.Fatal("runtime admission accepted the worker identity")
+	}
+	for _, statement := range []string{
+		`select record_id from public.records where false`,
+		`delete from public.records where false`,
+		`insert into public.record_deletion_gates select * from public.record_deletion_gates where false`,
+		`update public.record_deletion_gates set actor_id = actor_id where false`,
+		`delete from public.record_deletion_gates where false`,
+		`insert into public.record_markdown_client_purge_receipts select * from public.record_markdown_client_purge_receipts where false`,
+		`insert into public.record_comparison_purge_receipts select * from public.record_comparison_purge_receipts where false`,
+	} {
+		_, err := workerDB.Exec(ctx, statement)
+		var pgError *pgconn.PgError
+		if !errors.As(err, &pgError) || pgError.Code != "42501" {
+			t.Fatalf("worker statement %q error = %v, want insufficient privilege", statement, err)
+		}
+	}
+	if _, err := migratorDB.Exec(ctx, `grant select on public.records to `+pgx.Identifier{fixture.deletionWorker}.Sanitize()); err != nil {
+		t.Fatalf("introduce worker content privilege drift: %v", err)
+	}
+	if err := AdmitAppACLCurrentDeletionWorker(ctx, workerDB); err == nil {
+		t.Fatal("worker admission accepted an extra content privilege")
+	}
+	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil {
+		t.Fatal("runtime admission accepted worker privilege drift")
+	}
 }
 
 func assertRecordsCoreAppACLCurrentRolePrivileges(
@@ -853,66 +856,57 @@ func assertRecordsCoreAppACLCurrentRolePrivileges(
 ) {
 	t.Helper()
 
-	if _, err := runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_acl')`); err != nil {
-		t.Fatalf("runtime insert records-core root: %v", err)
-	}
-	revisionTx, err := runtimeDB.Begin(ctx)
-	if err != nil {
-		t.Fatalf("runtime begin records-core revision transaction: %v", err)
-	}
-	defer func() { _ = revisionTx.Rollback(ctx) }()
-	if _, err := revisionTx.Exec(ctx, `
+	// Root creation and deletion require the birth and deletion commands. The
+	// immutable revision tables retain their INSERT/DELETE grants for admitted
+	// revision work; missing parents still fail their actual foreign keys.
+	_, err := runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_acl')`)
+	requirePostgresSQLState(t, err, "42501")
+	_, err = runtimeDB.Exec(ctx, `
 		insert into public.record_revisions (
 			revision_id, record_id, revision_no, title, body_markdown,
 			markdown_dialect_version, record_type, impact_level,
 			visibility_scope, visibility_digest, author_id, canonical_hash
 		) values (
-			'rrv_acl', 'rec_acl', 1, 'ACL', '# ACL', 1, 'note', 'informational',
+			'rrv_aclmissing', 'rec_aclmissing', 1, 'ACL', '# ACL', 1, 'note', 'informational',
 			'{}'::jsonb, decode(repeat('41', 32), 'hex'), 'usr_acl', decode(repeat('42', 32), 'hex')
 		)
-	`); err != nil {
-		t.Fatalf("runtime insert immutable records-core revision: %v", err)
-	}
-	if _, err := revisionTx.Exec(ctx, `
+	`)
+	requirePostgresSQLState(t, err, "23503")
+	_, err = runtimeDB.Exec(ctx, `
 		insert into public.record_revision_subjects (
 			revision_id, ordinal, registry_version, subject_kind, relation_role,
 			source_id, is_primary, identity_snapshot, capture_authorization,
 			capture_authorization_digest
 		) values (
-			'rrv_acl', 0, 1, 'vps', 'affected', 'vps_acl', true,
+			'rrv_aclmissing', 0, 1, 'vps', 'affected', 'vps_acl', true,
 			'{}'::jsonb, '{}'::jsonb, decode(repeat('43', 32), 'hex')
 		)
-	`); err != nil {
-		t.Fatalf("runtime insert records-core primary subject: %v", err)
-	}
-	if err := revisionTx.Commit(ctx); err != nil {
-		t.Fatalf("runtime commit records-core revision transaction: %v", err)
-	}
-	assertRecordAttachmentsAppACLCurrentRolePrivileges(t, ctx, fixture, runtimeDB)
-	assertRecordCollaborationAppACLCurrentRolePrivileges(t, ctx, fixture, runtimeDB)
-
+	`)
+	requirePostgresSQLState(t, err, "23503")
 	_, err = runtimeDB.Exec(ctx, `update public.record_revisions set title = 'mutated' where revision_id = 'rrv_acl'`)
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
-		t.Fatalf("runtime update immutable records-core revision error = %v, want SQLSTATE 42501", err)
-	}
-
-	purgeTx, err := runtimeDB.Begin(ctx)
-	if err != nil {
-		t.Fatalf("runtime begin records-core purge transaction: %v", err)
-	}
-	defer func() { _ = purgeTx.Rollback(ctx) }()
+	requirePostgresSQLState(t, err, "42501")
 	for _, statement := range []string{
-		`delete from public.record_revision_subjects where revision_id = 'rrv_acl'`,
-		`delete from public.record_revisions where revision_id = 'rrv_acl'`,
-		`delete from public.records where record_id = 'rec_acl'`,
+		`delete from public.record_revision_subjects where revision_id = 'rrv_aclmissing'`,
+		`delete from public.record_revisions where revision_id = 'rrv_aclmissing'`,
 	} {
-		if _, err := purgeTx.Exec(ctx, statement); err != nil {
-			t.Fatalf("runtime execute records-core purge statement %q: %v", statement, err)
+		if _, err := runtimeDB.Exec(ctx, statement); err != nil {
+			t.Fatalf("runtime child-table DELETE privilege %q: %v", statement, err)
 		}
 	}
-	if err := purgeTx.Commit(ctx); err != nil {
-		t.Fatalf("runtime commit records-core purge transaction: %v", err)
+	_, err = runtimeDB.Exec(ctx, `delete from public.records where record_id = 'rec_acl'`)
+	requirePostgresSQLState(t, err, "42501")
+
+	workerDB := fixture.openDirectRolePool(t, ctx, fixture.deletionWorker)
+	for _, statement := range []string{
+		`select record_id from public.records where false`,
+		`select revision_id from public.record_revisions where false`,
+		`select revision_id from public.record_revision_subjects where false`,
+		`delete from public.records where false`,
+		`delete from public.record_revisions where false`,
+		`delete from public.record_revision_subjects where false`,
+	} {
+		_, err := workerDB.Exec(ctx, statement)
+		requirePostgresSQLState(t, err, "42501")
 	}
 
 	adminDB := fixture.openDirectRolePool(t, ctx, fixture.admin)
@@ -923,10 +917,75 @@ func assertRecordsCoreAppACLCurrentRolePrivileges(
 	if receiptCount != 0 {
 		t.Fatalf("fresh records-core purge receipt count = %d, want 0", receiptCount)
 	}
-	_, err = adminDB.Exec(ctx, `select record_id from public.records limit 1`)
-	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
-		t.Fatalf("platform admin read records-core content table error = %v, want SQLSTATE 42501", err)
+	for _, statement := range []string{
+		`select record_id from public.records where false`,
+		`select revision_id from public.record_revisions where false`,
+		`select revision_id from public.record_revision_subjects where false`,
+	} {
+		_, err := adminDB.Exec(ctx, statement)
+		requirePostgresSQLState(t, err, "42501")
 	}
+
+	t.Run("legacy_attachment_and_collaboration_acl", func(t *testing.T) {
+		assertLegacyRecordDataAppACLCurrentRolePrivileges(t, ctx)
+	})
+}
+
+// The dependent attachment and collaboration checks need predecessor records.
+// Materialize them under the actual C80 profile, then upgrade this independent
+// database. These fixture rows do not claim a C81 birth or deletion receipt.
+func assertLegacyRecordDataAppACLCurrentRolePrivileges(t *testing.T, ctx context.Context) {
+	t.Helper()
+	fixture := newAppACLConvergencePostgresFixture(t, ctx)
+	owner := fixture.openDirectRolePool(t, ctx, fixture.migrator)
+	exact := exactAppACLCurrentSuccessorPostgresFixture{
+		db: fixture.db, databaseName: fixture.databaseName, bootstrapOwner: fixture.bootstrapOwner,
+		runtimeRole: fixture.runtime, adminRole: fixture.admin, deletionWorkerRole: fixture.deletionWorker,
+		migratorRole: fixture.migrator, passwords: fixture.rolePasswords,
+	}
+	profile := appACLCurrentReleasedPostgresProfile(t, appACLCurrentP80Migration)
+	seedAppACLCurrentReleasedGenesis(t, ctx, exact, owner, profile)
+
+	tx, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin predecessor ACL fixture: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, statement := range []string{
+		`insert into public.records (record_id) values ('rec_acl'), ('rec_aclother'), ('rec_collabdelete')`,
+		`insert into public.record_revisions (
+			revision_id, record_id, revision_no, title, body_markdown, markdown_dialect_version,
+			record_type, impact_level, visibility_scope, visibility_digest, author_id, canonical_hash
+		) values ('rrv_acl', 'rec_acl', 1, 'ACL', '# ACL', 1, 'note', 'informational',
+			'{}'::jsonb, decode(repeat('41', 32), 'hex'), 'usr_acl', decode(repeat('42', 32), 'hex'))`,
+		`insert into public.record_revision_subjects (
+			revision_id, ordinal, registry_version, subject_kind, relation_role, source_id, is_primary,
+			identity_snapshot, capture_authorization, capture_authorization_digest
+		) values ('rrv_acl', 0, 1, 'vps', 'affected', 'vps_acl', true,
+			'{}'::jsonb, '{}'::jsonb, decode(repeat('43', 32), 'hex'))`,
+		`update public.records set current_revision_id='rrv_acl', current_title='ACL',
+			current_record_type='note', current_impact_level='informational', current_visibility_scope='{}'::jsonb,
+			current_visibility_digest=decode(repeat('41', 32), 'hex') where record_id='rec_acl'`,
+		`insert into public.content_delivery_epochs(project_id, object_kind, object_id, delivery_epoch)
+		 values ('default', 'record', 'rec_acl', 0), ('default', 'record', 'rec_aclother', 0),
+			('default', 'record', 'rec_collabdelete', 0)`,
+	} {
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			t.Fatalf("seed predecessor ACL fixture: %v", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit predecessor ACL fixture: %v", err)
+	}
+	if _, err := ConvergeAppACLCurrent(ctx, owner, fixture.runtime, fixture.admin, fixture.deletionWorker); err != nil {
+		t.Fatalf("upgrade predecessor ACL fixture: %v", err)
+	}
+	runtimeDB := fixture.openDirectRolePool(t, ctx, fixture.runtime)
+	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+		t.Fatalf("admit predecessor ACL runtime: %v", err)
+	}
+	assertRecordAttachmentsAppACLCurrentRolePrivileges(t, ctx, &fixture, runtimeDB)
+	assertRecordCollaborationAppACLCurrentRolePrivileges(t, ctx, &fixture, runtimeDB)
 }
 
 func assertRecordAttachmentsAppACLCurrentRolePrivileges(
@@ -937,16 +996,28 @@ func assertRecordAttachmentsAppACLCurrentRolePrivileges(
 ) {
 	t.Helper()
 
-	if _, err := runtimeDB.Exec(ctx, `
+	// Current publication is command-only. Seed legacy rows as the fixture's
+	// migrator only after proving the direct runtime cannot bypass that boundary.
+	migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
+	seedRestricted := func(statement string) {
+		t.Helper()
+		_, err := runtimeDB.Exec(ctx, statement)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("runtime raw attachment publication error = %v, want SQLSTATE 42501", err)
+		}
+		if _, err := migratorDB.Exec(ctx, statement); err != nil {
+			t.Fatalf("seed legacy attachment ACL fixture: %v", err)
+		}
+	}
+	seedRestricted(`
 		insert into public.blob_objects (
 			blob_key, sha256_digest, object_version, size_bytes, backend_kind
 		) values (
 			'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 			decode(repeat('aa', 32), 'hex'), 'local-v1', 7, 'local'
 		)
-	`); err != nil {
-		t.Fatalf("runtime insert attachment blob: %v", err)
-	}
+	`)
 	if _, err := runtimeDB.Exec(ctx, `insert into public.attachment_quota_accounts (project_id) values ('default')`); err != nil {
 		t.Fatalf("runtime insert attachment quota account: %v", err)
 	}
@@ -957,7 +1028,7 @@ func assertRecordAttachmentsAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime update attachment quota account: %v", err)
 	}
-	if _, err := runtimeDB.Exec(ctx, `
+	seedRestricted(`
 		insert into public.record_attachments (
 			attachment_id, record_id, attachment_state, display_name, media_type,
 			logical_size_bytes, blob_key, blob_object_version, created_by
@@ -966,16 +1037,12 @@ func assertRecordAttachmentsAppACLCurrentRolePrivileges(
 			'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 			'local-v1', 'usr_acl'
 		)
-	`); err != nil {
-		t.Fatalf("runtime insert logical attachment: %v", err)
-	}
-	if _, err := runtimeDB.Exec(ctx, `
+	`)
+	seedRestricted(`
 		insert into public.record_revision_attachments (
 			record_id, revision_id, ordinal, attachment_id
 		) values ('rec_acl', 'rrv_acl', 0, 'att_acl')
-	`); err != nil {
-		t.Fatalf("runtime insert immutable revision attachment: %v", err)
-	}
+	`)
 
 	for _, mutation := range []struct {
 		name      string
@@ -1024,14 +1091,14 @@ func testPostgresIntegrationAppACLCurrentExactRepeat(t *testing.T) {
 	fixture := newAppACLConvergencePostgresFixture(t, ctx)
 	migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
 
-	first, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin)
+	first, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin, fixture.deletionWorker)
 	if err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() first error = %v", err)
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture, migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
 
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin, fixture.deletionWorker)
 	if err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() repeat error = %v", err)
 	}
@@ -1049,7 +1116,7 @@ func testPostgresIntegrationAppACLCurrentPriorBaseline(t *testing.T) {
 	fixture := newAppACLConvergencePostgresFixture(t, ctx)
 	migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
 
-	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin); err != nil {
+	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin, fixture.deletionWorker); err != nil {
 		t.Fatalf("ConvergeAppACLCurrent() prior baseline error = %v", err)
 	}
 	_, _, priorInput := appACLCurrentPostgresContract(t, fixture, migrations.FS, appACLCurrentMigrationFragments)
@@ -1065,17 +1132,9 @@ func testPostgresIntegrationAppACLCurrentPriorBaseline(t *testing.T) {
 	// This fixture deliberately models an unrelated post-R1 source contract,
 	// not the production 0062 -> 0063 registered transition.
 	futureDependencies.transitionDefinitions = nil
-	_, err := convergeAppACLCurrentWithDependencies(
-		ctx,
-		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
-			return migratorDB.BeginTx(ctx, options)
-		},
-		fixture.runtime,
-		fixture.admin,
-		futureFS,
-		futureFragments,
-		futureDependencies,
-	)
+	_, err := convergeAppACLCurrentWithDependencies(ctx, func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+		return migratorDB.BeginTx(ctx, options)
+	}, fixture.runtime, fixture.admin, fixture.deletionWorker, futureFS, futureFragments, futureDependencies)
 	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
 		t.Fatalf("future current convergence error = %v, want rebuild-required sentinel", err)
 	}
@@ -1113,7 +1172,7 @@ func testPostgresIntegrationAppACLCurrentUnrelatedSameNames(t *testing.T) {
 				t.Fatalf("create unrelated same-name %s: %v", tc.name, err)
 			}
 
-			if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin); err != nil {
+			if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin, fixture.deletionWorker); err != nil {
 				t.Fatalf("ConvergeAppACLCurrent() with unrelated same-name %s error = %v", tc.name, err)
 			}
 			runtimeDB := fixture.openDirectRolePool(t, ctx, fixture.runtime)
@@ -1148,10 +1207,14 @@ func appACLCurrentPostgresContract(
 	if err != nil {
 		t.Fatalf("compile current PostgreSQL source contract: %v", err)
 	}
-	contract, err := compileAppACLCurrentCatalogContract(source, fixture.databaseName, []AppACLRoleBinding{
+	bindings := []AppACLRoleBinding{
 		{Subject: AppACLSubjectCenterRuntime, CatalogRole: fixture.runtime},
 		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: fixture.admin},
-	}, fixture.migrator)
+	}
+	if appACLCurrentSourceRequiresDeletionWorker(source) {
+		bindings = append(bindings, AppACLRoleBinding{Subject: AppACLSubjectRecordDeletionWorker, CatalogRole: fixture.deletionWorker})
+	}
+	contract, err := compileAppACLCurrentCatalogContract(source, fixture.databaseName, bindings, fixture.migrator)
 	if err != nil {
 		t.Fatalf("compile current PostgreSQL catalog contract: %v", err)
 	}

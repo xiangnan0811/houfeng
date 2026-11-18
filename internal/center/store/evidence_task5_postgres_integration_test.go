@@ -1,34 +1,35 @@
 package store
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"errors"
-	"io"
 	"testing"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
 )
 
 func TestPostgresIntegrationEvidenceTask5DeletionPreservesCopyAndPayload(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-task5-deletion", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, NewRecordEvidenceRevisionParticipant())
-	repository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture, runtimePool := signed.platform, signed.Runtime
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant())
+	repository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	targetAllocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-delete-target", recordbirth.PurposeEvidence)
 	databaseNow := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
 	targetCapture := storePreparedEvidenceCapture(
 		t,
-		"rec_evdeletetarget",
+		targetAllocation.RecordID,
 		"evs_evdeletetarget",
 		"evi_333333333333333333333333",
 		databaseNow,
 	)
-	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, targetCapture)
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, repository, targetCapture, targetAllocation.AllocationID)
 	targetPreparation := storeEvidenceRevisionPreparation(
 		t,
 		targetCapture.RecordID(),
@@ -36,70 +37,82 @@ func TestPostgresIntegrationEvidenceTask5DeletionPreservesCopyAndPayload(t *test
 		nil,
 		[]string{targetCapture.SnapshotID()},
 	)
-	target, err := recordRepository.CommitRevision(ctx, recordEvidenceParticipantCommand(
-		t, recordplatform.OperationKindRecordCreate, targetCapture.RecordID(), "", 0, 0,
-		"Evidence delete target", "evidence-delete-target", targetPreparation,
-	))
+	targetCommand := recordEvidenceParticipantCommand(t, recordplatform.OperationKindRecordCreate, targetCapture.RecordID(), "", 0, 0,
+		"Evidence delete target", "evidence-delete-target", targetPreparation)
+	targetCommand = prepareRevisionBirthCommand(t, ctx, signed, targetAllocation, targetCommand)
+	target, err := recordRepository.CommitRevision(ctx, targetCommand)
 	if err != nil {
 		t.Fatalf("CommitRevision(target) error = %v", err)
 	}
-	survivor, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_evdeletesurvivor", "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, "Evidence delete survivor"), "evidence-delete-survivor",
-	))
+	survivorAllocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "evidence-delete-survivor", recordbirth.PurposeCreate)
+	survivorCommand := recordsPostgresRevisionCommand(t, recordplatform.OperationKindRecordCreate, survivorAllocation.RecordID, "", 0, 0,
+		recordsPostgresCompleteRevisionInput(t, "Evidence delete survivor"), "evidence-delete-survivor")
+	survivorCommand = prepareRevisionBirthCommand(t, ctx, signed, survivorAllocation, survivorCommand)
+	survivor, err := recordRepository.CommitRevision(ctx, survivorCommand)
 	if err != nil {
 		t.Fatalf("CommitRevision(survivor) error = %v", err)
 	}
 
-	snapshot := targetCapture.Snapshot()
-	restoredEnvelope := snapshot.Envelope()
-	registry, err := evidence.NewRegistry([]evidence.Kind{
-		task5RecoveryEvidenceKind{descriptor: storeEvidenceParticipantDescriptor()},
-	})
-	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
+	// Seed the retained copy as fixture data; this deletion test does not claim
+	// that ordinary runtime principals can restore an arbitrary inventory.
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.evidence_snapshots
+		select (jsonb_populate_record(null::public.evidence_snapshots,
+		  to_jsonb(s) || jsonb_build_object('snapshot_id','evs_evdeletesurvivor','record_id',$2::text))).*
+		from public.evidence_snapshots s where s.snapshot_id=$1`, targetCapture.SnapshotID(), survivor.RecordID); err != nil {
+		t.Fatalf("seed surviving comparison snapshot: %v", err)
 	}
-	recoveryAdapter, err := evidence.NewRecoveryAdapter(registry, repository)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
+	if _, err := fixture.db.Exec(ctx, `insert into public.record_revision_evidence(record_id,revision_id,ordinal,snapshot_id,caption,reference_role)
+		values($1,$2,0,'evs_evdeletesurvivor','explicit comparison copy','evidence')`, survivor.RecordID, survivor.RevisionID); err != nil {
+		t.Fatalf("seed surviving comparison reference: %v", err)
 	}
-	if err := recoveryAdapter.Replay(ctx, evidence.EvidenceRecoveryInventory{
-		Payloads: []evidence.EvidenceRecoveryPayload{{
-			Key: restoredEnvelope.Key, Digest: snapshot.Hash(), CanonicalPayload: snapshot.Bytes(),
-		}},
-		Snapshots: []evidence.EvidenceRecoverySnapshot{{
-			RecordID: survivor.RecordID, SnapshotID: "evs_evdeletesurvivor", Envelope: restoredEnvelope,
-			PayloadDigest: snapshot.Hash(),
-		}},
-		CaptureIntents: []evidence.EvidenceRecoveryCaptureIntent{},
-		RevisionReferences: []evidence.EvidenceRecoveryRevisionReference{{
-			RecordID: survivor.RecordID, RevisionID: survivor.RevisionID, Ordinal: 0,
-			SnapshotID: "evs_evdeletesurvivor", Caption: "explicit comparison copy",
-			ReferenceRole: evidence.EvidenceReferenceRoleEvidence,
-		}},
-		CopyLineage: []evidence.EvidenceRecoveryCopyLineage{{
-			SnapshotID: "evs_evdeletesurvivor", CopiedFromSnapshotID: targetCapture.SnapshotID(),
-			CopyReason: "explicit comparison copy",
-		}},
-	}); err != nil {
-		t.Fatalf("Replay(explicit surviving copy) error = %v", err)
+	if _, err := fixture.db.Exec(ctx, `insert into public.evidence_copy_lineage(snapshot_id,copied_from_snapshot_id,copy_reason)
+		values('evs_evdeletesurvivor',$1,'explicit comparison copy')`, targetCapture.SnapshotID()); err != nil {
+		t.Fatalf("seed surviving comparison lineage: %v", err)
 	}
 	intent, preview := targetCapture.Intent(), targetCapture.Preview()
-	if err := repository.PersistCaptureIntent(ctx, target.RecordID, "evs_evdeletepending", intent, preview); err != nil {
+	if err := persistEvidenceCaptureIntentFixture(ctx, repository, target.RecordID, "evs_evdeletepending", intent, preview); err != nil {
 		t.Fatalf("PersistCaptureIntent() error = %v", err)
 	}
 
-	operation := recorddeletion.DeletionOperation{
-		OperationID: "rpo_evdeletetask5", ReservationID: "drs_evdeletetask5",
+	operation := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1, OperationID: "rpo_evdeletetask5", ReservationID: "drs_evdeletetask5",
 		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: target.RecordID},
 		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging,
-		FenceEpoch: 1, LedgerSequence: 1, LedgerEntryHash: sha256.Sum256([]byte("task5 deletion ledger")),
-	}
+		FenceEpoch: 1, LedgerSequence: 1, LedgerEntryHash: sha256.Sum256([]byte("task5 deletion ledger"))}
 	seedAttachmentDeletionOperation(t, ctx, fixture, operation, target.RevisionID)
+	if _, err := fixture.db.Exec(ctx, `update public.content_delivery_epochs set delivery_epoch=$2
+		where project_id='default' and object_kind='record' and object_id=$1`, target.RecordID, int64(operation.FenceEpoch)); err != nil {
+		t.Fatalf("set fixture cleanup epoch: %v", err)
+	}
 	adapter, err := evidence.NewDeletionAdapter(repository)
 	if err != nil {
 		t.Fatalf("NewDeletionAdapter() error = %v", err)
 	}
+	digest := targetCapture.Snapshot().Hash()
+	connection, err := fixture.db.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var originalCompressed []byte
+	if err := connection.QueryRow(ctx, `select compressed_payload from public.evidence_payloads where payload_digest=$1`, digest[:]).Scan(&originalCompressed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `set session_replication_role=replica`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `update public.evidence_payloads set compressed_payload=set_byte(compressed_payload,0,0) where payload_digest=$1`, digest[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.PurgeDeletion(ctx, recorddeletion.PurgeTarget{Operation: operation}); err == nil {
+		t.Fatal("corrupt evidence produced a purge receipt")
+	}
+	if _, err := connection.Exec(ctx, `update public.evidence_payloads set compressed_payload=$2 where payload_digest=$1`, digest[:], originalCompressed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `set session_replication_role=origin`); err != nil {
+		t.Fatal(err)
+	}
+	connection.Release()
 	receipt, err := adapter.PurgeDeletion(ctx, recorddeletion.PurgeTarget{Operation: operation})
 	if err != nil {
 		t.Fatalf("PurgeDeletion() error = %v", err)
@@ -116,7 +129,6 @@ func TestPostgresIntegrationEvidenceTask5DeletionPreservesCopyAndPayload(t *test
 	}
 
 	var targetRefs, targetSnapshots, targetIntents, survivorRefs, survivorSnapshots, survivorLineage, payloads int64
-	digest := targetCapture.Snapshot().Hash()
 	if err := fixture.db.QueryRow(ctx, `
 		select
 		  (select count(*) from public.record_revision_evidence where record_id = $1),
@@ -136,132 +148,4 @@ func TestPostgresIntegrationEvidenceTask5DeletionPreservesCopyAndPayload(t *test
 		t.Fatalf("target ref/snapshot/intent survivor ref/snapshot/lineage payload = %d/%d/%d %d/%d/%d %d",
 			targetRefs, targetSnapshots, targetIntents, survivorRefs, survivorSnapshots, survivorLineage, payloads)
 	}
-}
-
-func TestPostgresIntegrationEvidenceTask5RecoveryReplaysCanonicalInventoryThenRunsGlobalGC(t *testing.T) {
-	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-task5-recovery", 2)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	record, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_evrecovery", "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, "Evidence recovery"), "evidence-recovery",
-	))
-	if err != nil {
-		t.Fatalf("CommitRevision() error = %v", err)
-	}
-
-	repository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	orphan := storeEvidenceSnapshotFixture(t, "recovery orphan")
-	if _, err := repository.PersistPayload(ctx, orphan); err != nil {
-		t.Fatalf("PersistPayload(orphan) error = %v", err)
-	}
-	restored := storeEvidenceSnapshotFixture(t, "recovered canonical payload")
-	restoredEnvelope := restored.Envelope()
-	intent, preview := storeEvidenceIntentFixture()
-	registry, err := evidence.NewRegistry([]evidence.Kind{task5RecoveryEvidenceKind{descriptor: storeEvidenceDescriptor()}})
-	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
-	}
-	adapter, err := evidence.NewRecoveryAdapter(registry, repository)
-	if err != nil {
-		t.Fatalf("NewRecoveryAdapter() error = %v", err)
-	}
-	inventory := evidence.EvidenceRecoveryInventory{
-		Payloads: []evidence.EvidenceRecoveryPayload{{
-			Key: restoredEnvelope.Key, Digest: restored.Hash(), CanonicalPayload: restored.Bytes(),
-		}},
-		Snapshots: []evidence.EvidenceRecoverySnapshot{{
-			RecordID: record.RecordID, SnapshotID: "evs_evrecovery", Envelope: restoredEnvelope,
-			PayloadDigest: restored.Hash(),
-		}},
-		CaptureIntents: []evidence.EvidenceRecoveryCaptureIntent{{
-			RecordID: record.RecordID, SnapshotID: "evs_evrecoverypending", Intent: intent, Preview: preview,
-		}},
-		RevisionReferences: []evidence.EvidenceRecoveryRevisionReference{{
-			RecordID: record.RecordID, RevisionID: record.RevisionID, Ordinal: 0, SnapshotID: "evs_evrecovery",
-			Caption: "recovered decision", ReferenceRole: evidence.EvidenceReferenceRoleDecisionSupport,
-		}},
-		CopyLineage: []evidence.EvidenceRecoveryCopyLineage{{
-			SnapshotID: "evs_evrecovery", CopiedFromSnapshotID: "evs_evrecoverysource",
-			CopyReason: "recovered explicit copy",
-		}},
-	}
-	if err := adapter.Replay(ctx, inventory); err != nil {
-		t.Fatalf("Replay() error = %v", err)
-	}
-	if err := adapter.Replay(ctx, inventory); err != nil {
-		t.Fatalf("Replay(idempotent retry) error = %v", err)
-	}
-	divergent := inventory
-	divergent.CopyLineage = append([]evidence.EvidenceRecoveryCopyLineage(nil), inventory.CopyLineage...)
-	divergent.CopyLineage[0].CopyReason = "divergent copy reason"
-	if err := adapter.Replay(ctx, divergent); !errors.Is(err, evidence.ErrInvalidRecoveryInventory) {
-		t.Fatalf("Replay(divergent retry) error = %v, want ErrInvalidRecoveryInventory", err)
-	}
-
-	var compressed []byte
-	var storedPayloads, orphanPayloads, snapshots, intents, references, gcReceipts int64
-	restoredDigest, orphanDigest := restored.Hash(), orphan.Hash()
-	if err := fixture.db.QueryRow(ctx, `
-		select
-		  (select compressed_payload from public.evidence_payloads where payload_digest = $1),
-		  (select count(*) from public.evidence_payloads where payload_digest = $1),
-		  (select count(*) from public.evidence_payloads where payload_digest = $2),
-		  (select count(*) from public.evidence_snapshots
-		    where snapshot_id = 'evs_evrecovery' and record_id = $3
-		      and capture_authorization_digest = $4),
-		  (select count(*) from public.evidence_capture_intents
-		    where intent_id = $5 and record_id = $3 and snapshot_id = 'evs_evrecoverypending'),
-		  (select count(*) from public.record_revision_evidence
-		    where record_id = $3 and revision_id = $6 and ordinal = 0 and snapshot_id = 'evs_evrecovery'
-		      and caption = 'recovered decision' and reference_role = 'decision_support'),
-		  (select count(*) from public.evidence_payload_gc_receipts)`,
-		restoredDigest[:], orphanDigest[:], record.RecordID, restoredEnvelope.Authorization.Digest[:],
-		intent.ID, record.RevisionID,
-	).Scan(&compressed, &storedPayloads, &orphanPayloads, &snapshots, &intents, &references, &gcReceipts); err != nil {
-		t.Fatalf("read evidence recovery result: %v", err)
-	}
-	reader, err := gzip.NewReader(bytes.NewReader(compressed))
-	if err != nil {
-		t.Fatalf("gzip.NewReader(recovered payload) error = %v", err)
-	}
-	canonical, err := io.ReadAll(reader)
-	if closeErr := reader.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil || !bytes.Equal(canonical, restored.Bytes()) {
-		t.Fatalf("recovered canonical payload mismatch/error = %q/%v", canonical, err)
-	}
-	if storedPayloads != 1 || orphanPayloads != 0 || snapshots != 1 || intents != 1 || references != 1 || gcReceipts != 1 {
-		t.Fatalf("payload/orphan/snapshot/intent/reference/gc = %d/%d/%d/%d/%d/%d, want 1/0/1/1/1/1",
-			storedPayloads, orphanPayloads, snapshots, intents, references, gcReceipts)
-	}
-}
-
-type task5RecoveryEvidenceKind struct {
-	descriptor evidence.Descriptor
-}
-
-func (kind task5RecoveryEvidenceKind) Descriptor() evidence.Descriptor { return kind.descriptor }
-func (task5RecoveryEvidenceKind) ValidateSelection(context.Context, evidence.ActorScope, evidence.Selection) error {
-	return nil
-}
-func (task5RecoveryEvidenceKind) PreviewCapture(context.Context, evidence.ActorScope, evidence.Selection) (evidence.Preview, error) {
-	return evidence.Preview{}, nil
-}
-func (task5RecoveryEvidenceKind) Capture(context.Context, evidence.ActorScope, evidence.Intent) (evidence.CanonicalSnapshot, error) {
-	return evidence.CanonicalSnapshot{}, nil
-}
-func (task5RecoveryEvidenceKind) Authorize(context.Context, evidence.ActorScope, evidence.Selection) (evidence.AuthorizationScope, error) {
-	return evidence.AuthorizationScope{}, nil
-}
-func (task5RecoveryEvidenceKind) Summarize(evidence.CanonicalSnapshot) evidence.Summary {
-	return evidence.Summary{}
-}
-func (task5RecoveryEvidenceKind) Compare(evidence.CanonicalSnapshot, evidence.CanonicalSnapshot, evidence.Alignment) evidence.Comparison {
-	return evidence.Comparison{}
-}
-func (task5RecoveryEvidenceKind) Export(evidence.CanonicalSnapshot, evidence.ExportMode) evidence.ExportMaterial {
-	return evidence.ExportMaterial{}
 }

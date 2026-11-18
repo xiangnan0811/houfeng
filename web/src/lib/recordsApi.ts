@@ -1,4 +1,5 @@
 import allowlistedApiError from './apiError'
+import { decodeAllocationJSON, parseRecordAllocation, sameRecordAllocation, validIdempotencyKey } from './recordAllocation'
 import {
   ApiError,
   jsonBodyInit,
@@ -57,6 +58,8 @@ import type {
   SubjectActivityItem,
   SubjectActivitySourceStatus,
   RecordSubjectKind,
+  RecordAllocation,
+  RecordAllocationInput,
   VPSOverview,
   IPQualityIPType,
   IPQualityProductSummary,
@@ -66,8 +69,8 @@ function encoded(value: string): string {
   return encodeURIComponent(value)
 }
 
-function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  return transportRequestJSON<T>(path, init, allowlistedApiError)
+function requestJSON<T>(path: string, init?: RequestInit, decodeResponse?: (rawBody: string) => T): Promise<T> {
+  return transportRequestJSON<T>(path, init, allowlistedApiError, decodeResponse)
 }
 
 function requestEmpty(path: string, init?: RequestInit): Promise<void> {
@@ -110,12 +113,13 @@ function postIdempotentJSON<T>(
   body: unknown,
   idempotencyKey: string,
   signal?: AbortSignal,
+  decodeResponse?: (rawBody: string) => T,
 ): Promise<T> {
   const init = jsonBodyInit('POST', body, {
     'Idempotency-Key': idempotencyKey,
   })
   if (signal) init.signal = signal
-  return requestJSON<T>(path, init)
+  return requestJSON<T>(path, init, decodeResponse)
 }
 
 function changeRecordLifecycle(
@@ -181,10 +185,22 @@ export function searchRecords(filter?: RecordSearchFilter): Promise<RecordSearch
     : undefined))
 }
 
-export function captureEvidencePreview(
+/**
+ * New targets carry `idempotencyKey` on their first preview (no record ID) and
+ * receive the server reservation; later pre-root previews send that record ID
+ * and allocation unchanged. Existing records send only their record ID.
+ */
+export async function captureEvidencePreview(
   input: EvidenceCapturePreviewInput,
   signal?: AbortSignal,
+  idempotencyKey?: string,
 ): Promise<EvidenceCapturePreview> {
+  if (input.allocation) {
+    if (!input.record_id) throw new Error('证据预览缺少预留记录身份')
+    parseRecordAllocation(input.allocation, { purpose: 'evidence_preview', recordId: input.record_id })
+  } else if (!input.record_id && (!idempotencyKey || !validIdempotencyKey(idempotencyKey))) {
+    throw new Error('证据预览缺少预留请求身份')
+  }
   const body: EvidenceCapturePreviewInput = {
     kind: input.kind,
     schema_version: input.schema_version,
@@ -199,9 +215,37 @@ export function captureEvidencePreview(
     sensitive_topology_fields: [...input.sensitive_topology_fields],
   }
   if (input.record_id !== undefined) body.record_id = input.record_id
-  const init = jsonBodyInit('POST', body)
+  if (input.allocation !== undefined) body.allocation = input.allocation
+  const init = jsonBodyInit('POST', body, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined)
   if (signal) init.signal = signal
-  return requestJSON<EvidenceCapturePreview>('/api/evidence/capture-previews', init)
+  const preview = await requestJSON<unknown>('/api/evidence/capture-previews', init, decodeAllocationJSON) as EvidenceCapturePreview
+  if (idempotencyKey !== undefined || input.allocation !== undefined) {
+    const allocation = parseRecordAllocation(preview.allocation, {
+      purpose: 'evidence_preview',
+      recordId: preview.record_id,
+      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+      ...(input.allocation ? { requestDigest: input.allocation.request_digest, idempotencyKey: input.allocation.idempotency_key } : {}),
+    })
+    if (input.allocation && !sameRecordAllocation(allocation, input.allocation)) throw new Error('证据预览返回了另一个记录预留')
+    return { ...preview, allocation }
+  }
+  return preview
+}
+
+/** Reserves a new target record. Retry an uncertain reply with the same key and digest. */
+export async function createRecordAllocation(
+  input: RecordAllocationInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RecordAllocation> {
+  if (!validIdempotencyKey(idempotencyKey) || !/^[0-9a-f]{64}(?![\s\S])/.test(input.request_digest) || /^0+$/.test(input.request_digest)) {
+    throw new Error('记录预留请求无效')
+  }
+  const value = await postIdempotentJSON<unknown>('/api/records/allocations', {
+    purpose: input.purpose,
+    request_digest: input.request_digest,
+  }, idempotencyKey, signal, decodeAllocationJSON)
+  return parseRecordAllocation(value, { purpose: input.purpose, idempotencyKey, requestDigest: input.request_digest })
 }
 
 export function getEvidenceSnapshot(
@@ -536,6 +580,8 @@ const SUBJECT_ACTIVITY_EVENT_KINDS = [
   'record_restored',
   'record_archived',
   'record_unarchived',
+  'record_trashed',
+  'record_trash_restored',
   'record_owner_changed',
   'record_participant_changed',
   'record_follow_up_changed',
@@ -1026,6 +1072,24 @@ export function saveComparisonRecord(
     record_id: input.record_id,
     draft_id: input.draft_id,
     draft_etag: input.draft_etag,
+    comparison_intent: input.comparison_intent,
+    allocation: input.allocation,
+  }, idempotencyKey, signal)
+}
+
+/**
+ * Asks for the completed result of a save made by an earlier client with its
+ * own `rec_` ID. Sends only the original record ID and key plus the current
+ * authenticated intent for the same comparison: no draft, reservation or new
+ * content, and the server never creates a record on this request.
+ */
+export function recoverLegacyComparisonRecord(
+  input: { record_id: string; comparison_intent: string },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RecordMutationResult> {
+  return postIdempotentJSON<RecordMutationResult>('/api/records', {
+    record_id: input.record_id,
     comparison_intent: input.comparison_intent,
   }, idempotencyKey, signal)
 }

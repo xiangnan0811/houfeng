@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/monitoringinstances"
@@ -23,90 +23,6 @@ func (f *fakeCommandActionAuditExecutor) Exec(_ context.Context, sql string, arg
 	f.sql = sql
 	f.args = append([]any(nil), args...)
 	return f.tag, f.err
-}
-
-func TestInsertCommandActionAuditUsesCurrentIdentitySnapshots(t *testing.T) {
-	exec := &fakeCommandActionAuditExecutor{tag: pgconn.NewCommandTag("INSERT 0 1")}
-	occurredAt := time.Date(2026, time.July, 12, 8, 30, 0, 0, time.UTC)
-
-	err := insertCommandActionAudit(context.Background(), exec, commandActionAuditEvent{
-		ActionID:             "act_001",
-		MonitoringInstanceID: "mi_001",
-		CommandID:            "uptime",
-		Sensitivity:          "standard",
-		EventType:            "queued",
-		ActorUserID:          "usr_001",
-		Source:               "web",
-		OccurredAt:           occurredAt,
-	})
-	if err != nil {
-		t.Fatalf("insertCommandActionAudit() error = %v", err)
-	}
-
-	lowerSQL := strings.ToLower(oneLineStoreSQL(exec.sql))
-	for _, want := range []string{
-		"insert into monitoring_instance_command_action_audit",
-		"monitoring_instance_name_snapshot",
-		"actor_username_snapshot",
-		"actor_display_name_snapshot",
-		"select $1",
-		"mi.display_name",
-		"coalesce(actor.username, '')",
-		"coalesce(actor.display_name, '')",
-		"from monitoring_instances mi",
-		"left join users actor",
-		"actor.user_id = nullif($6, '')",
-		"mi.monitoring_instance_id = $3",
-		"actor.user_id is not null",
-	} {
-		if !strings.Contains(lowerSQL, want) {
-			t.Fatalf("audit insert SQL missing %q: %s", want, oneLineStoreSQL(exec.sql))
-		}
-	}
-	if strings.Contains(lowerSQL, "values (") {
-		t.Fatalf("audit insert must use INSERT SELECT, got %s", oneLineStoreSQL(exec.sql))
-	}
-	if strings.Contains(lowerSQL, "stdout") || strings.Contains(lowerSQL, "stderr") {
-		t.Fatalf("audit insert SQL leaked output fields: %s", oneLineStoreSQL(exec.sql))
-	}
-	if len(exec.args) != 9 {
-		t.Fatalf("audit insert args = %#v, want 9 values", exec.args)
-	}
-	if exec.args[1] != "act_001" || exec.args[2] != "mi_001" || exec.args[5] != "usr_001" || exec.args[8] != occurredAt {
-		t.Fatalf("audit insert args = %#v", exec.args)
-	}
-}
-
-func TestInsertCommandActionAuditWritesFixedRejectedReasonWithoutAction(t *testing.T) {
-	exec := &fakeCommandActionAuditExecutor{tag: pgconn.NewCommandTag("INSERT 0 1")}
-
-	err := insertCommandActionAudit(context.Background(), exec, commandActionAuditEvent{
-		MonitoringInstanceID: "mi_001",
-		CommandID:            "systemctl_status",
-		Sensitivity:          "sensitive",
-		EventType:            "rejected",
-		ActorUserID:          "usr_001",
-		Source:               "web",
-	})
-	if err != nil {
-		t.Fatalf("insertCommandActionAudit() error = %v", err)
-	}
-
-	lowerSQL := strings.ToLower(oneLineStoreSQL(exec.sql))
-	for _, want := range []string{
-		"'rejected'",
-		"jsonb_build_object('reason', 'sensitive_confirmation_required')",
-		"mi.archived_at is null",
-		"mi.binding_status = '已绑定'",
-		"mi.monitoring_status <> '暂停'",
-	} {
-		if !strings.Contains(lowerSQL, want) {
-			t.Fatalf("rejected audit SQL missing %q: %s", want, oneLineStoreSQL(exec.sql))
-		}
-	}
-	if exec.args[1] != nil {
-		t.Fatalf("rejected action arg = %#v, want nil", exec.args[1])
-	}
 }
 
 func TestInsertCommandActionAuditRequiresExactlyOneSnapshotSource(t *testing.T) {
@@ -195,33 +111,42 @@ func TestInsertCommandActionAuditWrapsExecutorError(t *testing.T) {
 	}
 }
 
-func TestRecordRejectedCommandActionUsesSnapshotAuditHelper(t *testing.T) {
-	var sql string
-	var args []any
-	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
-		exec: func(_ context.Context, query string, queryArgs ...any) (pgconn.CommandTag, error) {
-			sql = query
-			args = append([]any(nil), queryArgs...)
-			return pgconn.NewCommandTag("INSERT 0 1"), nil
-		},
-	}}
-	occurredAt := time.Date(2026, time.July, 12, 9, 0, 0, 0, time.UTC)
-
-	err := repo.RecordRejectedCommandAction(context.Background(), "mi_001", monitoringinstances.RejectedCommandActionInput{
-		CommandID:   "systemctl_status",
-		Sensitivity: "sensitive",
-		ActorUserID: "usr_001",
-		Source:      monitoringinstances.CommandActionSourceWeb,
-		OccurredAt:  occurredAt,
-	})
-	if err != nil {
-		t.Fatalf("RecordRejectedCommandAction() error = %v", err)
-	}
-	if !strings.Contains(strings.ToLower(sql), "'rejected'") {
-		t.Fatalf("audit SQL = %s, want rejected event", oneLineStoreSQL(sql))
-	}
-	if len(args) != 9 || args[1] != nil || args[2] != "mi_001" || args[3] != "systemctl_status" || args[4] != "sensitive" || args[5] != "usr_001" || args[6] != monitoringinstances.CommandActionSourceWeb || args[8] != occurredAt {
-		t.Fatalf("audit args = %#v", args)
+func TestRecordRejectedCommandActionSourceAuthority(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		blocked bool
+	}{
+		{name: "writable parent"},
+		{name: "retired parent", blocked: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			writes := 0
+			tx := &fakeMonitoringInstanceTx{
+				sourceState: fakeSourceWriterState{
+					parents: map[string]string{"mi_001": "vps_001"},
+					blocked: map[string]bool{"vps/vps_001": tt.blocked},
+				},
+				exec: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+					if strings.Contains(sql, "pg_advisory_xact_lock") {
+						return pgconn.NewCommandTag("SELECT 1"), nil
+					}
+					writes++
+					return pgconn.NewCommandTag("INSERT 0 1"), nil
+				},
+			}
+			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+			err := repo.RecordRejectedCommandAction(context.Background(), "mi_001", monitoringinstances.RejectedCommandActionInput{
+				CommandID: "systemctl_status", Sensitivity: "sensitive",
+				ActorUserID: "usr_001", Source: monitoringinstances.CommandActionSourceWeb,
+			})
+			if tt.blocked {
+				if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) || writes != 0 || tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+					t.Fatalf("error = %v, writes = %d, commits = %d, rollbacks = %d", err, writes, tx.commitCalls, tx.rollbackCalls)
+				}
+			} else if err != nil || writes != 1 || tx.commitCalls != 1 {
+				t.Fatalf("error = %v, writes = %d, commits = %d", err, writes, tx.commitCalls)
+			}
+		})
 	}
 }
 

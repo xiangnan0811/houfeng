@@ -31,9 +31,10 @@ type recordDeletionPreviewResponse struct {
 }
 
 type recordDeletionSurvivingCopyResponse struct {
-	Scope     string `json:"scope"`
-	Kind      string `json:"kind"`
-	CopyCount uint64 `json:"copy_count"`
+	Scope       string  `json:"scope"`
+	Kind        string  `json:"kind"`
+	CountStatus string  `json:"count_status"`
+	CopyCount   *uint64 `json:"copy_count"`
 }
 
 type recordDeletionManagedBackupResponse struct {
@@ -64,7 +65,8 @@ type recordDeletionOperationResponse struct {
 - draft/revision conflict 的 `recovery` 只能包含客户端恢复所需的 allowlisted draft/revision metadata 与 payload；不得整体序列化领域结构体。未知 error 固定为 `500 internal_error`。
 - record/draft handler 在任何 actor、application、path 或 method 分支前设置精确 `Cache-Control: private, no-store`；成功、opaque 404、conflict、unavailable 与 204 都不得被共享或浏览器缓存复用。
 - 所有出站 draft payload（普通 item、list、publish 读取、typed conflict 的 server/local payload）必须重新通过 transport allowlist decoder。持久化 payload 即使是合法 canonical JSON，只要包含未知字段、缺必填 array 或 array 为 `null`，就返回不带原 payload/ETag 的 `500 internal_error`，不能当作客户端 400/422，也不能原样回显。
-- deletion preview 只允许 `reservation_id`、一次性 `deletion_request_token`、UTC `expires_at`、固定顺序的九项 `online_purge_scopes`、identity-free `surviving_copies[{scope,kind,copy_count}]`、`managed_backup{retained_copy_count,maximum_retention_days,latest_expires_at}` 与 `ledger_health`。`surviving_copies` 必须按 adapter/kind 闭合集顺序、去重且使用正数 count；空集合编码为 `[]`。无 retained backup 时 `latest_expires_at` 编码为 `null`。
+- deletion preview 只允许 `reservation_id`、一次性 `deletion_request_token`、UTC `expires_at`、固定顺序的九项 `online_purge_scopes`、identity-free `surviving_copies[{scope,kind,count_status,copy_count}]`、`managed_backup{retained_copy_count,maximum_retention_days,latest_expires_at}` 与 `ledger_health`。`surviving_copies` 必须按 adapter/kind 闭合集顺序、去重；`count_status:"known"` 必须带正数 `copy_count`，`count_status:"unknown"` 必须编码 `copy_count:null`，且只允许 `record_markdown_client/offline_browser_buffer`，不得伪造 0/1 计数；空集合编码为 `[]`。无 retained backup 时 `latest_expires_at` 编码为 `null`。`managed_backup.retained_copy_count` 是独立合同，不使用 count status。
+- adapter preview commitment 使用 `houfeng.record-deletion.adapter-preview.v2` 域：每个 survivor 先编码 kind，再编码 count status discriminant，只有 known 才继续编码 count。v1 域签发的 preview 在 execute 时按 binding 漂移返回 `409 deletion_preview_stale`，不提供兼容回退。
 - preview 只在完整九 adapter readiness、受管备份摘要和 ledger/witness 健康都可证明时返回 `ledger_health:"healthy"` 与 token；unknown/unhealthy 状态返回 `503 deletion_safety_unavailable`，不能在 JSON 中描述内部 ledger/witness 细节。operation 响应只允许 `operation_id` 与闭合 `state`。reservation commitment、request fingerprint、record/project identity、dependency/impact digest、ledger/witness tuple、fence/release epoch 和 receipt digest 均不得进入 HTTP JSON。
 - deletion operation 的 pending state 返回 `202` 并设置 `Retry-After: 1`；`not_committed` 在 POST/GET 都返回 `200`，`online_purged` 只在 GET status 返回 `200`。delete commit 已持久化后的 POST replay 即使已 `online_purged` 仍返回同一 operation 的 `202`，不能改写成新的成功语义。
 - `record_purge_operations` 是可重建应用投影，不是权威删除存在性来源。status query 的 `pgx.ErrNoRows` 在 primary ledger/full-witness fallback 尚未接线时必须映射 `ErrDeletionStatusUnavailable` -> `503 deletion_status_unavailable`；不得伪造 authoritative 404 或完成。未来 fallback 只有在 ledger namespace + full witness 明确证明不存在后才能返回 opaque 404。
@@ -115,8 +117,8 @@ type recordDeletionOperationResponse struct {
 
 - `internal/center/http/handlers/records_test.go`、`record_drafts_test.go`：覆盖 400/404/409/413/422/503、200/404/409/503/204 的 exact no-store header、typed recovery allowlist、persisted server/local unknown payload fail-closed、unknown/nested trusted field、数组 `[]`/`null`、raw error/evidence 禁泄露以及 application 零调用。
 - `internal/center/http/router_test.go`：覆盖 session middleware、feature-off API 404/SPA 隔离、static/prefix route dispatch。
-- `internal/center/http/handlers/record_deletions_test.go`：覆盖 preview/execute/status allowlist、固定九项 scope、空 `surviving_copies:[]`、无备份 `latest_expires_at:null`、非法/乱序 summary fail-closed、header-only canonical token、body token/缺失/格式错误/多个 header 的 application 零调用、opaque 404、409、503、pending `202`/`Retry-After`、`not_committed`/status `online_purged` 200 和同 operation replay。
-- `internal/center/recorddeletion/preview_summary_test.go`：覆盖 adapter 与 aggregate survivor 的 nil、unknown、zero-count、duplicate、kind/scope 乱序拒绝。
+- `internal/center/http/handlers/record_deletions_test.go`：覆盖 preview/execute/status allowlist、固定九项 scope、空 `surviving_copies:[]`、known/unknown `count_status` 与 unknown `copy_count:null` 的精确 JSON、无备份 `latest_expires_at:null`、非法/乱序/错 owner/known 零或空 count/unknown 带 count 的 summary fail-closed、header-only canonical token、body token/缺失/格式错误/多个 header 的 application 零调用、opaque 404、409、503、pending `202`/`Retry-After`、`not_committed`/status `online_purged` 200 和同 operation replay。
+- `internal/center/recorddeletion/preview_summary_test.go`：覆盖 adapter 与 aggregate survivor 的 nil、unknown、zero-count、known nil、unknown 带 count、unknown 错 kind/错 owner、duplicate、kind/scope 乱序拒绝；clone 不共享 count 指针；registry 拒绝非 markdown adapter 的 unknown；v2 commitment 区分 unknown 与 known 计数，v1 preview binding 在 execute 被拒绝。
 - `internal/center/recorddeletion/service_test.go`、`internal/center/store/record_deletions_test.go`：覆盖 initiator/project-admin status 授权、非授权 opaque missing、content-free projection 和 projection missing fail-closed 503。
 - `cmd/houfeng-center/bootstrap_test.go`：覆盖 legacy mode 不构造 Records handler、RuntimeAdmission mode 显式接线、transaction admission 未就绪时稳定 503，以及未接线 deletion dependencies 时 preview 无 token。
 - 提交前至少运行：

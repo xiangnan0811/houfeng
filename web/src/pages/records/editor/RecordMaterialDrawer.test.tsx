@@ -114,6 +114,7 @@ describe('RecordMaterialDrawer', () => {
           onRemove={onRemove}
           items={[
             { kind: 'evidence', id: 'ev_7K2P', label: '第三晚 TCP 观测', available: true },
+            { kind: 'evidence', id: 'ev_pending', label: '待确认证据', available: false, confirmationPending: true },
             { kind: 'attachment', id: 'att_report', label: '报告', available: true },
           ]}
         />
@@ -122,6 +123,9 @@ describe('RecordMaterialDrawer', () => {
     expect(screen.getByRole('button', { name: '插入第三晚 TCP 观测' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '移除报告' })).toBeDisabled()
     expect(screen.getByRole('link', { name: '查看证据' })).toHaveAttribute('href', '/evidence/ev_7K2P')
+    expect(screen.getByText('确认中')).toBeInTheDocument()
+    expect(screen.queryByText('引用已失效')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: '查看证据' })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '插入第三晚 TCP 观测' }))
     fireEvent.click(screen.getByRole('button', { name: '移除报告' }))
     expect(onInsert).not.toHaveBeenCalled()

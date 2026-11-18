@@ -210,6 +210,62 @@ substitute.
 
 Attachment storage has no implicit backend when Records runtime admission is enabled. `local` requires an absolute private directory that is neither `/` nor another broad system path. S3 deployments set `HOUFENG_ATTACHMENT_BLOB_BACKEND=s3`, endpoint, bucket, and TLS mode, and load credentials through `HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE` and `HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE`; do not put credential values in the environment file. Center and processor must use the same immutable Blob backend and scanner settings.
 
+### Local Blob namespace admission
+
+The C81 local-storage contract requires an admitted namespace before Center or
+content-processor starts. Ordinary fresh Compose performs this one-shot admission
+after db-init and before either writer. Its UID/GID10001 initializer checks the
+direct platform-admin connection, records three random UUIDs in the separate
+UID10001-owned `data/local-namespace-init` journal, and reuses them on exact
+retry. The administrator credential is a read-only staged file available only to
+that initializer, not to the runtime processes. Creating an empty directory or
+applying schema alone is insufficient. S3 selection does not initialize a local
+namespace. Actual fresh-install acceptance remains a separate evidence gate.
+The namespace marker is published atomically. On a source-enrolled stack, the
+one-shot verifies an existing matching binding only; it never provisions one.
+
+For a direct or systemd deployment using a fresh isolated tree with all business
+writers stopped, run the built admin executable as the actual BlobRoot owner,
+with a direct platform-admin SQL login supplied only through a private one-shot
+request outside BlobRoot:
+
+```bash
+houfeng-record-platform-admin local-namespace provision --request-file /run/houfeng-local-provision/request.json
+```
+
+The strict JSON fields are `database_url`, absolute canonical `root`, `namespace_id`,
+`incarnation_id`, `request_id`, numeric `owner_uid`, and numeric `owner_gid`. Preserve the three
+random UUID identities for exact retry. The invoking user owns the private request directory
+and mode-0600 request. The command consumes the credential input before DB access. After an
+ambiguous failure keep writers stopped and resolve the same identities. Never leave privileged
+credentials in the business volume/runtime configuration, invoke the participant as root, or
+relax ownership to make it succeed.
+
+The tree uses 0700 directories, 0600 marker/lock/temp files and a dedicated fixed provision
+lock. Runtime opens the admitted physical binding without mkdir, repair or rebind; changed
+marker/directory/anchor identity fails closed. Both processes share one actual Linux
+filesystem/flock domain; btrfs is supported. The local writer also requires `O_TMPFILE`,
+user xattrs, and access to its own `/proc/self/fd` on procfs so an initialized, durably
+registered inode can be linked without extra capabilities. Missing support fails closed;
+there is no named-file fallback. Keep namespace rows, historical incarnations, anchors,
+obligations and registered temporary targets in the coordinated recovery point.
+
+Source-enabled adoption and V2 source initialization are unsupported; retained
+source V1 has a separate contract. The local UID10001 participant cannot acquire
+the source outer guard or activate source recovery. Ordinary cold upgrade accepts
+an unbound released BlobRoot only when the UID/GID10001 `0700` root contains
+exactly an empty UID/GID10001 `0700` `sha256` directory and the database has no
+existing local blob references. A missing or empty BlobRoot is refused for cold
+upgrade; fresh installation retains its separate initialization behavior. The
+controller checks references before ACTIVE and again after fencing; the
+initializer checks the physical tree. Populated legacy roots are refused before
+any change. New-boot or
+copied physical namespace adoption is not supported; do not delete markers or
+invent a new UUID to force admission. A database inventory with
+`physical_evidence=not_observed` proves neither physical inventory nor stopped
+writers. See the [local I/O contract](../spec/contracts/platform/delivery-primitives.md#scenario-本地持久写入跨进程锁与清理).
+
+
 > Note: `HOUFENG_WEB_DIST_DIR` defaults to `web/dist`, but the configured directory must exist and contain the built SPA; otherwise center `/` returns 404 and the UI is unavailable. Production deployments should point it at the installed `web/dist` path.
 
 ## Local center run
@@ -233,15 +289,28 @@ The center applies embedded migrations on startup and serves API plus the built 
 
 The release bundle is the ordinary single-host production path. It runs only
 published images and needs no source checkout, local build, helper launcher, or
-manual database command. Prerequisites are Docker with Compose support, an
-existing Nginx Proxy Manager (NPM) deployment in either supported proxy mode,
-and an HTTPS hostname whose DNS already reaches NPM.
+manual database command for a fresh installation. Use local rootful Docker with
+Compose support, an existing Nginx Proxy Manager (NPM) deployment in either
+supported proxy mode, and an HTTPS hostname whose DNS already reaches NPM.
 
-Create a private deployment directory and download the four assets from the same
-GitHub Release:
+For a new installation choose a protected, canonical path whose ancestors are
+root-owned, non-writable by other users, free of symlinks, and traversable by the
+UID10002/GID10001 native upgrade participant. A user-owned `0700` home directory
+is not sufficient for that host operation. Verify `/srv` meets these conditions;
+the following creates a new `/srv/houfeng` and fails if it already exists. Run
+these commands and subsequent Compose operations in a root shell. Control files,
+including Compose assets, `.env`, and upgrade requests, must stay root-owned and
+not writable by UID10002; `.env` and private requests must remain private. Do not
+chmod a user's home directory or relocate an existing identity to force an upgrade.
+An existing installation with unsafe or inaccessible ancestors must be refused.
+Download the four assets from the same GitHub Release:
 
 ```bash
-install -d -m 0700 houfeng && cd houfeng
+sudo -i
+mkdir /srv/houfeng || exit 1
+chown root:10001 /srv/houfeng
+chmod 0750 /srv/houfeng
+cd /srv/houfeng
 sudo install -d -o 10001 -g 10001 -m 0700 optional-secrets optional-secrets/comparison-keyring optional-secrets/s3
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml -o compose.yaml
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.proxy-network.yaml -o compose.proxy-network.yaml
@@ -353,49 +422,62 @@ docker compose up -d
 
 ### Topology and initialization
 
-The stack contains eight services:
+The stack contains these services:
 
-- `houfeng-storage-init` creates the UID/GID-owned attachment and authority,
-  public Center identity, and staged-secret directories below `./data`;
-- `houfeng-secrets-init` copies only the four operator database secrets needed
-  by the read-only initializer/processor into service-specific private files;
+- `houfeng-storage-init` prepares UID/GID-owned data directories and the
+  ordinary guard and root marker;
+- `houfeng-secrets-init` stages the scoped operator database secrets;
 - `db` runs pinned PostgreSQL 16 with its bootstrap secret;
-- `houfeng-db-init` provisions distinct runtime, platform-admin, and migrator
-  logins plus the internally generated constrained authority login, applies the
-  pre-R1 catalog restriction, converges the current schema, verifies or creates
-  the signed activation ledger, activates through the existing projector, and
-  proves runtime admission;
+- `houfeng-db-init` runs as UID/GID 10002 with supplementary GID10001, provisions
+  the scoped database logins, converges the current schema, verifies or creates
+  the signed activation history, projects ordinary V2 membership and publishes
+  the protected launch bindings;
+- `houfeng-local-namespace-init` runs as UID/GID10001 after db-init, admitting a
+  fresh local namespace with the separate staged platform-admin file; for S3 it
+  does not initialize local storage;
 - `houfeng-record-authority` verifies the signed state and active contract,
-  renews only the fixed `compose-center` membership, and exposes a loopback-only
-  health probe after the membership is fresh;
+  atomically renews the distinct `compose-center` API and `compose-processor`
+  worker memberships, and exposes a loopback-only health probe;
 - `clamav` maintains the malware-signature cache and scans attachment content;
 - `houfeng` serves the baked Web UI and API as UID/GID 10001;
-- `houfeng-content-processor` runs the attachment processor as UID/GID 10001
-  with a read-only root, no capabilities, `no-new-privileges`, core dumps
-  disabled, and a bounded private tmpfs.
+- `houfeng-content-processor` runs as UID/GID 10001 with a read-only root, no
+  capabilities, `no-new-privileges`, core dumps disabled, and a bounded private
+  tmpfs. It reads its launch and deployment ID through the read-only public
+  `center-config` mount. Worker claim, renewal and completion require its own
+  live membership at effect time; heartbeat renewal alone does not prove liveness.
 
-Storage, secret-staging, and database initialization are one-shot gates. Center
-starts only after they succeed, PostgreSQL/ClamAV are healthy, and the Records
-authority is healthy; the processor waits for initialization and scanner
-readiness. Seeing all three initializer containers in `Exited (0)` state is
-expected. Any catalog, identity, signed-state, activation, membership,
-migration, or runtime-admission drift fails closed before application services
-start. Exact-repeat initialization verifies the existing authority bundle and
-active contract rather than creating a second identity or fabricating rows.
+Storage, secret-staging, database and namespace initialization are one-shot
+gates. Center and processor wait for the namespace initializer, and Center also
+waits for healthy authority. Seeing all four initializer containers in
+`Exited (0)` state is expected. Catalog, identity, signed-state, membership,
+migration, namespace or runtime-admission drift fails closed. Genuine fresh V2
+and exact-repeat initialization preserve the signed state and receipts while
+bounded heartbeat expiry may renew. An active ordinary V1 installation requires
+the explicit cold upgrade below; normal init cannot silently replace its launch.
 
-Compose secrets are sourced from the private root `.env` and exposed as files to
-only the services that need them. PostgreSQL receives only its bootstrap
-secret. `houfeng-secrets-init` receives the bootstrap and three operator-managed
-database-role secrets, mounts only `data/secrets`, then writes separate private
-directories for db-init and the processor because Compose cannot inject
-environment-backed secret content into a read-only service root. It cannot read
-the authority bundle, attachments, logs, or PostgreSQL tree. Center receives the
-runtime, initial-admin, and session secrets. The processor receives only a staged
-runtime secret. The
-authority reads only its generated private state and generated constrained
-database credential. Center and processor never receive bootstrap, migrator,
-platform-admin, or authority credentials; the processor never receives initial
-admin or session material.
+Compose secrets come from the private root `.env` and are scoped to the services
+that need them. PostgreSQL gets bootstrap only. The stager receives bootstrap and
+the four operator database-role secrets, has a read-only data parent with staged
+secrets masked, and writes service-specific directories. The namespace-only
+platform-admin file is UID10002:GID10001 mode `0440` under a `0750` directory;
+only the namespace initializer mounts that directory read-only. Center receives
+runtime, initial-admin and session secrets; the processor receives only staged
+runtime credentials. Neither receives platform-admin, deletion-worker, bootstrap,
+migrator or authority credentials. The authority uses only its generated private
+state and database credential.
+
+Storage preparation creates the ordinary root marker and permanent guard under
+`maintenance/`. The namespace initializer mounts the maintenance parent read-only
+to read the public marker and guard; private operation state remains unreadable
+to UID10001. Management checks the durable disposition while holding the guard;
+ACTIVE survives controller death and prevents ordinary protected work. Do not
+delete, replace, or reset the guard, marker, or operation journal to recover.
+
+C81 requires an independent `HOUFENG_RECORD_DELETION_WORKER_PASSWORD`, staged as
+`houfeng_record_deletion_worker_password` for db-init only. Generate it separately
+with `openssl rand -hex 32`; do not reuse any other database password. Initialization
+binds the constrained `houfeng_record_deletion_worker` login into the current
+manifest. This does not start a deletion worker or enable permanent-deletion HTTP.
 
 All local durable state is visible in the deployment directory:
 
@@ -406,8 +488,13 @@ only `data/center-config`, and staged service files remain under `data/secrets`.
 data/
 ├── attachments/
 ├── center-config/
-│   └── deployment-id
+│   ├── deployment-id
+│   ├── birth-launch.json
+│   └── birth-launch-processor.json
 ├── clamav/
+├── local-namespace-init/
+│   ├── bootstrap.lock
+│   └── identity.json
 ├── postgres/
 ├── records-authority/
 │   ├── private/
@@ -419,16 +506,17 @@ data/
 │       └── deployment-id
 └── secrets/
     ├── db-init/
+    ├── local-namespace-init/
     └── processor/
 ```
 
-All eight services share Docker's `local` logging driver with `max-size: "10m"`,
+All services share Docker's `local` logging driver with `max-size: "10m"`,
 `max-file: "3"`, and compression enabled. Center writes only stdout; no log
 directory is mounted. Existing `data/logs` is not deleted and remains part of
 existing backups, but no longer receives new Center logs. Operators retain or
 remove those historical files according to their retention requirements.
 
-`optional-secrets/` is the only additional mounted operator directory and must
+`optional-secrets/` contains optional runtime credentials and must
 remain owned by UID/GID `10001` and mode `0700` so the non-root containers can
 traverse their scoped bind mounts. Install an optional key file with
 `sudo install -o 10001 -g 10001 -m 0400 SOURCE DEST`; do not loosen permissions
@@ -439,11 +527,13 @@ comparison keys.
 Local attachments are the default. If S3 is selected, Center and processor must
 use the same endpoint, bucket, TLS mode, and credential-file paths below the S3
 directory; S3 data is no longer part of the local `./data` migration unit.
+The namespace initializer exits without creating a local namespace when the selected
+backend is S3; it does not switch the deployment to local storage.
 
 ### Health and troubleshooting
 
 `docker compose ps` must show PostgreSQL, ClamAV, Center, and the Records
-authority healthy, the processor running, and all three initializer services
+authority healthy, the processor running, and all four initializer services
 completed successfully. Verify the public route through NPM in either mode;
 shared-network mode has no host port, while host-proxy mode has only the reviewed
 IPv4-loopback mapping:
@@ -466,7 +556,7 @@ whole host.
 Replace the example HTTPS origin with `HOUFENG_PUBLIC_BASE_URL`. Keep shared
 diagnostics free of passwords, cookies, provider credentials, enrollment
 commands, and tokens. If an initializer failed, inspect it explicitly with
-`docker compose logs houfeng-storage-init houfeng-secrets-init houfeng-db-init`;
+`docker compose logs houfeng-storage-init houfeng-secrets-init houfeng-db-init houfeng-local-namespace-init`;
 do not bypass its dependency or start Center manually. Authority health failure
 belongs in `docker compose logs houfeng-record-authority`; do not replace the
 deployment ID or edit its private files to force readiness.
@@ -480,30 +570,24 @@ curl -fsS -H 'Host: center.example.com' http://127.0.0.1:16001/api/healthz
 
 ### Backup, restore, and host migration
 
-PostgreSQL, local attachments, and Records authority state are one logical
-recovery point. The matching public deployment ID, signed ledger, authority key,
-generated database credential, and activation receipt are not reproducible
-cache data.
-For the simplest consistent backup, stop the whole stack with
-`docker compose down`, copy the complete private deployment directory while
-PostgreSQL is stopped, then restart with `docker compose up -d`. The copy must
-include `compose.yaml`, `compose.proxy-network.yaml`,
-`compose.proxy-host.yaml`, `.env`, `optional-secrets/`, and the entire `data/`
-tree. Keeping both matching release mode files makes the selected
-`COMPOSE_FILE` recoverable even though only one mode is active. Protect the copy
-as secret material. A database-only, attachment-only, authority-only, or live
-unordered filesystem copy is incomplete. An active database with absent,
-corrupt, or mismatched authority state fails closed; restore PostgreSQL and Records authority state together.
+PostgreSQL, local attachments, and Records authority state must be captured with
+the namespace journal as one logical recovery point. The matching public deployment ID,
+signed ledger, authority key, generated database credential, activation receipt,
+and namespace UUID journal are not reproducible cache data. Stop the whole stack
+with `docker compose down` and copy the private deployment directory while
+PostgreSQL is stopped. Include `compose.yaml`, `compose.proxy-network.yaml`,
+`compose.proxy-host.yaml`, `.env`, `optional-secrets/`, and the entire `data/` tree.
+Protect the copy as secret material. A database-only, attachment-only,
+authority-only, or live unordered copy is incomplete; restore PostgreSQL and Records authority state together.
 
-To restore or migrate hosts, stop the source, copy that same directory intact,
-install Docker/Compose on the target, and re-establish the prerequisite for the
-selected mode: make the exact existing NPM network available to shared-network
-mode, or prove Docker Engine 28.0.0 or newer for host-proxy mode. Keep the same
-`COMPOSE_FILE`, run `docker compose config`, then run `docker compose up -d`.
-Do not start both copies against one identity or split the PostgreSQL and
-attachment recovery points. Confirm the public health route and a representative
-admitted Records write plus attachment after restore before retiring the source.
-Starting two copied authorities for the same deployment is unsupported.
+The permanent guard and durable operation state under `maintenance/` are outside
+the rollback unit: retain them and never replace an active disposition with an
+older copy. A copied data tree does not authorize a new-boot, new-host or new
+physical namespace rebind. Do not start a second copied authority, silently
+adopt populated unbound storage, or claim host-migration acceptance from a copy.
+The supported ordinary cold operation uses the same already-admitted physical
+namespace; physical recovery and source handoff require separate authorization
+and an independently supported procedure.
 
 For S3, a valid recovery point instead requires a coordinated PostgreSQL dump
 and object-version manifest. The Compose bundle does not claim cross-storage
@@ -511,80 +595,138 @@ snapshot orchestration; use a separately reviewed recovery procedure.
 
 ### Upgrade, rollback, and secret rotation
 
-Before upgrading, take a cold recovery point. Download `compose.yaml`,
-`compose.proxy-network.yaml`, `compose.proxy-host.yaml`, and the public
-`compose.env.example` asset from the exact target tag. Review the new template
-against the private local `.env`, preserve the selected `COMPOSE_FILE` and its
-mode-specific value, and update `HOUFENG_IMAGE` to the matching immutable tag.
-Stop every old process that can write the application database before running
-the initializer: in Compose this is at least `houfeng` and
-`houfeng-content-processor`; also stop any separately supervised Center,
-importer, or Agent writer. Do not start the target Center while db-init is
-pending.
+Take a cold coordinated recovery point and preserve the permanent maintenance
+guard and any operation state before changing an existing installation. Ordinary
+active V1 requires `deploy-ordinary-upgrade`, an explicit root controller on
+local rootful Docker. The target image must already be present and pinned by
+immutable image ID; the controller extracts and checks its actual static admin,
+Center and processor executables. Stop unsupervised host writers, external restart
+controllers and manual starts before the operation and keep them stopped until
+the controller has completed the target restart and application proof. The
+controller fences and joins the project containers and isolates the target DB.
+The child receives neither Docker credentials/socket nor permission to rewrite
+operator Compose files, `.env`, or the restart recipe. The controller validates
+the protected path and non-writable control files before controlled recreation.
+
+The `.env` `COMPOSE_FILE` must select exactly `compose.yaml` and one published
+proxy overlay: `compose.proxy-network.yaml` or `compose.proxy-host.yaml`.
+The controller pins the selected files and refuses any other selection before
+making changes. A wrong-checksum or unsupported C81 predecessor is also refused
+before any change.
+
+Install the host `houfeng-record-platform-admin` binary as root-owned and not
+group- or world-writable, under root-controlled directories that UID10002 can
+traverse; the binary must also be executable by UID10002. For example, use a
+root-controlled `/usr/local/bin` with an executable mode such as `0755`. The
+trusted preparation stage re-executes this host controller binary as UID10002
+before launching the pinned target. A copy under `/root` or another inaccessible
+`0700` directory is refused with a preflight error.
+
+The host controller must run as root with effective `CAP_KILL` and
+`CAP_SYS_PTRACE` retained for the entire operation. Native spawn and probe check
+both before creating any child and refuse otherwise. `CAP_KILL` permits pidfd
+cancellation and kernel delivery of the parent-death SIGKILL to the UID10002
+participant; `CAP_SYS_PTRACE` permits independent `/proc` inspection of that
+nondumpable child. Plain host root normally has both. Capability-dropping sudo,
+systemd units and containers must retain them; the UID10002 participant itself
+runs with zero capabilities.
+
+Native preparation and the participant share the host mount namespace. They can
+access files according to the permissions of trusted UID10002; there is no
+Landlock, chroot, separate mount namespace, or other kernel filesystem sandbox.
+The trust boundary includes root, UID10002 and the root-selected target code for
+the whole operation. The participant instead uses the exact pinned target,
+typed selected paths, a minimal environment, private pipes for the five database
+credentials, no capabilities, no-new-privileges and race-free descriptor closure.
+It has no Docker access; the per-deployment guard and SQL admission enforce the
+operation's state boundaries. No LSM, sysctl or persistent host-configuration
+change is required.
+
+The controller first acquires the permanent `.ordinary-controller.lock` in the
+working directory (for the example, `/srv/houfeng/.ordinary-controller.lock`),
+then the ordinary exclusive guard. A
+missing `maintenance/ordinary` guard is bootstrapped with a journal; root-marker
+continuity prevents a silent rebind. Preserve both locks, the marker and the
+operation records; established missing or conflicting state fails closed.
+
+The controller requires a clean environment: ambient `PG*` and `SSL_CERT*`
+variables are rejected rather than ignored. Its native participant uses a minimal
+environment and trusts UID10002 processes for the duration of the operation;
+this is not isolation from a hostile peer running as UID10002. Containment of
+the privileged helper on control EOF or SIGKILL does not change normal runtime
+container Docker SIGTERM behavior.
+
+The ordinary cold request is canonical compact JSON with one trailing newline.
+Run the implemented `houfeng-record-platform-admin deploy-ordinary-upgrade
+--request-file <private-file>` path with the prerequisites above. The acceptance
+run used an owned nested Docker host, not a real-host installation; arm64 was
+cross-built only, and lost-commit and pre-lock backend cases have component
+coverage only. G2 remains NOT_READY, permanent-deletion HTTP remains CLOSED,
+and this work has not been deployed.
+
+In a root shell on the Docker host, first choose a unique stable operation ID
+containing only lowercase letters, digits, `_` or `-`, at most 128 characters.
+Prepare seven distinct root-owned, single-link `0400` or `0600` files in a
+protected, non-symlinked directory: `/root/private/bootstrap`,
+`/root/private/runtime`, `/root/private/admin`, `/root/private/worker`,
+`/root/private/migrator`, `/root/private/initial-password`, and
+`/root/private/session-hmac-key`. The first five contain the corresponding
+database passwords, not URLs; the last two provide Center's initial-password
+and session-HMAC secret for faithful target Compose recreation, not credentials
+for HTTP acceptance proof. The session-HMAC file must contain the old Center's
+actual key, witnessed before fencing; this operation must not rotate it
+implicitly. Keep all values out of shell arguments, environment variables,
+Compose assets, and the business data tree. Use the same protected request and
+files for an exact retry; do not recreate or edit them after the operation starts.
+The controller recreates the selected target using file-backed secrets from a
+root-only `0700` private store containing `0444` files. Per-secret commitments
+are stored in a root-private record; shared intent contains only its nonce-bound
+digest. Raw values do not go into Docker client arguments, environment, or the
+durable journal.
+
+The following uses `jq`, an existing project named `houfeng` in `/srv/houfeng`,
+and the immutable ID of the locally present target image. The target Compose
+assets and `.env` must be root-controlled and match that image. The root-owned
+request directory must be new; do not overwrite an earlier operation:
 
 ```bash
-docker compose config
-docker compose pull
-docker compose stop houfeng houfeng-content-processor
-docker compose run --rm houfeng-secrets-init
-docker compose run --rm houfeng-db-init
-docker compose up -d houfeng houfeng-content-processor
-docker compose ps
+cd /srv/houfeng
+read -r -p 'Unique operation ID: ' operation_id
+read -r -p 'Locally present target image ID (sha256:...): ' target_image_id
+database_container_id=$(docker inspect --format '{{.Id}}' "$(docker compose ps -q db)")
+docker image inspect "$target_image_id" >/dev/null
+umask 077
+mkdir /root/houfeng-upgrade-input &&
+jq -cn --arg operation_id "$operation_id" \
+  --arg database_container_id "$database_container_id" --arg target_image_id "$target_image_id" \
+  '{version:1,operation_id:$operation_id,project:"houfeng",working_directory:"/srv/houfeng",database_container_id:$database_container_id,target_image_id:$target_image_id,secrets:{bootstrap:"/root/private/bootstrap",runtime:"/root/private/runtime",platform_admin:"/root/private/admin",deletion_worker:"/root/private/worker",migrator:"/root/private/migrator",initial_password:"/root/private/initial-password",session_hmac_key:"/root/private/session-hmac-key"}}' \
+  > /root/houfeng-upgrade-input/request.json &&
+env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+  houfeng-record-platform-admin deploy-ordinary-upgrade --request-file /root/houfeng-upgrade-input/request.json
 ```
 
-The stop-writers step is part of the cold upgrade boundary: do not let an old
-Center or processor write settings or business data while the scoped migrator
-is changing the schema, and do not use `docker compose up -d` before db-init.
+The database container ID must be its full 64 lowercase hexadecimal characters;
+the image ID must be `sha256:` followed by 64 lowercase hexadecimal characters.
+The command validates the canonical paths, ownership and request shape. If the
+operation fails or its outcome is uncertain, keep the same request, target and
+private files and invoke the same command again only after correcting the
+reported external condition; do not rerun the request-creation commands.
 
-The database initializer applies only a forward transition explicitly supported
-by the target release before Center starts. The exact contract is the
-[APP ACL current contract](../spec/contracts/platform/app-acl-current.md):
-the embedded current set is the frozen 52-source R1 prefix plus 24 registered
-post-R1 fragments, for 76 sources ending at
-`0075_add_settings_deployment_overrides.sql`; `0075` is an explicit empty
-fragment and adds no APP ACL. The current APP migrator accepts only a fresh
-C75 genesis, the 12 exact registered predecessor profiles
-`P62/P64/P63/P66/P67/P68/P69/P70/P71/P72/P73/P74` and their 3071 explicitly
-registered chains, or an exact C75 repeat. Every predecessor uses its
-registered suffix ending in `0075`; P74 uses `0075` only. The P74 predecessor
-is checked against the independently frozen C74 golden, and the C74→C75
-transition has no ACL delta.
+Keep the durable operation, its private request and the guard state. An
+interruption may leave ACTIVE even after both processes exit; protected ordinary
+work stays closed. Retry the exact same operation and target, preserving all
+recorded state. Never delete or reset the guard, disposition, journal, database,
+or launch files to force startup. Unknown state, changed physical namespace,
+source-enrolled/installed-birth state or an unsupported prior private 0081
+checksum fails closed. The supported path preserves authentic signed V1 history
+and uses the same already-admitted physical namespace. V2 exact repeat verifies
+existing receipts and state; heartbeat expiry can legitimately renew.
 
-For `center_settings`, `0075` gives an existing row
-`incident_sweep_runtime_managed=true`, then fixes the column default at
-`false`; a missing singleton remains missing, a later new row defaults to
-`false`, and an explicit `false` is not changed by repeat. The transition
-verifies the full settings snapshot, existing fields, and timestamps, and
-requires the terminal column to be boolean `NOT NULL DEFAULT false`. Center
-runtime admission is a single `REPEATABLE READ READ ONLY` snapshot after
-db-init; it performs no DDL/DCL and never upgrades the database.
-
-A partial, checksum-drifted, unknown-prefix, unregistered-chain, null-head,
-or otherwise unknown database fails initialization; do not bypass db-init, run
-ad hoc SQL, or start Center manually.
-
-Before relying on that transition, rehearse both restoration of the complete
-cold recovery point and the target upgrade in an isolated Compose project that
-cannot publish production ports, join the production proxy network, reuse the
-production project name, or start a second Records authority. The rehearsal
-must verify the exact registered C75 ledger/manifest chain, P74/`p74_upgrade`
-settings cases, full settings/timestamp preservation, exact index shape,
-runtime no-DDL admission, Records, and attachments, then remove only the
-isolated rehearsal resources. A successful database-only dry run is not a cold
-restore rehearsal.
-
-Do not roll an older image back over a database already migrated by a newer
-incompatible release. For the current C75 migration chain, image-only rollback
-after a successor has been published is not supported: rollback means stopping
-the target stack and restoring the complete pre-upgrade cold recovery point
-together with its matching PostgreSQL, attachments, Records authority state,
-common Compose file, mode file, env contract, secrets, and old image set.
-Switching modes changes only `COMPOSE_FILE` and the mode-specific
-`HOUFENG_PROXY_NETWORK` value; always run `docker compose config` before
-`docker compose up -d`, and never replace or split the data/authority identity
-while switching. If db-init or any post-init admission/health check fails,
-keep Center and the authority stopped until the exact old stack has been
-restored and verified.
+Do not roll an older image over a database migrated by an incompatible release.
+A cold recovery point is not proof that copying or restoring to a different
+physical namespace is supported. Keep the old writers stopped after a failed
+transition and resolve the durable operation before any controlled restart.
+G2 remains NOT_READY and permanent-deletion HTTP remains CLOSED.
 
 Compose does not include the value behind an environment-sourced secret in its
 service configuration hash. A plain `docker compose up -d` therefore does not
@@ -720,6 +862,24 @@ sudo systemctl enable --now houfeng-center houfeng-content-processor
 ```
 
 For S3, replace the local backend lines in both environment files with the same endpoint/bucket/TLS settings and private `HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE` / `HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE` paths. Grant the `houfeng` user read access to those mode-restricted files; never put S3 credentials directly in a tracked unit or environment example. The processor unit creates its private `0700` runtime workspace, sets `LimitCORE=0`, and grants writes only to that workspace and the durable Blob path.
+
+For record-backed processor work, configure the processor's own complete
+`HOUFENG_RECORD_INSTANCE_ID`, `HOUFENG_RECORD_DEPLOYMENT_ID` (or its `_FILE`),
+`HOUFENG_RECORD_INSTANCE_KIND`, and `HOUFENG_RECORD_INSTANCE_CAPABILITY` against
+an actually admitted deployment member. Reusing the API instance name does not
+establish processor membership. Ordinary Compose provisions its distinct worker
+identity; direct/systemd deployments must supply and admit their own processor
+identity and launch configuration.
+
+An enrolled source also requires the independent reader URL in
+`HOUFENG_DELETION_WITNESS_DATABASE_URL` (or its `_FILE`) and the exact physical
+identity file in `HOUFENG_SOURCE_WITNESS_IDENTITY_FILE`. The processor verifies
+the APP enrollment binding with the same validator as Center and closes its
+witness pool when the runtime exits. Without witness configuration, source
+authorization checks APP enrollment and rejects enrolled record effects;
+standalone processing and existing cleanup retain their own authorization paths.
+Partial or invalid supplied witness configuration is a startup error. This
+configuration does not enable birth certification or permanent deletion.
 
 Then create or open the VPS in the web UI and use **创建并接入 agent** from the VPS detail page. That action creates the scoped MonitoringInstance and opens its onboarding workspace. The primary path is the generated one-command installer. During early development, the same generated command is also the accepted agent upgrade path for an already-bound systemd monitoring instance:
 

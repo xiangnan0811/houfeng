@@ -166,11 +166,10 @@ func TestRecoveryKeepsPermanentDeleteDisabledWhenExactRowsMissing(t *testing.T) 
 func TestExternalCopyDisclosureIsContentSafe(t *testing.T) {
 	t.Parallel()
 
-	encoded, err := EncodeExternalCopies([]recorddeletion.SurvivingCopySummary{{
-		Scope:     recorddeletion.AdapterNameRecordPortability,
-		Kind:      recorddeletion.SurvivingCopyKindDeliveredExport,
-		CopyCount: 1,
-	}})
+	encoded, err := EncodeExternalCopies([]recorddeletion.SurvivingCopySummary{
+		recorddeletion.UnknownSurvivingCopySummary(recorddeletion.AdapterNameRecordMarkdownClient, recorddeletion.SurvivingCopyKindOfflineBrowserBuffer),
+		recorddeletion.KnownSurvivingCopySummary(recorddeletion.AdapterNameRecordPortability, recorddeletion.SurvivingCopyKindDeliveredExport, 1),
+	})
 	if err != nil {
 		t.Fatalf("EncodeExternalCopies() error = %v", err)
 	}
@@ -180,8 +179,39 @@ func TestExternalCopyDisclosureIsContentSafe(t *testing.T) {
 			t.Fatalf("EncodeExternalCopies() leaked %q: %s", leaked, text)
 		}
 	}
-	if !bytes.Contains(encoded, []byte(`"kind":"delivered_export"`)) || !bytes.Contains(encoded, []byte(`"copy_count":1`)) {
-		t.Fatalf("EncodeExternalCopies() missing allowlisted fields: %s", text)
+	want := `{"copies":[` +
+		`{"scope":"record_markdown_client","kind":"offline_browser_buffer","count_status":"unknown","copy_count":null},` +
+		`{"scope":"record_portability","kind":"delivered_export","count_status":"known","copy_count":1}]}`
+	if text != want {
+		t.Fatalf("EncodeExternalCopies() = %s, want %s", text, want)
+	}
+}
+
+func TestExternalCopyDisclosureRejectsInvalidCountStatus(t *testing.T) {
+	t.Parallel()
+
+	one := uint64(1)
+	for name, surviving := range map[string]recorddeletion.SurvivingCopySummary{
+		"known zero": recorddeletion.KnownSurvivingCopySummary(recorddeletion.AdapterNameRecordPortability, recorddeletion.SurvivingCopyKindDeliveredExport, 0),
+		"known nil": {
+			Scope:       recorddeletion.AdapterNameRecordPortability,
+			Kind:        recorddeletion.SurvivingCopyKindDeliveredExport,
+			CountStatus: recorddeletion.SurvivingCopyCountKnown,
+		},
+		"unknown with count": {
+			Scope:       recorddeletion.AdapterNameRecordMarkdownClient,
+			Kind:        recorddeletion.SurvivingCopyKindOfflineBrowserBuffer,
+			CountStatus: recorddeletion.SurvivingCopyCountUnknown,
+			CopyCount:   &one,
+		},
+		"unknown wrong owner": recorddeletion.UnknownSurvivingCopySummary(recorddeletion.AdapterNameRecordPortability, recorddeletion.SurvivingCopyKindOfflineBrowserBuffer),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := EncodeExternalCopies([]recorddeletion.SurvivingCopySummary{surviving}); !errors.Is(err, ErrInvalidRestoreRequest) {
+				t.Fatalf("EncodeExternalCopies() error = %v, want ErrInvalidRestoreRequest", err)
+			}
+		})
 	}
 }
 

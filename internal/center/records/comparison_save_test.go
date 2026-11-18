@@ -24,8 +24,8 @@ func TestSaveComparisonRecordIdempotentRetryKeepsFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
 	}
-	store := &revisionCommitStoreStub{result: RevisionCommitResult{RecordID: request.RecordID, RevisionNo: 1, Created: true}}
-	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store)
+	store := &revisionCommitStoreStub{result: RevisionCommitResult{RecordID: request.RecordID, RevisionNo: 1, Created: true, Replayed: true}}
+	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store, nil)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}
@@ -162,7 +162,7 @@ func TestSaveComparisonRecordPreparationRejectsClientOwnedSnapshotIDs(t *testing
 		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
 	}
 	store := &revisionCommitStoreStub{}
-	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store)
+	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store, nil)
 	if err != nil {
 		t.Fatalf("NewRevisionService() error = %v", err)
 	}

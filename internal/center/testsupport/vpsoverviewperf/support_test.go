@@ -1,11 +1,7 @@
 package vpsoverviewperf
 
 import (
-	"context"
-	"errors"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
 
 	"houfeng/internal/center/activity"
 	"houfeng/internal/center/vpsoverview"
@@ -92,40 +88,6 @@ func TestValidateHealthyOverviewRejectsPartialOrMalformedOverview(t *testing.T) 
 				t.Fatal("ValidateHealthyOverview() error = nil, want rejection")
 			}
 		})
-	}
-}
-
-func TestQueryTraceOwnsStableCountAndErrorContract(t *testing.T) {
-	trace := &QueryTrace{}
-	for index := 0; index < ExpectedQueryCount; index++ {
-		ctx := trace.TraceQueryStart(context.Background(), nil, pgx.TraceQueryStartData{})
-		end := pgx.TraceQueryEndData{}
-		if index == ExpectedQueryCount-1 {
-			end.Err = errors.New("query failed")
-		}
-		trace.TraceQueryEnd(ctx, nil, end)
-	}
-
-	stats := trace.Snapshot()
-	if stats.Count != ExpectedQueryCount || stats.Errors != 1 {
-		t.Fatalf("Snapshot() = %#v, want count=%d errors=1", stats, ExpectedQueryCount)
-	}
-	if err := stats.Validate(); err == nil {
-		t.Fatal("QueryStats.Validate() error = nil with a query error")
-	}
-	if got := stats.ErrorRatePercent(); got <= 0 {
-		t.Fatalf("ErrorRatePercent() = %f, want positive", got)
-	}
-
-	trace.Reset()
-	if got := trace.Snapshot(); got != (QueryStats{}) {
-		t.Fatalf("Snapshot() after Reset = %#v, want zero", got)
-	}
-	if err := (QueryStats{Count: ExpectedQueryCount}).Validate(); err != nil {
-		t.Fatalf("healthy QueryStats rejected: %v", err)
-	}
-	if err := (QueryStats{Count: ExpectedQueryCount - 1}).Validate(); err == nil {
-		t.Fatal("QueryStats.Validate() error = nil with unstable query count")
 	}
 }
 

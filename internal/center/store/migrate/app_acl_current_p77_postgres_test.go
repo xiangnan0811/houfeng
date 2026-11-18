@@ -100,7 +100,7 @@ func testPostgresIntegrationAppACLCurrentP77Upgrade(t *testing.T, chained bool) 
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 	assertAppACLCurrentP77FamilyAvailability(t, ctx, runtimeDB, "unknown", false)
-	successor, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C77 to C78 convergence: %v", err)
 	}
@@ -115,7 +115,7 @@ func testPostgresIntegrationAppACLCurrentP77Upgrade(t *testing.T, chained bool) 
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatalf("C78 changed the historical manifest inventory: %#v", after.Manifest)
 	}
-	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 	if !reflect.DeepEqual(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog), before.Catalog) {
 		t.Fatal("current changed catalog beyond the exact C80 replay delta")
 	}
@@ -124,7 +124,7 @@ func testPostgresIntegrationAppACLCurrentP77Upgrade(t *testing.T, chained bool) 
 	}
 	assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, readAppACLCurrentSettingsPresenceSnapshot(t, ctx, db))
 	assertAppACLCurrentP77FamilyAvailability(t, ctx, runtimeDB, "unavailable", true)
-	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C78 repeat: %v", err)
 	}
@@ -234,7 +234,7 @@ func testPostgresIntegrationAppACLCurrentP77Rollback(t *testing.T, cutpoint stri
 			return manifest, injected
 		}
 	}
-	_, err := convergeAppACLCurrentWithDependencies(ctx, db.BeginTx, fixture.runtimeRole, fixture.adminRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
+	_, err := convergeAppACLCurrentWithDependencies(ctx, db.BeginTx, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if !reached || !errors.Is(err, injected) {
 		t.Fatalf("rollback did not reach %s: reached=%t error=%v", cutpoint, reached, err)
 	}
@@ -249,7 +249,7 @@ func testPostgresIntegrationAppACLCurrentP77Rollback(t *testing.T, cutpoint stri
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
 	assertAppACLCurrentP77FamilyAvailability(t, ctx, runtimeDB, "unknown", false)
-	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err != nil {
+	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 		t.Fatalf("C78 recovery after rollback: %v", err)
 	}
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
@@ -267,7 +267,7 @@ func testPostgresIntegrationAppACLCurrentP77Drift(t *testing.T, current bool, dr
 	seedAppACLCurrentP77Predecessor(t, ctx, fixture, db, false)
 	seedAppACLCurrentP77Rows(t, ctx, db)
 	if current {
-		if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err != nil {
+		if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 			t.Fatalf("C78 convergence before drift: %v", err)
 		}
 	}
@@ -298,7 +298,7 @@ func testPostgresIntegrationAppACLCurrentP77Drift(t *testing.T, current bool, dr
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil {
 		t.Fatal("runtime admitted predecessor or drifted current state")
 	}
-	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err == nil {
+	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err == nil {
 		t.Fatal("convergence accepted or repaired unapproved drift")
 	}
 	if !reflect.DeepEqual(readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input), before) || readAppACLCurrentP77Rows(t, ctx, db) != beforeRows {

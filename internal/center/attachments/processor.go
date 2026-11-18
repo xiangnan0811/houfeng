@@ -62,6 +62,7 @@ type ProcessorClaim struct {
 	ProcessorJobID    string
 	UploadID          string
 	AttachmentID      string
+	DraftID           string
 	DisplayName       string
 	DeclaredMediaType string
 	Source            BlobObject

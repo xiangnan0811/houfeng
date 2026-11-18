@@ -45,6 +45,44 @@ test('runtime fixture accepts exact evidence-only URL and rejects undeclared str
   await expect(api.assertRuntimeStreamsClean()).rejects.toThrow(/extra=1/)
 })
 
+test('record cleanup fixture serves an idle channel and rejects malformed reconcile or socket URLs', async ({ page }) => {
+  const api = await installRouter(page)
+  api.useProfile(unauthenticatedProfile)
+  await page.goto('/login')
+  const browserId = 'browser_0e2e0000-0000-4000-8000-000000000001'
+  const reconcile = await page.evaluate(async (browser_id) => {
+    const post = async (body: unknown) => {
+      const response = await fetch('/api/records/client-cleanup/reconcile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return { status: response.status, body: await response.json() as unknown }
+    }
+    const base = `ws://${location.host}/api/records/client-cleanup?browser_id=${browser_id}`
+    new WebSocket(base)
+    new WebSocket(`${base}&cursor=c%2F1`)
+    new WebSocket(`${base}&extra=1`)
+    return [
+      await post({ browser_id, record_ids: [] }),
+      await post({ browser_id, record_ids: ['rec_a'], allocation_references: [{ record_id: 'rec_b', allocation_id: 'rqa_b' }] }),
+      await post({ browser_id, record_ids: 'rec_a' }),
+    ]
+  }, browserId)
+  expect(reconcile).toEqual([
+    { status: 200, body: { allowed: [], invalidate: [], pending: [] } },
+    { status: 200, body: { allowed: ['rec_a'], invalidate: [], pending: ['rec_b'] } },
+    { status: 422, body: { error: 'fixture request body mismatch: POST /api/records/client-cleanup/reconcile' } },
+  ])
+  expect(() => api.assertNoUnexpectedRequests()).toThrow(/client-cleanup\/reconcile body must be/)
+  expect((await api.snapshotRecordCleanupSockets()).map((socket) => [socket.browserId, socket.phase])).toEqual([
+    [browserId, 'open'],
+    [browserId, 'open'],
+  ])
+  expect((await api.snapshotRuntimeStreamSockets()).map((socket) => socket.phase)).toEqual(['error'])
+  await expect(api.assertRuntimeStreamsClean()).rejects.toThrow(/extra=1/)
+})
+
 test('requires every mutation fixture to declare its exact body keys', async ({ page }) => {
   const api = await installRouter(page)
   api.useProfile({

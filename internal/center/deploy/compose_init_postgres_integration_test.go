@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 
 	"houfeng/internal/center/platformmigrate"
 	"houfeng/internal/center/recordauthority"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/store"
 )
 
@@ -25,6 +27,17 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	}
 	if os.Getenv("HOUFENG_RECORD_PLATFORM_EPHEMERAL_OWNER") == "" || os.Getenv("HOUFENG_RECORDS_RUN_ID") == "" {
 		t.Fatal("Compose initialization integration requires the ownership-checked ephemeral PostgreSQL runner")
+	}
+	fixtureRoot := os.Getenv("HOUFENG_BIRTH_LAUNCH_FIXTURE_ROOT")
+	if fixtureRoot == "" || os.Getuid() != 10002 || os.Geteuid() != 10002 {
+		t.Fatal("strict Compose initialization requires UID 10002 and the protected real-launch fixture")
+	}
+	guardRoot := os.Getenv("HOUFENG_ORDINARY_GUARD_FIXTURE_ROOT")
+	if !filepath.IsAbs(guardRoot) || filepath.Clean(guardRoot) != guardRoot || filepath.Base(guardRoot) != "ordinary" {
+		t.Fatal("strict Compose initialization requires a preprovisioned ordinary guard")
+	}
+	if err := WithOrdinaryComposeGuard(t.Context(), guardRoot, false, func() error { return nil }); err != nil {
+		t.Fatalf("verify preprovisioned ordinary guard: %v", err)
 	}
 	ctx := context.Background()
 	baseURL := os.Getenv("HOUFENG_DATABASE_URL")
@@ -43,6 +56,20 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	assertComposeIntegrationFixtureHasNoProductionState(t, ctx, bootstrapPool)
 
 	config := uniqueComposeIntegrationConfig(t, baseConfig.ConnConfig.Password)
+	directory, err := os.MkdirTemp(fixtureRoot, "compose-initialize-pg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	if err := os.Chmod(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	centerDirectory := filepath.Join(directory, "center-config")
+	if err := os.Mkdir(centerDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.AuthorityStateRoot = filepath.Join(directory, "authority")
+	config.CenterDeploymentIDPath = filepath.Join(centerDirectory, "deployment-id")
 	createDatabaseDDL := formatComposeIntegrationDDL(t, ctx, bootstrapPool, `CREATE DATABASE %I`, config.DatabaseName)
 	if _, err := bootstrapPool.Exec(ctx, createDatabaseDDL); err != nil {
 		t.Fatalf("create Compose integration database: %v", err)
@@ -50,10 +77,10 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	t.Cleanup(func() { cleanupComposeIntegrationDatabase(t, context.Background(), bootstrapPool, config) })
 
 	openPostgres := func(ctx context.Context, endpoint composePostgresEndpoint) (*pgxpool.Pool, error) {
-		config := baseConfig.Copy()
-		config.ConnConfig.Database = endpoint.Database
-		config.ConnConfig.User = endpoint.Role
-		config.ConnConfig.Password = endpoint.Password
+		config, err := composeIntegrationEndpointConfig(baseConfig, endpoint)
+		if err != nil {
+			return nil, err
+		}
 		pool, err := pgxpool.NewWithConfig(ctx, config)
 		if err != nil {
 			return nil, err
@@ -64,20 +91,92 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 		}
 		return pool, nil
 	}
-	if err := initializeCompose(ctx, config, openPostgres); err != nil {
+	deps := defaultComposeInitDependencies(openPostgres)
+	controlPath := filepath.Join(directory, "source-authority.json")
+	deps.withMaintenance = func(ctx context.Context, app *pgxpool.Pool, fn func(*SourceMaintenanceConfig) error) error {
+		return withComposeManagementGuard(ctx, app, controlPath, guardRoot, fn)
+	}
+	initialize := func(ctx context.Context, config ComposeInitConfig) error {
+		return initializeComposeWithDependencies(ctx, config, deps)
+	}
+	if err := initialize(ctx, config); err != nil {
 		t.Fatalf("fresh Compose initialization error = %v", err)
 	}
 	assertComposeIntegrationCatalog(t, ctx, bootstrapPool, openPostgres, config)
 	assertComposeIntegrationAuthorityProof(t, ctx, openPostgres, config)
 	assertComposeIntegrationHeartbeatRejectionsDoNotMutate(t, ctx, openPostgres, config)
 	beforeRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
+	privateDir := filepath.Join(config.AuthorityStateRoot, "private")
+	immutableNames := []string{"membership-successor.json", "activation-receipt.json", "membership-rotation-receipt.json"}
+	immutable := make(map[string][]byte, len(immutableNames))
+	for _, name := range immutableNames {
+		immutable[name], err = os.ReadFile(filepath.Join(privateDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	passwordsBeforeRepeat := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config)
-	if err := initializeCompose(ctx, config, openPostgres); err != nil {
+	if err := initialize(ctx, config); err != nil {
 		t.Fatalf("exact-repeat Compose initialization error = %v", err)
 	}
 	afterRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
 	if beforeRepeat != afterRepeat {
 		t.Fatalf("exact-repeat durable counts = %#v, want unchanged %#v", afterRepeat, beforeRepeat)
+	}
+	for _, name := range immutableNames {
+		current, err := os.ReadFile(filepath.Join(privateDir, name))
+		if err != nil || !bytes.Equal(current, immutable[name]) {
+			t.Fatalf("exact repeat changed %s: %v", name, err)
+		}
+	}
+	rotationReceipt := filepath.Join(privateDir, "membership-rotation-receipt.json")
+	if err := os.Remove(rotationReceipt); err != nil {
+		t.Fatal(err)
+	}
+	if err := initialize(ctx, config); err != nil {
+		t.Fatalf("recover committed rotation receipt: %v", err)
+	}
+	recovered, err := os.ReadFile(rotationReceipt)
+	if err != nil || !bytes.Equal(recovered, immutable["membership-rotation-receipt.json"]) {
+		t.Fatalf("rotation receipt recovery changed canonical bytes: %v", err)
+	}
+	activationReceipt := filepath.Join(privateDir, "activation-receipt.json")
+	if err := os.Remove(activationReceipt); err != nil {
+		t.Fatal(err)
+	}
+	if err := initialize(ctx, config); err != nil {
+		t.Fatalf("recover committed genesis receipt: %v", err)
+	}
+	recovered, err = os.ReadFile(activationReceipt)
+	if err != nil || !bytes.Equal(recovered, immutable["activation-receipt.json"]) {
+		t.Fatalf("genesis receipt recovery changed canonical bytes: %v", err)
+	}
+	if err := os.WriteFile(rotationReceipt, []byte("corrupt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := initialize(ctx, config); !errors.Is(err, ErrComposeInitActivateAuthority) {
+		t.Fatalf("corrupt receipt initialization error = %v", err)
+	}
+	if err := os.WriteFile(rotationReceipt, immutable["membership-rotation-receipt.json"], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := openPostgres(ctx, composePostgresEndpoint{Database: config.DatabaseName, Role: config.Roles.Migrator, Password: config.Passwords.Migrator})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	if _, err := owner.Exec(ctx, `update public.deployment_membership set queue_admitted=false where instance_id='compose-processor'`); err != nil {
+		t.Fatal(err)
+	}
+	beforeDrift := readComposeIntegrationMembership(t, ctx, owner)
+	if err := initialize(ctx, config); !errors.Is(err, ErrComposeInitActivateAuthority) {
+		t.Fatalf("mixed membership state initialization error = %v", err)
+	}
+	if after := readComposeIntegrationMembership(t, ctx, owner); after != beforeDrift {
+		t.Fatal("rejected mixed membership state changed the center lease")
+	}
+	if _, err := owner.Exec(ctx, `update public.deployment_membership set queue_admitted=true where instance_id='compose-processor'`); err != nil {
+		t.Fatal(err)
 	}
 	passwordsAfterRepeat := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config)
 	if !reflect.DeepEqual(passwordsAfterRepeat, passwordsBeforeRepeat) {
@@ -87,12 +186,13 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	rotated := config
 	rotated.Passwords.Runtime = "runtime:/?# rotated secret"
 	rotated.Passwords.PlatformAdmin = "admin:/?# rotated secret"
+	rotated.Passwords.DeletionWorker = "deletion-worker:/?# rotated secret"
 	rotated.Passwords.Migrator = "migrator:/?# rotated secret"
-	if err := initializeCompose(ctx, rotated, openPostgres); err != nil {
+	if err := initialize(ctx, rotated); err != nil {
 		t.Fatalf("password-rotation Compose initialization error = %v", err)
 	}
 	passwordsAfterRotation := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, rotated)
-	for _, role := range []string{rotated.Roles.CenterRuntime, rotated.Roles.PlatformAdmin, rotated.Roles.Migrator} {
+	for _, role := range []string{rotated.Roles.CenterRuntime, rotated.Roles.PlatformAdmin, rotated.Roles.DeletionWorker, rotated.Roles.Migrator} {
 		if passwordsAfterRotation[role] == passwordsAfterRepeat[role] {
 			t.Fatalf("approved password rotation did not change verifier for %q", role)
 		}
@@ -111,14 +211,95 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	rejected := rotated
 	rejected.Passwords.Runtime = "runtime rejected rotation"
 	rejected.Passwords.PlatformAdmin = "admin rejected rotation"
+	rejected.Passwords.DeletionWorker = "deletion-worker rejected rotation"
 	rejected.Passwords.Migrator = "migrator rejected rotation"
-	if err := initializeCompose(ctx, rejected, openPostgres); err == nil {
+	if err := initialize(ctx, rejected); err == nil {
 		t.Fatal("Compose initialization accepted existing role membership drift")
 	}
 	passwordsAfterRejectedRotation := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, rotated)
 	if !reflect.DeepEqual(passwordsAfterRejectedRotation, passwordsBeforeRejectedRotation) {
 		t.Fatal("membership-drift rejection partially rotated role passwords")
 	}
+}
+
+// These database fixtures use synthetic executable digests and do not prove
+// protected files or executable identity. They stage and inspect a real OPEN
+// registry so database heartbeat and runtime admission use real SQL.
+func composeLaunchIsolatedInitDependencies(open func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error)) composeInitDependencies {
+	deps := defaultComposeInitDependencies(open)
+	deps.withMaintenance = testComposeMaintenance
+	var published composeBirthLaunchPair
+	deps.prepareBirthLaunch = func(ctx context.Context, owner *pgxpool.Pool, state recordauthority.VerifiedComposeState, maintenance *SourceMaintenanceConfig, _ string, runtimeRole, workerRole string) (composeBirthLaunchPair, error) {
+		center := recordbirth.LaunchBinding{ProtocolVersion: 1, ProcessKind: "center", DeploymentID: string(state.DeploymentID), ActivationBundleDigest: state.ActivationCommand.ActivationBundleDigest, BinaryDigest: [32]byte{1}}
+		if maintenance != nil {
+			source, err := readSourceAdmission(ctx, owner)
+			if err != nil || source == nil || maintenance.BirthInstalled {
+				return composeBirthLaunchPair{}, errComposeBirthLaunch
+			}
+			center.SourceGeneration, center.Witness = uint64(source.Generation), source.Witness
+		}
+		processor := center
+		processor.ProcessKind, processor.BinaryDigest = "content-processor", [32]byte{2}
+		pair, err := encodeComposeBirthLaunchPair(center, processor)
+		if err != nil {
+			return composeBirthLaunchPair{}, err
+		}
+		registry, err := readComposeBirthLaunchRegistry(ctx, owner)
+		if err != nil {
+			return composeBirthLaunchPair{}, err
+		}
+		if registry == nil {
+			var revision int64
+			if err := owner.QueryRow(ctx, `select record_platform_internal.record_birth_launch_stage($1::bytea,$2::bytea,$3::name,$4::name,$5::bigint)`, pair.centerBytes, pair.processorBytes, runtimeRole, workerRole, int64(0)).Scan(&revision); err != nil || revision != 1 {
+				return composeBirthLaunchPair{}, errComposeBirthLaunch
+			}
+			registry = &composeBirthLaunchRegistry{revision: revision, runtimeRole: runtimeRole, workerRole: workerRole, centerBytes: pair.centerBytes, processorBytes: pair.processorBytes}
+		}
+		if registry.runtimeRole != runtimeRole || registry.workerRole != workerRole || !bytes.Equal(registry.centerBytes, pair.centerBytes) || !bytes.Equal(registry.processorBytes, pair.processorBytes) {
+			return composeBirthLaunchPair{}, errComposeBirthLaunch
+		}
+		if !registry.opened {
+			if _, err := owner.Exec(ctx, `select record_platform_internal.record_birth_launch_open($1::bigint)`, registry.revision); err != nil {
+				return composeBirthLaunchPair{}, errComposeBirthLaunch
+			}
+		}
+		registry, err = readComposeBirthLaunchRegistry(ctx, owner)
+		if err != nil || registry == nil || !registry.opened || !bytes.Equal(registry.centerBytes, pair.centerBytes) || !bytes.Equal(registry.processorBytes, pair.processorBytes) {
+			return composeBirthLaunchPair{}, errComposeBirthLaunch
+		}
+		pair.revision = registry.revision
+		published = pair
+		return pair, nil
+	}
+	deps.inspectBirthLaunch = func(ctx context.Context, pool *pgxpool.Pool, _ recordauthority.VerifiedComposeState, _ *SourceMaintenanceConfig, _ string, opened bool) (composeBirthLaunchPair, error) {
+		var revision int64
+		var actualOpened bool
+		var center, processor []byte
+		if err := pool.QueryRow(ctx, `select revision,opened,center_binding,processor_binding from public.record_birth_launch_inspect(null::bigint,null::bytea)`).Scan(&revision, &actualOpened, &center, &processor); err != nil || revision != published.revision || actualOpened != opened || !bytes.Equal(center, published.centerBytes) || !bytes.Equal(processor, published.processorBytes) {
+			return composeBirthLaunchPair{}, errComposeBirthLaunch
+		}
+		return published, nil
+	}
+	deps.probeRuntime = testComposeProbeBirthLaunch
+	return deps
+}
+
+func composeIntegrationEndpointConfig(base *pgxpool.Config, endpoint composePostgresEndpoint) (*pgxpool.Config, error) {
+	config := base.Copy()
+	if endpoint.LaunchDigest != ([32]byte{}) {
+		url, err := recordbirth.WithRuntimeLaunch(base.ConnString(), endpoint.LaunchDigest)
+		if err != nil {
+			return nil, err
+		}
+		config, err = pgxpool.ParseConfig(url)
+		if err != nil {
+			return nil, err
+		}
+	}
+	config.ConnConfig.Database = endpoint.Database
+	config.ConnConfig.User = endpoint.Role
+	config.ConnConfig.Password = endpoint.Password
+	return config, nil
 }
 
 func assertComposeIntegrationFixtureHasNoProductionState(t *testing.T, ctx context.Context, bootstrapPool *pgxpool.Pool) {
@@ -156,16 +337,18 @@ func uniqueComposeIntegrationConfig(t *testing.T, bootstrapPassword string) Comp
 		AuthorityRole:          composeAuthorityRole,
 		AuthorityStateRoot:     filepath.Join(stateParent, "records-authority"),
 		CenterDeploymentIDPath: filepath.Join(centerConfigDirectory, "deployment-id"),
-		Roles: platformmigrate.AppRoleSetV1{
-			CenterRuntime: "hf_runtime_" + suffix,
-			PlatformAdmin: "hf_admin_" + suffix,
-			Migrator:      "hf_migrator_" + suffix,
+		Roles: platformmigrate.AppRoleSetV2{
+			CenterRuntime:  "hf_runtime_" + suffix,
+			PlatformAdmin:  "hf_admin_" + suffix,
+			DeletionWorker: "hf_deletion_worker_" + suffix,
+			Migrator:       "hf_migrator_" + suffix,
 		},
 		Passwords: ComposeInitPasswords{
-			Bootstrap:     bootstrapPassword,
-			Runtime:       "runtime:/?# first secret",
-			PlatformAdmin: "admin:/?# first secret",
-			Migrator:      "migrator:/?# first secret",
+			Bootstrap:      bootstrapPassword,
+			Runtime:        "runtime:/?# first secret",
+			PlatformAdmin:  "admin:/?# first secret",
+			DeletionWorker: "deletion-worker:/?# first secret",
+			Migrator:       "migrator:/?# first secret",
 		},
 	}
 	if err := config.Validate(); err != nil {
@@ -272,6 +455,9 @@ func assertComposeIntegrationAuthorityProof(
 	if err := recordauthority.VerifyActivationReceipt(config.AuthorityStateRoot, state); err != nil {
 		t.Fatalf("verify Compose activation receipt: %v", err)
 	}
+	if state.MembershipVersion != 2 || len(state.Memberships) != 2 || recordauthority.VerifyMembershipRotationReceipt(config.AuthorityStateRoot, state) != nil {
+		t.Fatal("Compose authority does not have the verified V2 inventory and rotation receipt")
+	}
 	publishedDeploymentID, err := os.ReadFile(config.CenterDeploymentIDPath)
 	if err != nil {
 		t.Fatalf("read published Compose Center deployment identity: %v", err)
@@ -314,6 +500,21 @@ func assertComposeIntegrationAuthorityProof(
 		membership.QueueAdmitted != wantMembership.QueueAdmitted {
 		t.Fatalf("Compose membership = %#v, want exact verified authority inventory %#v", membership, wantMembership)
 	}
+	var processor composeIntegrationMembershipSnapshot
+	if err := migratorPool.QueryRow(ctx, `select deployment_id,project_id,instance_id,instance_kind,capability,deployment_epoch,fence_contract_version,load_balancer_admitted,queue_admitted,heartbeat_expires_at,created_at,updated_at from public.deployment_membership where instance_id='compose-processor'`).Scan(
+		&processor.DeploymentID, &processor.ProjectID, &processor.InstanceID, &processor.InstanceKind, &processor.Capability,
+		&processor.DeploymentEpoch, &processor.FenceContractVersion, &processor.LoadBalancerAdmitted, &processor.QueueAdmitted,
+		&processor.HeartbeatExpiresAt, &processor.CreatedAt, &processor.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	wantProcessor := state.Memberships[1]
+	if processor.DeploymentID != membership.DeploymentID || processor.ProjectID != membership.ProjectID ||
+		processor.InstanceID != wantProcessor.InstanceID || processor.InstanceKind != wantProcessor.InstanceKind ||
+		processor.Capability != wantProcessor.Capability || processor.DeploymentEpoch != int64(wantProcessor.DeploymentEpoch) ||
+		processor.FenceContractVersion != int64(wantProcessor.FenceContractVersion) || processor.LoadBalancerAdmitted != wantProcessor.LoadBalancerAdmitted ||
+		processor.QueueAdmitted != wantProcessor.QueueAdmitted || !processor.HeartbeatExpiresAt.Equal(membership.HeartbeatExpiresAt) {
+		t.Fatalf("processor membership does not match verified inventory and shared lease: %#v", processor)
+	}
 	now := time.Now().UTC()
 	if !membership.HeartbeatExpiresAt.After(now) || membership.HeartbeatExpiresAt.After(now.Add(120*time.Second)) {
 		t.Fatalf("Compose membership expiry %s is not a fresh bounded lease at %s", membership.HeartbeatExpiresAt, now)
@@ -351,7 +552,7 @@ func assertComposeIntegrationHeartbeatRejectionsDoNotMutate(
 	defer authorityPool.Close()
 
 	before := readComposeIntegrationMembership(t, ctx, migratorPool)
-	validCommand, _, err := recordauthority.MarshalMembershipHeartbeatCommandV1(state, time.Now().UTC())
+	validCommand, _, err := recordauthority.MarshalMembershipHeartbeatCommandV2(state, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("marshal valid heartbeat baseline: %v", err)
 	}
@@ -369,7 +570,7 @@ func assertComposeIntegrationHeartbeatRejectionsDoNotMutate(
 		"truncated command":  validCommand[:len(validCommand)-1],
 	} {
 		var ignored time.Time
-		if err := authorityPool.QueryRow(ctx, `select public.record_platform_compose_membership_heartbeat($1::bytea)`, command).Scan(&ignored); err == nil {
+		if err := authorityPool.QueryRow(ctx, `select public.record_platform_compose_membership_heartbeat_v2($1::bytea)`, command).Scan(&ignored); err == nil {
 			t.Fatalf("Compose heartbeat accepted %s", name)
 		}
 		after := readComposeIntegrationMembership(t, ctx, migratorPool)
@@ -399,7 +600,7 @@ func assertComposeIntegrationCatalog(
 	config ComposeInitConfig,
 ) {
 	t.Helper()
-	for _, role := range []string{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.Migrator, config.AuthorityRole} {
+	for _, role := range []string{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.DeletionWorker, config.Roles.Migrator, config.AuthorityRole} {
 		var canLogin, inherit, superuser, createDB, createRole, replication, bypassRLS bool
 		if err := bootstrapPool.QueryRow(ctx, `
 			select rolcanlogin, rolinherit, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls
@@ -474,6 +675,7 @@ func assertComposeIntegrationCatalog(
 	for _, endpoint := range []composePostgresEndpoint{
 		{Database: config.DatabaseName, Role: config.Roles.CenterRuntime, Password: config.Passwords.Runtime},
 		{Database: config.DatabaseName, Role: config.Roles.PlatformAdmin, Password: config.Passwords.PlatformAdmin},
+		{Database: config.DatabaseName, Role: config.Roles.DeletionWorker, Password: config.Passwords.DeletionWorker},
 	} {
 		pool, openErr := openPostgres(ctx, endpoint)
 		if openErr != nil {
@@ -512,7 +714,7 @@ func assertComposeIntegrationCatalog(
 
 func readComposeIntegrationPasswordHashes(t *testing.T, ctx context.Context, bootstrapPool *pgxpool.Pool, config ComposeInitConfig) map[string]string {
 	t.Helper()
-	rows, err := bootstrapPool.Query(ctx, `select rolname, rolpassword from pg_catalog.pg_authid where rolname = any($1::name[]) order by rolname`, []string{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.Migrator, config.AuthorityRole})
+	rows, err := bootstrapPool.Query(ctx, `select rolname, rolpassword from pg_catalog.pg_authid where rolname = any($1::name[]) order by rolname`, []string{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.DeletionWorker, config.Roles.Migrator, config.AuthorityRole})
 	if err != nil {
 		t.Fatalf("read Compose role password hashes: %v", err)
 	}
@@ -554,7 +756,7 @@ func cleanupComposeIntegrationDatabase(t *testing.T, ctx context.Context, bootst
 		arguments []any
 	}{
 		{format: `DROP DATABASE IF EXISTS %I`, arguments: []any{config.DatabaseName}},
-		{format: `DROP ROLE IF EXISTS %I, %I, %I, %I`, arguments: []any{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.Migrator, config.AuthorityRole}},
+		{format: `DROP ROLE IF EXISTS %I, %I, %I, %I, %I`, arguments: []any{config.Roles.CenterRuntime, config.Roles.PlatformAdmin, config.Roles.DeletionWorker, config.Roles.Migrator, config.AuthorityRole}},
 	} {
 		ddl := formatComposeIntegrationDDL(t, ctx, bootstrapPool, formatAndArguments.format, formatAndArguments.arguments...)
 		if _, err := bootstrapPool.Exec(ctx, ddl); err != nil && !errors.Is(err, context.Canceled) {

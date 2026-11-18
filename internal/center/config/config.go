@@ -58,6 +58,9 @@ type CenterConfig struct {
 	Attachment                AttachmentConfig
 	RecordInstanceID          string
 	RecordDeploymentID        string
+	BirthProducer             BirthProducerConfig
+	BirthReader               BirthReaderConfig
+	BirthLaunchFile           string
 	RecordInstanceKind        string
 	RecordInstanceCapability  string
 
@@ -279,6 +282,23 @@ func LoadCenterConfig() (CenterConfig, error) {
 		return CenterConfig{}, fmt.Errorf("HOUFENG_PORTABILITY_ENABLED requires HOUFENG_RECORDS_ENABLED=true")
 	}
 
+	birthProducer, err := loadBirthProducerConfig(recordPlatformMode)
+	if err != nil {
+		return CenterConfig{}, err
+	}
+	birthReader, err := LoadBirthReaderConfig(recordPlatformMode)
+	if err != nil {
+		return CenterConfig{}, err
+	}
+	if birthProducer.Connection != nil && birthReader.Connection != nil &&
+		birthProducer.Connection.ConnConfig.User == birthReader.Connection.ConnConfig.User {
+		return CenterConfig{}, fmt.Errorf("record birth producer and reader require independent database roles")
+	}
+	birthLaunchFile, err := loadBirthLaunchFile(recordPlatformMode)
+	if err != nil {
+		return CenterConfig{}, err
+	}
+
 	cfg := CenterConfig{
 		RecordPlatformMode:        recordPlatformMode,
 		ComparisonEnabled:         comparisonEnabled,
@@ -306,6 +326,9 @@ func LoadCenterConfig() (CenterConfig, error) {
 		Attachment:                attachmentConfig,
 		RecordInstanceID:          recordInstanceID,
 		RecordDeploymentID:        recordDeploymentID,
+		BirthProducer:             birthProducer,
+		BirthReader:               birthReader,
+		BirthLaunchFile:           birthLaunchFile,
 		RecordInstanceKind:        recordInstanceKind,
 		RecordInstanceCapability:  recordInstanceCapability,
 	}

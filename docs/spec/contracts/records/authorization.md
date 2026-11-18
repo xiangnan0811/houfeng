@@ -47,10 +47,14 @@ order by g.group_id asc
 
 - 可信 actor 只能由服务端 `authn.UserBySession` 的 `auth.User` 和 `ScopeRepository` 返回的持久化 `group_id` 构造：只把服务器端 `auth.RoleAdmin` 映射为 `recordauth.RoleProjectAdmin`，project 固定为 `default`，再走唯一的 `NormalizeActorScope`。它校验 opaque ID、闭合集，排序去重 group，并返回副本。
 - 除服务端验证 session cookie 取得 `auth.User` 外，任何客户端 header、query、body 或其他 cookie 字段都不能决定 project、role、group、visibility、source floor 或 capability；`X-Project-ID`、`X-Role`、`X-Group-ID` 等即使出现也必须无效。成功时同时写 typed actor 与 legacy user ID；没有 optional/nil scope repository 或“空 group 降级”路径。
+- revision commit、lifecycle commit 与 import finish 的存储命令携带 `Actor recordauth.ActorScope`，不再另收可独立信任的 lifecycle/import `ActorID`。命令校验拒绝缺失或闭合集外 actor；revision author 必须等于 actor user，import finish 与批内全部 revision 必须属于同一 canonical actor。持久化 actor_id 从该 actor 取得。这是身份传递与输入一致性合同，不代替事务内重读用户/成员及来源授权，也不单独证明在途撤权已生效。
 - `VisibilityScope` 用固定字段顺序、长度前缀的 canonical bytes 计算 SHA-256；角色/group 规范化为排序去重。`project` 不得携带 grant；空 `restricted` 是 deny-all，绝不等价于 project-wide。Policy 要求输入仍等于 canonical 形态及其 hash，不能信任 JSON、map 或调用方给出的摘要。
 - `SourceAuthorization` 是严格 tagged union：`live` 当且仅当 `CurrentScope != nil` 且 `FinalFloor == nil && LastLiveScope == nil`；`tombstoned` 当且仅当 `CurrentScope == nil` 且 `FinalFloor != nil && LastLiveScope != nil`。tombstone 的 canonical `LastLiveScope` 是 transition witness，不是另一次可跳过的授权范围。
 - `records.NormalizeCompleteRevisionInput` 只能接受服务端 adapter 解析并已经 canonical/digest-checked 的 source authorization，但必须接受完整 `live|tombstoned` 两种 union；不得在 `recordauth.NormalizeSourceAuthorization` 之上再叠加 live-only 条件。来源删除后的新修订继续保存 immutable capture scope，并以 witnessed final floor/last-live evidence 完成授权；live route 必须为空。历史 row 中的 evidence 不得当作 current scope cache，后续保存/读取仍由 adapter 重新解析 live 或 witnessed tombstone。
 - 每个 source 的 capture/current/floor/witness 必须同 project。live 必须满足 `CurrentScope <= CaptureScope`；tombstone 必须满足 `LastLiveScope <= CaptureScope` 且 `FinalFloor <= LastLiveScope`。source digest 覆盖 kind、ID、state、capture 以及 live current 或 tombstone floor + witness，因此不得跨 source/state/transition 重放。
+- 来源永久 retirement 的外部证据使用独立 W2 的 exact terminal，不把 APP 旧 tombstone、最新一条记录或 live-first 查询当作权威。reader 在 APP 业务事务外观察 W2，事务内重读 APP admission、barrier、unknown guard 和当前 generation pin；terminal 的完整 source/domain/retirement identity、canonical bytes/hash、sequence、barrier digest、last-live/floor 与 APP barrier 和 pin 必须精确一致。pin 安装 generation 必须为当前 generation，terminal 的 origin generation 不因恢复改写。W2 必须 active 且 handoff completed；未覆盖、legacy 冲突、缺失或不一致的证据均 fail closed。
+- W1 source 历史无法凭 projection 伪造 W2 终态，也不因 `attempt_not_committed` 推断已撤销。可定位的合法 source 四元组阻断自身；source kind/ID 非 canonical 则阻断其 deployment/project，连 deployment/project 都无法定位时阻断整个 witness domain。合法其他 source/deployment 不被扩大阻断；只有 `record_permanent_delete` 与 `record` 同时匹配才留给独立 W1 record-ledger 路径。reader 与 prepare/append/recovery-finalize 使用同一判定，已有 W2 terminal 或 exact replay 不能覆盖该 blocker。
+- 有效 tombstone 的授权是 capture ∩ last-live ∩ final-floor，再与当前 actor 的 role/group、record visibility 和所需 capability 相交；floor 不得宽于 last-live，不能因已验证 terminal 省略当前权限检查。未 enroll 的 APP 在没有相矛盾历史时可返回 tombstone-not-found；已 enroll 则不能以未配置或不可用 W2 降级为无历史。
 - `Policy.Authorize` 依次验证 actor、capability、canonical resource、project 相等、role-capability、resource visibility、每个 source 的 capture，及每个 live `CurrentScope` 或 tombstone `FinalFloor`。`project_admin` 拥有全部**已知** capability，但没有资源 scope、跨项目、union 完整性或 digest 的 bypass；所有交集都必须允许才可放行。
 - 初始主管理员的管理权与 Records scope 独立：`is_supervisor` 不进入 actor，不绕过上述交集。组名称目录也不进入 `ScopeRepository`；成员变更在下一请求重新读取生效，已在途请求继续使用原 request-local actor，不宣称撤销在途写入。
 
@@ -74,7 +78,7 @@ order by g.group_id asc
 
 - Good：已认证的 `auth.RoleAdmin` 在 `default` project 查询到 `rag_beta, rag_alpha, rag_beta`；context 中得到 `RoleProjectAdmin` 与排序去重后的 `rag_alpha, rag_beta`，legacy user ID 仍可被旧 handler 读取。
 - Good：viewer 对 record read 的 role/group grant 同时通过 resource、capture 和 live/final floor，或显式获授 `project_admin` role 的 restricted scope，才由 policy 放行。
-- Good：来源已删除但 full witness 给出 canonical final floor/last-live scope；adapter 返回空 route，revision normalization 与统一 policy 都接受该 tombstoned evidence，同时继续应用 capture/floor 交集。
+- Good：来源已删除且 exact W2 terminal、APP barrier 和当前 generation pin 一致；adapter 返回空 route，revision normalization 与统一 policy 接受 canonical tombstoned evidence，并继续应用当前 actor 和 capture/last-live/floor 交集。
 - Base：用户没有任何 group membership 时仍创建合法 typed actor（空 group）；它只能依靠 role/project visibility，不可由客户端补 group。空 `restricted` 对所有 actor 仍为 deny-all。
 - Bad：从 `X-Role` / `X-Group-ID` 构造 actor，查询 group 显示字段，或 repository 故障时把 groups 当作空数组继续执行。
 - Bad：仅因 project admin 直接放行，或 tombstone 删除后把 final floor 放宽为 capture project；两者都会绕过强制交集/单调性证据。

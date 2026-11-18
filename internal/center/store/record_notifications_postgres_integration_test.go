@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
+	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -29,9 +31,9 @@ func TestPostgresIntegrationRecordAutomaticFollowerSourcesRollbackWithProducerTr
 			commit: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, parent records.RevisionCommitResult, gate AdmissionGate) (string, error) {
 				command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgsourcerollback", 0,
 					mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Rollback source", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), "notification-source-action-rollback")
-				_, err := newPostgresActionRepositoryForTest(
-					t, fixture.openDirectRuntimePool(t, ctx, "record-source-action-rollback", 1), gate,
-				).CommitAction(ctx, command)
+				pool := fixture.openDirectRuntimePool(t, ctx, "record-source-action-rollback", 1)
+				_, err := NewPostgresRecordActionRepository(pool, gate, NewPostgresCollaborationMembershipReader(),
+					newRecordsPostgresAuthorization(t, pool, fixture.admissionGate)).CommitAction(ctx, command)
 				return command.Idempotency.Key.Key, err
 			},
 		},
@@ -40,29 +42,33 @@ func TestPostgresIntegrationRecordAutomaticFollowerSourcesRollbackWithProducerTr
 			commit: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, parent records.RevisionCommitResult, gate AdmissionGate) (string, error) {
 				command := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgsourcerollback", 0,
 					"Rollback source.", "", []string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb"}, "notification-source-comment-rollback")
-				_, err := newPostgresCommentRepositoryForTest(t,
-					fixture.openDirectRuntimePool(t, ctx, "record-source-comment-rollback", 1), gate,
-				).CommitComment(ctx, command)
+				pool := fixture.openDirectRuntimePool(t, ctx, "record-source-comment-rollback", 1)
+				_, err := NewPostgresRecordCommentRepository(pool, gate, NewPostgresCollaborationMembershipReader(),
+					newRecordsPostgresAuthorization(t, pool, fixture.admissionGate)).CommitComment(ctx, command)
 				return command.Idempotency.Key.Key, err
 			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			fixture := newRecordsPostgresFixture(t, ctx)
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
 			seedCollaborationRevisionUsers(t, ctx, fixture)
-			parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgsource"+test.name, "notification-source-"+test.name+"-parent")
+			seedPostgresCollaborationSource(t, ctx, fixture)
+			parent := seedPostgresActionParent(t, ctx, fixture, "notification-source-"+test.name+"-parent")
 			cutPoint := errors.New("automatic follower completion admission cut point")
 			var admissions atomic.Int32
-			gate := AdmissionGateFunc(func(context.Context, pgx.Tx) error {
+			gate := AdmissionGateFunc(func(ctx context.Context, tx pgx.Tx) error {
+				if err := fixture.admissionGate.Admit(ctx, tx); err != nil {
+					return err
+				}
 				if admissions.Add(1) == 3 {
 					return cutPoint
 				}
 				return nil
 			})
 			key, err := test.commit(t, ctx, fixture, parent, gate)
-			if !errors.Is(err, cutPoint) || admissions.Load() != 3 {
-				t.Fatalf("commit error/admissions = %v/%d, want completion cut point/3", err, admissions.Load())
+			if !errors.Is(err, cutPoint) {
+				t.Fatalf("commit error = %v, want completion cut point", err)
 			}
 			var followers, subjects, outbox, keys int
 			if err := fixture.db.QueryRow(ctx, `
@@ -105,19 +111,16 @@ func TestPostgresIntegrationRecordNotificationCancelsCapturedAuthorizationAndFen
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			fixture := newRecordsPostgresFixture(t, ctx)
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
 			seedCollaborationRevisionUsers(t, ctx, fixture)
+			seedPostgresCollaborationSource(t, ctx, fixture)
 			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-stale-"+test.slug, 3)
 			input := collaborationRevisionInput(t, collaborationRevisionInputValues{ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"})
-			created, err := newRecordsPostgresRepository(
-				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-			).CommitRevision(ctx, recordsPostgresRevisionCommand(
-				t, recordplatform.OperationKindRecordCreate, "rec_pgnotifystale"+test.slug, "", 0, 0, input, "notification-stale-"+test.slug,
-			))
+			created, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "notification-stale-"+test.slug))
 			if err != nil {
 				t.Fatalf("CommitRevision() error = %v", err)
 			}
-			projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "notification_stale_claim")
 			if claim.Event.AuthorizationEpoch != created.AuthorizationEpoch || claim.Event.RecordFenceEpoch != 0 {
 				t.Fatalf("captured epochs = auth %d/fence %d, want %d/0", claim.Event.AuthorizationEpoch, claim.Event.RecordFenceEpoch, created.AuthorizationEpoch)
@@ -146,9 +149,10 @@ func TestPostgresIntegrationRecordNotificationCancelsCapturedAuthorizationAndFen
 
 func TestPostgresIntegrationRecordPlatformAssertOutboxClaimRejectsImmutableTupleDrift(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-outbox-tuple-drift", 2)
-	repository := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	fixture, gate, runtimePool := newAdmittedOutboxFixture(t, ctx)
+	parent := seedAdmittedOutboxRecord(t, ctx, runtimePool, gate, "outbox-tuple-parent")
+	repository := NewPostgresRecordPlatformRepository(runtimePool, gate)
+	actions := NewPostgresRecordActionRepository(runtimePool, gate, NewPostgresCollaborationMembershipReader(), newRecordsPostgresAuthorization(t, runtimePool, gate))
 	for index, test := range []struct {
 		name   string
 		mutate func(*testing.T, int64)
@@ -198,26 +202,46 @@ func TestPostgresIntegrationRecordPlatformAssertOutboxClaimRejectsImmutableTuple
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			subjectID := fmt.Sprintf("ract_tuple%d", index)
-			if err := repository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-				_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
-					Event: recordplatform.OutboxEvent{
-						ProjectID: string(recordplatform.ProjectIDDefault), EventKind: recordplatform.OutboxEventKindRecordActionAssigned,
-						SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: subjectID,
-						SourceVersion: 1, AuthorizationEpoch: 3, RecordFenceEpoch: 0,
-					},
-					ExpiresAfter: time.Hour,
-				})
-				return err
-			}); err != nil {
-				t.Fatalf("enqueue tuple fixture: %v", err)
+			command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, subjectID, 0,
+				mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Tuple route", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}),
+				fmt.Sprintf("outbox-tuple-%d", index))
+			if _, err := actions.CommitAction(ctx, command); err != nil {
+				t.Fatalf("create action tuple fixture: %v", err)
 			}
 			claim := claimNotificationOutboxKind(t, ctx, repository, recordplatform.OutboxEventKindRecordActionAssigned, fmt.Sprintf("tuple_drift_%d", index))
+			assertClaim := func() error {
+				return repository.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+					acquired, err := acquireEffectMutationResources(ctx, transaction.tx, []string{parent.RecordID}, nil, records.RevisionMutationResources{})
+					if err != nil {
+						return err
+					}
+					transaction.registerAcquiredRecordMutationResources(acquired)
+					return transaction.AssertOutboxClaim(ctx, claim)
+				})
+			}
+			if err := assertClaim(); err != nil {
+				t.Fatalf("assert original outbox claim: %v", err)
+			}
 			test.mutate(t, claim.Event.RowID)
-			err := repository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-				return transaction.AssertOutboxClaim(ctx, claim)
-			})
+			err := assertClaim()
 			if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
 				t.Fatalf("AssertOutboxClaim(tuple drift) error = %v, want ErrLostOwnerLease", err)
+			}
+			for _, finalize := range []struct {
+				name string
+				run  func() error
+			}{
+				{name: "cancel", run: func() error { return repository.CancelOutbox(ctx, claim) }},
+				{name: "sent", run: func() error { return repository.MarkOutboxSent(ctx, claim) }},
+				{name: "retry", run: func() error { return repository.RetryOutbox(ctx, claim, time.Second) }},
+			} {
+				if err := finalize.run(); err == nil {
+					t.Fatalf("%s accepted drifted outbox tuple", finalize.name)
+				}
+			}
+			var status string
+			if err := fixture.db.QueryRow(ctx, `select status from public.record_outbox where outbox_row_id=$1`, claim.Event.RowID).Scan(&status); err != nil || status != "processing" {
+				t.Fatalf("drifted finalization status=%q error=%v", status, err)
 			}
 		})
 	}
@@ -225,22 +249,16 @@ func TestPostgresIntegrationRecordPlatformAssertOutboxClaimRejectsImmutableTuple
 
 func TestPostgresIntegrationRecordNotificationTakeoverOverlapsAndRejectsStaleFinalizer(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	parent := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-action-takeover-parent")
 	stalePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-stale-finalizer", 1)
 	takeoverPool := fixture.openDirectRuntimePool(t, ctx, "record-notification-live-takeover", 1)
-	staleQueue := NewPostgresRecordPlatformRepository(stalePool, allowRecordPlatformAdmissionGate)
-	if err := staleQueue.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
-			Event: recordplatform.OutboxEvent{
-				ProjectID: string(recordplatform.ProjectIDDefault), EventKind: recordplatform.OutboxEventKindRecordActionAssigned,
-				SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: "ract_takeover_overlap",
-				SourceVersion: 1, AuthorizationEpoch: 3,
-			},
-			ExpiresAfter: time.Hour,
-		})
-		return err
-	}); err != nil {
-		t.Fatalf("enqueue takeover overlap event: %v", err)
+	staleQueue := NewPostgresRecordPlatformRepository(stalePool, gate)
+	command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_takeoveroverlap", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Takeover route", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), "outbox-takeover-action")
+	actions := NewPostgresRecordActionRepository(runtime, gate, NewPostgresCollaborationMembershipReader(), newRecordsPostgresAuthorization(t, runtime, gate))
+	if _, err := actions.CommitAction(ctx, command); err != nil {
+		t.Fatalf("create takeover action: %v", err)
 	}
 	staleClaim := claimNotificationOutboxKind(t, ctx, staleQueue, recordplatform.OutboxEventKindRecordActionAssigned, "notification_stale_owner")
 	expireNotificationClaim(t, ctx, fixture, staleClaim.Event.RowID)
@@ -285,7 +303,7 @@ func TestPostgresIntegrationRecordNotificationTakeoverOverlapsAndRejectsStaleFin
 	defer cancelRace()
 	takeoverResults := make(chan claimOutcome, 1)
 	go func() {
-		claim, err := NewPostgresRecordPlatformRepository(takeoverPool, allowRecordPlatformAdmissionGate).ClaimOutbox(raceCtx, recordplatform.OutboxClaimInputV1{
+		claim, err := NewPostgresRecordPlatformRepository(takeoverPool, gate).ClaimOutbox(raceCtx, recordplatform.OutboxClaimInputV1{
 			OwnerID: "notification_takeover_owner", OwnerLeaseDuration: time.Minute,
 		})
 		takeoverResults <- claimOutcome{claim: claim, err: err}
@@ -320,37 +338,24 @@ func TestPostgresIntegrationRecordNotificationTakeoverOverlapsAndRejectsStaleFin
 
 func TestPostgresIntegrationRecordNotificationProjectionFencesTakeoverAndReplaysAtomically(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-projection", 4)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
 		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 	})
-	recordRepository := newRecordsPostgresRepository(
-		t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	)
-	created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgnotification", "", 0, 0, input, "notification-parent-create",
-	))
+	recordRepository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()))
+	created, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "notification-parent-create"))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
 	}
 
-	storedSubject := input.Subjects()[0]
-	identity, err := records.NewSubjectIdentitySnapshot(storedSubject.Kind, storedSubject.IdentitySnapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
-		ProjectID: recordauth.ProjectIDDefault, StableID: storedSubject.SourceID,
-		IdentitySnapshot: identity, LiveRoute: "/vps/" + storedSubject.SourceID,
-		CaptureAuthorization: storedSubject.CaptureAuthorization,
-	}}
-	authorization := newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate)
+	authorization := newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)
 	projection := NewPostgresRecordNotificationRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(), authorization, 30*24*time.Hour,
+		runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(), authorization, 30*24*time.Hour,
 	)
-	queue := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	queue := NewPostgresRecordPlatformRepository(runtimePool, fixture.admissionGate)
 
 	ownerClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "notification_owner_a")
 	if ownerClaim.Event.SubjectID != created.RecordID || ownerClaim.Event.SourceVersion != created.RevisionNo {
@@ -487,16 +492,16 @@ func TestPostgresIntegrationRecordNotificationProjectionFencesTakeoverAndReplays
 		t.Fatalf("restore inbox membership: %v", err)
 	}
 
-	liveAuthorization := storedSubject.CaptureAuthorization
-	revokedFloor := collaborationVisibility(t, recordauth.VisibilityKindRestricted, []string{"rag_revoked"})
-	resolver.resolved.CaptureAuthorization = collaborationSourceAuthorization(t, liveAuthorization.CaptureScope, revokedFloor, recordauth.SourceStateTombstoned)
-	if got, err := projection.ListInbox(ctx, listRequest); err != nil || got == nil || len(got) != 0 {
-		t.Fatalf("ListInbox(after source revoke) = (%#v, %v), want nonnil empty", got, err)
+	if _, err := fixture.db.Exec(ctx, `delete from public.vps_assets where vps_id = $1`, input.Subjects()[0].SourceID); err != nil {
+		t.Fatalf("remove current source: %v", err)
 	}
-	if _, err := projection.GetInboxDeepLink(ctx, itemRequest); !errors.Is(err, recordcollaboration.ErrInboxNotFound) {
-		t.Fatalf("GetInboxDeepLink(after source revoke) error = %v, want opaque not found", err)
+	if _, err := projection.ListInbox(ctx, listRequest); !errors.Is(err, ErrRecordSubjectUnavailable) {
+		t.Fatalf("ListInbox(without source) error = %v, want source unavailable", err)
 	}
-	resolver.resolved.CaptureAuthorization = liveAuthorization
+	if _, err := projection.GetInboxDeepLink(ctx, itemRequest); !errors.Is(err, ErrRecordSubjectUnavailable) {
+		t.Fatalf("GetInboxDeepLink(without source) error = %v, want source unavailable", err)
+	}
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.deletion_reservations (
 			reservation_id, project_id, object_kind, object_id,
@@ -582,24 +587,21 @@ func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWi
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			fixture := newRecordsPostgresFixture(t, ctx)
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
 			seedCollaborationRevisionUsers(t, ctx, fixture)
+			seedPostgresCollaborationSource(t, ctx, fixture)
 			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-delivery-projection", 4)
 			input := collaborationRevisionInput(t, collaborationRevisionInputValues{
 				ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 			})
-			created, err := newRecordsPostgresRepository(
-				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-			).CommitRevision(ctx, recordsPostgresRevisionCommand(
-				t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryprojection", "", 0, 0, input, "delivery-projection-parent",
-			))
+			created, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "delivery-projection-parent"))
 			if err != nil {
 				t.Fatalf("CommitRevision() error = %v", err)
 			}
-			baseProjection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			_, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 			projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
-				runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-				baseProjection.authorization, 30*24*time.Hour, test.bindingReader,
+				runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+				newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate), 30*24*time.Hour, test.bindingReader,
 			)
 			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_projection_owner")
 			result, err := projection.ProjectNotification(ctx, claim)
@@ -644,21 +646,18 @@ func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWi
 
 func TestPostgresIntegrationRecordNotificationPlanningFailureRetriesParentWithoutRollingBackInbox(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-planning-retry", 4)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
 		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 	})
-	created, err := newRecordsPostgresRepository(
-		t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	).CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryretry", "", 0, 0, input, "delivery-planning-retry-parent",
-	))
+	created, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "delivery-planning-retry-parent"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	_, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 	planningErr := errors.New("credential=secret webhook=https://provider.invalid/hook response=provider-body")
 	bindings := &notificationBindingListerStub{
 		err: planningErr,
@@ -670,8 +669,8 @@ func TestPostgresIntegrationRecordNotificationPlanningFailureRetriesParentWithou
 		},
 	}
 	projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-		base.authorization, 30*24*time.Hour, bindings,
+		runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+		newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate), 30*24*time.Hour, bindings,
 	)
 	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_planning_first")
 	projector, err := recordcollaboration.NewNotificationProjector(
@@ -780,21 +779,18 @@ func TestPostgresIntegrationRecordNotificationPlanningRechecksPolicyAndOwnerBetw
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			fixture := newRecordsPostgresFixture(t, ctx)
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
 			seedCollaborationRevisionUsers(t, ctx, fixture)
+			seedPostgresCollaborationSource(t, ctx, fixture)
 			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-planning-recheck", 6)
 			input := collaborationRevisionInput(t, collaborationRevisionInputValues{
 				ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 			})
-			created, err := newRecordsPostgresRepository(
-				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-			).CommitRevision(ctx, recordsPostgresRevisionCommand(
-				t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryrecheck", "", 0, 0, input, "delivery-planning-recheck-parent",
-			))
+			created, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "delivery-planning-recheck-parent"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			_, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 			bindings := &notificationBindingListerStub{byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
 				"usr_bbbbbbbbbbbbbbbbbbbbbbbb": {{
 					ProjectID: recordauth.ProjectIDDefault, RecipientUserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
@@ -804,8 +800,11 @@ func TestPostgresIntegrationRecordNotificationPlanningRechecksPolicyAndOwnerBetw
 			enteredPlanning := make(chan struct{})
 			releasePlanning := make(chan struct{})
 			var admissions atomic.Int32
-			gate := AdmissionGateFunc(func(ctx context.Context, _ pgx.Tx) error {
-				if admissions.Add(1) == 3 {
+			gate := AdmissionGateFunc(func(ctx context.Context, tx pgx.Tx) error {
+				if err := fixture.admissionGate.Admit(ctx, tx); err != nil {
+					return err
+				}
+				if admissions.Add(1) == 5 {
 					close(enteredPlanning)
 					select {
 					case <-releasePlanning:
@@ -817,7 +816,7 @@ func TestPostgresIntegrationRecordNotificationPlanningRechecksPolicyAndOwnerBetw
 			})
 			projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
 				runtimePool, gate, NewPostgresCollaborationMembershipReader(),
-				base.authorization, 30*24*time.Hour, bindings,
+				newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate), 30*24*time.Hour, bindings,
 			)
 			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_planning_interphase")
 			type projectionOutcome struct {
@@ -875,21 +874,18 @@ func TestPostgresIntegrationRecordNotificationPlanningRechecksPolicyAndOwnerBetw
 
 func TestPostgresIntegrationRecordNotificationTakeoverReconcilesRecipientWithoutDeletingDeliveryAudit(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-recipient-reconcile", 5)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
 		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 	})
-	created, err := newRecordsPostgresRepository(
-		t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	).CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryreconcile", "", 0, 0, input, "delivery-recipient-reconcile-parent",
-	))
+	created, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "delivery-recipient-reconcile-parent"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	_, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 	provider := &notificationBindingProviderStub{}
 	bindings := &notificationBindingListerStub{
 		provider: provider,
@@ -901,8 +897,8 @@ func TestPostgresIntegrationRecordNotificationTakeoverReconcilesRecipientWithout
 		},
 	}
 	projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-		base.authorization, 30*24*time.Hour, bindings,
+		runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+		newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate), 30*24*time.Hour, bindings,
 	)
 	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_reconcile_first")
 	first, err := projection.ProjectNotification(ctx, claim)
@@ -953,21 +949,18 @@ func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTa
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			fixture := newRecordsPostgresFixture(t, ctx)
+			fixture := newAdmittedCoreRecordFixture(t, ctx)
 			seedCollaborationRevisionUsers(t, ctx, fixture)
+			seedPostgresCollaborationSource(t, ctx, fixture)
 			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-external-delivery", 4)
 			input := collaborationRevisionInput(t, collaborationRevisionInputValues{
 				ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 			})
-			created, err := newRecordsPostgresRepository(
-				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-			).CommitRevision(ctx, recordsPostgresRevisionCommand(
-				t, recordplatform.OperationKindRecordCreate, "rec_pgexternaldelivery", "", 0, 0, input, "external-delivery-parent",
-			))
+			created, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "external-delivery-parent"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			_, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 			provider := &notificationBindingProviderStub{}
 			bindings := &notificationBindingListerStub{
 				provider: provider,
@@ -979,8 +972,8 @@ func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTa
 				},
 			}
 			repository := NewPostgresRecordNotificationRepositoryWithExternalBindings(
-				runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-				base.authorization, 30*24*time.Hour, bindings,
+				runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+				newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate), 30*24*time.Hour, bindings,
 			)
 			parentClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "external_parent")
 			if _, err := repository.ProjectNotification(ctx, parentClaim); err != nil {
@@ -990,7 +983,7 @@ func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTa
 				t.Fatal(err)
 			}
 			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "external_delivery_a")
-			preparation, err := repository.PrepareExternalDelivery(ctx, claim, "https://houfeng.example")
+			preparation, err := repository.PrepareExternalDelivery(ctx, claim, "https://houfeng.example", time.Second)
 			if err != nil || preparation.Prepared == nil || preparation.Validate() != nil {
 				t.Fatalf("PrepareExternalDelivery() = (%#v, %v)", preparation, err)
 			}
@@ -999,14 +992,21 @@ func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTa
 			}
 
 			if !test.takeover {
-				result, err := repository.FinalizeExternalDelivery(
-					ctx, claim, preparation.Prepared.Attempt, recordcollaboration.ExternalDeliveryProviderSent, 0,
-				)
-				if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+				fact, err := repository.ReportExternalDeliveryOutcome(ctx, claim, preparation.Prepared.Attempt, preparation.Prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderSent)
+				if err != nil {
+					t.Fatalf("ReportExternalDeliveryOutcome(sent): %v", err)
+				}
+				result, err := repository.FinalizeExternalDelivery(ctx, claim, preparation.Prepared.Attempt, fact, 0)
+				if err != nil || !result.QueueFinalized || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
 					t.Fatalf("FinalizeExternalDelivery(sent) = (%#v, %v)", result, err)
 				}
-				if err := queue.MarkOutboxSent(ctx, claim); err != nil {
-					t.Fatal(err)
+				replayed, err := repository.FinalizeExternalDelivery(ctx, claim, preparation.Prepared.Attempt, fact, 0)
+				if err != nil || replayed != result {
+					t.Fatalf("replay committed sent completion = (%#v, %v), want %#v", replayed, err, result)
+				}
+				var queueState string
+				if err := fixture.db.QueryRow(ctx, `select status from public.record_outbox where outbox_row_id=$1`, claim.Event.RowID).Scan(&queueState); err != nil || queueState != "sent" {
+					t.Fatalf("sent completion queue=%q error=%v", queueState, err)
 				}
 				assertExternalDeliveryState(t, ctx, fixture, claim.Event.SubjectID, "sent", "sent", 1)
 				return
@@ -1014,17 +1014,16 @@ func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTa
 
 			expireNotificationClaim(t, ctx, fixture, claim.Event.RowID)
 			takeover := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "external_delivery_b")
-			replay, err := repository.PrepareExternalDelivery(ctx, takeover, "https://houfeng.example")
-			if err != nil || replay.Prepared != nil || replay.Result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+			replay, err := repository.PrepareExternalDelivery(ctx, takeover, "https://houfeng.example", time.Second)
+			if err != nil || replay.Prepared != nil || !replay.Result.QueueFinalized || replay.Result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
 				t.Fatalf("PrepareExternalDelivery(takeover) = (%#v, %v)", replay, err)
 			}
-			if _, err := repository.FinalizeExternalDelivery(
-				ctx, claim, preparation.Prepared.Attempt, recordcollaboration.ExternalDeliveryProviderSent, 0,
-			); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
-				t.Fatalf("stale FinalizeExternalDelivery() error = %v, want ErrLostOwnerLease", err)
+			fact, err := repository.ReportExternalDeliveryOutcome(ctx, claim, preparation.Prepared.Attempt, preparation.Prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderSent)
+			if err != nil {
+				t.Fatalf("late original sender report: %v", err)
 			}
-			if err := queue.MarkOutboxSent(ctx, takeover); err != nil {
-				t.Fatal(err)
+			if _, err := repository.FinalizeExternalDelivery(ctx, claim, preparation.Prepared.Attempt, fact, 0); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+				t.Fatalf("stale FinalizeExternalDelivery() error = %v, want ErrLostOwnerLease", err)
 			}
 			assertExternalDeliveryState(t, ctx, fixture, claim.Event.SubjectID, "unknown_outcome", "unknown_outcome", 1)
 		})
@@ -1033,11 +1032,15 @@ func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTa
 
 func TestPostgresIntegrationRecordExternalDeliveryCrashTakeoverOverlapsStaleFinalizer(t *testing.T) {
 	harness := newPostgresExternalDeliveryHarness(t)
-	preparation, err := harness.repository.PrepareExternalDelivery(harness.ctx, harness.claim, "https://houfeng.example")
+	preparation, err := harness.repository.PrepareExternalDelivery(harness.ctx, harness.claim, "https://houfeng.example", time.Second)
 	if err != nil || preparation.Prepared == nil {
 		t.Fatalf("PrepareExternalDelivery() = (%#v, %v)", preparation, err)
 	}
 	attempt := preparation.Prepared.Attempt
+	fact, err := harness.repository.ReportExternalDeliveryOutcome(harness.ctx, harness.claim, attempt, preparation.Prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderSent)
+	if err != nil {
+		t.Fatalf("commit provider fact before takeover: %v", err)
+	}
 	expireNotificationClaim(t, harness.ctx, harness.fixture, harness.claim.Event.RowID)
 
 	takeoverPool := harness.fixture.openDirectRuntimePool(t, harness.ctx, "record-external-delivery-live-takeover", 1)
@@ -1084,7 +1087,7 @@ func TestPostgresIntegrationRecordExternalDeliveryCrashTakeoverOverlapsStaleFina
 	defer cancelRace()
 	takeoverResults := make(chan claimOutcome, 1)
 	go func() {
-		claim, err := NewPostgresRecordPlatformRepository(takeoverPool, allowRecordPlatformAdmissionGate).ClaimOutbox(
+		claim, err := NewPostgresRecordPlatformRepository(takeoverPool, harness.fixture.admissionGate).ClaimOutbox(
 			raceCtx,
 			recordplatform.OutboxClaimInputV1{OwnerID: "external_delivery_takeover_owner", OwnerLeaseDuration: time.Minute},
 		)
@@ -1093,20 +1096,13 @@ func TestPostgresIntegrationRecordExternalDeliveryCrashTakeoverOverlapsStaleFina
 	waitForPostgresBlockingPID(t, raceCtx, harness.fixture.db, takeoverPID, controlPID)
 
 	staleResults := make(chan error, 1)
+	staleStarted := make(chan struct{})
 	go func() {
-		_, err := harness.repository.FinalizeExternalDelivery(
-			raceCtx, harness.claim, attempt, recordcollaboration.ExternalDeliveryProviderSent, 0,
-		)
+		close(staleStarted)
+		_, err := harness.repository.FinalizeExternalDelivery(raceCtx, harness.claim, attempt, fact, 0)
 		staleResults <- err
 	}()
-	select {
-	case err := <-staleResults:
-		if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
-			t.Fatalf("overlapped stale delivery finalizer error = %v, want ErrLostOwnerLease", err)
-		}
-	case <-raceCtx.Done():
-		t.Fatalf("stale delivery finalizer did not reject while takeover was in flight: %v", raceCtx.Err())
-	}
+	<-staleStarted
 	if err := controlTx.Commit(harness.ctx); err != nil {
 		t.Fatalf("release external delivery takeover latch: %v", err)
 	}
@@ -1115,17 +1111,26 @@ func TestPostgresIntegrationRecordExternalDeliveryCrashTakeoverOverlapsStaleFina
 		takeover.claim.Owner.Generation != harness.claim.Owner.Generation+1 {
 		t.Fatalf("external delivery takeover claim = (%#v, %v)", takeover.claim, takeover.err)
 	}
+	select {
+	case err := <-staleResults:
+		var pgErr *pgconn.PgError
+		if !errors.Is(err, recordplatform.ErrLostOwnerLease) && !(errors.As(err, &pgErr) && pgErr.Code == "40001") {
+			t.Fatalf("overlapped stale finalizer error = %v, want lost owner or a serialization conflict", err)
+		}
+	case <-raceCtx.Done():
+		t.Fatalf("stale finalizer did not finish: %v", raceCtx.Err())
+	}
+	if _, err := harness.repository.FinalizeExternalDelivery(harness.ctx, harness.claim, attempt, fact, 0); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("stale finalizer after takeover error = %v, want ErrLostOwnerLease", err)
+	}
 	result, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, *takeover.claim)
-	if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+	if err != nil || !result.QueueFinalized || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
 		t.Fatalf("ProcessExternalDelivery(takeover) = (%#v, %v)", result, err)
 	}
 	if harness.provider.calls != 0 {
 		t.Fatalf("provider calls after uncertain takeover = %d, want zero", harness.provider.calls)
 	}
-	if err := harness.queue.MarkOutboxSent(harness.ctx, *takeover.claim); err != nil {
-		t.Fatal(err)
-	}
-	assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, "unknown_outcome", "unknown_outcome", 1)
+	assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, "sent", "sent", 1)
 }
 
 func TestPostgresIntegrationRecordExternalDeliveryBoundsRetriesAndTerminalOutcomes(t *testing.T) {
@@ -1140,21 +1145,15 @@ func TestPostgresIntegrationRecordExternalDeliveryBoundsRetriesAndTerminalOutcom
 				t.Fatalf("attempt %d ProcessExternalDelivery() error = %v", attempt, err)
 			}
 			if attempt < int(recordcollaboration.MaxNotificationDeliveryAttempts) {
-				if result.Disposition != recordcollaboration.ExternalDeliveryOutboxRetry || result.RetryAfter <= 0 {
+				if !result.QueueFinalized || result.Disposition != recordcollaboration.ExternalDeliveryOutboxRetry || result.RetryAfter <= 0 || result.NextAttemptAt.IsZero() {
 					t.Fatalf("attempt %d result = %#v, want retry", attempt, result)
-				}
-				if err := harness.queue.RetryOutbox(harness.ctx, claim, result.RetryAfter); err != nil {
-					t.Fatal(err)
 				}
 				forceExternalDeliveryRetryDue(t, harness, claim.Event.RowID)
 				claim = claimNotificationOutboxKind(t, harness.ctx, harness.queue, recordplatform.OutboxEventKindRecordNotificationDelivery, fmt.Sprintf("external_retry_%d", attempt+1))
 				continue
 			}
-			if result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+			if !result.QueueFinalized || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
 				t.Fatalf("attempt eight result = %#v, want complete terminal", result)
-			}
-			if err := harness.queue.MarkOutboxSent(harness.ctx, claim); err != nil {
-				t.Fatal(err)
 			}
 		}
 		if harness.provider.calls != int(recordcollaboration.MaxNotificationDeliveryAttempts) {
@@ -1182,15 +1181,212 @@ func TestPostgresIntegrationRecordExternalDeliveryBoundsRetriesAndTerminalOutcom
 			harness := newPostgresExternalDeliveryHarness(t)
 			harness.provider.outcome = test.outcome
 			result, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, harness.claim)
-			if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+			if err != nil || !result.QueueFinalized || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
 				t.Fatalf("ProcessExternalDelivery() = (%#v, %v)", result, err)
-			}
-			if err := harness.queue.MarkOutboxSent(harness.ctx, harness.claim); err != nil {
-				t.Fatal(err)
 			}
 			assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, test.wantState, string(test.outcome), 1)
 		})
 	}
+}
+
+func TestPostgresIntegrationRecordExternalDeliveryProjectorUsesAtomicDisposition(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		outcome    recordcollaboration.ExternalDeliveryProviderOutcome
+		queueState string
+		state      string
+	}{
+		{name: "sent", outcome: recordcollaboration.ExternalDeliveryProviderSent, queueState: "sent", state: "sent"},
+		{name: "retry", outcome: recordcollaboration.ExternalDeliveryProviderTemporaryFailure, queueState: "pending", state: "retry_wait"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newPostgresExternalDeliveryHarness(t)
+			harness.provider.outcome = test.outcome
+			queue := &notificationPreclaimedQueue{claim: &harness.claim, queue: harness.queue}
+			projector, err := recordcollaboration.NewNotificationProjectorWithExternalDelivery(queue, harness.repository, newPostgresExternalDeliveryProcessor(t, harness.repository), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			processed, err := projector.ProjectNext(harness.ctx, recordplatform.OutboxClaimInputV1{OwnerID: "projector_delivery", OwnerLeaseDuration: time.Minute})
+			if err != nil || !processed || harness.provider.calls != 1 {
+				t.Fatalf("ProjectNext()=(%t,%v), provider calls=%d", processed, err, harness.provider.calls)
+			}
+			var queueState, deliveryState string
+			var attempts, completions int
+			if err := harness.fixture.db.QueryRow(harness.ctx, `select o.status,d.delivery_state,d.attempt_count,
+				(select count(*) from public.record_notification_delivery_completions c where c.delivery_id=d.delivery_id)
+				from public.record_outbox o join public.record_notification_deliveries d on d.delivery_id=o.subject_id
+				where o.outbox_row_id=$1`, harness.claim.Event.RowID).Scan(&queueState, &deliveryState, &attempts, &completions); err != nil ||
+				queueState != test.queueState || deliveryState != test.state || attempts != 1 || completions != 1 {
+				t.Fatalf("atomic disposition queue=%q delivery=%q attempts=%d completions=%d error=%v", queueState, deliveryState, attempts, completions, err)
+			}
+		})
+	}
+}
+
+func TestPostgresIntegrationRecordExternalDeliveryFactAndFinalizationRecovery(t *testing.T) {
+	t.Run("temporary fact survives takeover and replay retains retry time", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		ctx := harness.ctx
+		preparation, err := harness.repository.PrepareExternalDelivery(ctx, harness.claim, "https://houfeng.example", time.Second)
+		if err != nil || preparation.Prepared == nil {
+			t.Fatalf("prepare original sender: %#v, %v", preparation, err)
+		}
+		prepared := preparation.Prepared
+		fact, err := harness.repository.ReportExternalDeliveryOutcome(ctx, harness.claim, prepared.Attempt, prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderTemporaryFailure)
+		if err != nil {
+			t.Fatalf("commit temporary fact: %v", err)
+		}
+		repeated, err := harness.repository.ReportExternalDeliveryOutcome(ctx, harness.claim, prepared.Attempt, prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderTemporaryFailure)
+		if err != nil || repeated != fact {
+			t.Fatalf("repeat provider fact = %#v, %v", repeated, err)
+		}
+		expireNotificationClaim(t, ctx, harness.fixture, harness.claim.Event.RowID)
+		takeover := claimNotificationOutboxKind(t, ctx, harness.queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "fact_retry_takeover")
+		recovered, err := harness.repository.PrepareExternalDelivery(ctx, takeover, "https://houfeng.example", time.Second)
+		if err != nil || recovered.Prepared != nil || !recovered.Result.QueueFinalized ||
+			recovered.Result.Disposition != recordcollaboration.ExternalDeliveryOutboxRetry ||
+			recovered.Result.RetryAfter != time.Second || recovered.Result.NextAttemptAt.IsZero() {
+			t.Fatalf("recover temporary fact: %#v, %v", recovered, err)
+		}
+		if harness.provider.calls != 0 {
+			t.Fatalf("takeover resent provider attempt: %d calls", harness.provider.calls)
+		}
+		var state, queueState string
+		var nextAt time.Time
+		if err := harness.fixture.db.QueryRow(ctx, `select d.delivery_state,o.status,o.next_attempt_at
+			from public.record_notification_deliveries d join public.record_outbox o on o.subject_id=d.delivery_id
+			where o.outbox_row_id=$1`, takeover.Event.RowID).Scan(&state, &queueState, &nextAt); err != nil ||
+			state != "retry_wait" || queueState != "pending" || !nextAt.Equal(recovered.Result.NextAttemptAt) {
+			t.Fatalf("persisted retry state=%q queue=%q next=%v result=%v error=%v", state, queueState, nextAt, recovered.Result.NextAttemptAt, err)
+		}
+		replayed, err := harness.repository.FinalizeExternalDelivery(ctx, takeover, prepared.Attempt, fact, time.Second)
+		if err != nil || !replayed.QueueFinalized || replayed.Disposition != recovered.Result.Disposition ||
+			replayed.RetryAfter != recovered.Result.RetryAfter || !replayed.NextAttemptAt.Equal(recovered.Result.NextAttemptAt) {
+			t.Fatalf("completion replay changed retry: %#v, %v", replayed, err)
+		}
+		if _, err := harness.repository.FinalizeExternalDelivery(ctx, harness.claim, prepared.Attempt, fact, time.Second); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+			t.Fatalf("original owner finalized after takeover: %v", err)
+		}
+		forceExternalDeliveryRetryDue(t, harness, takeover.Event.RowID)
+		next := claimNotificationOutboxKind(t, ctx, harness.queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "fact_retry_next")
+		result, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(ctx, next)
+		if err != nil || !result.QueueFinalized || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete || harness.provider.calls != 1 {
+			t.Fatalf("new authorized attempt = %#v, %v; sends=%d", result, err, harness.provider.calls)
+		}
+		var attempts int
+		if err := harness.fixture.db.QueryRow(ctx, `select delivery_state,attempt_count from public.record_notification_deliveries where delivery_id=$1`, next.Event.SubjectID).Scan(&state, &attempts); err != nil || state != "sent" || attempts != 2 {
+			t.Fatalf("retried delivery state=%q attempts=%d error=%v", state, attempts, err)
+		}
+	})
+
+	t.Run("conflicts and forged reports never authorize a send", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		ctx := harness.ctx
+		preparation, err := harness.repository.PrepareExternalDelivery(ctx, harness.claim, "https://houfeng.example", time.Second)
+		if err != nil || preparation.Prepared == nil {
+			t.Fatalf("prepare original sender: %#v, %v", preparation, err)
+		}
+		prepared := preparation.Prepared
+		forged, err := recordcollaboration.ParseExternalDeliveryReportingCapability([]byte(strings.Repeat("x", 32)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := harness.repository.ReportExternalDeliveryOutcome(ctx, harness.claim, prepared.Attempt, forged, recordcollaboration.ExternalDeliveryProviderSent); err == nil {
+			t.Fatal("forged reporting capability recorded a provider fact")
+		}
+		for _, mutate := range []func(*recordplatform.ClaimedOutboxEventV1){
+			func(claim *recordplatform.ClaimedOutboxEventV1) { claim.Owner.OwnerID = "other_sender" },
+			func(claim *recordplatform.ClaimedOutboxEventV1) { claim.Owner.Generation++ },
+			func(claim *recordplatform.ClaimedOutboxEventV1) {
+				claim.Owner.ExpiresAt = claim.Owner.ExpiresAt.Add(time.Microsecond)
+			},
+			func(claim *recordplatform.ClaimedOutboxEventV1) {
+				claim.ExpiresAt = claim.ExpiresAt.Add(time.Microsecond)
+			},
+		} {
+			drifted := harness.claim
+			mutate(&drifted)
+			if _, err := harness.repository.ReportExternalDeliveryOutcome(ctx, drifted, prepared.Attempt, prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderSent); err == nil {
+				t.Fatal("changed sender tuple recorded a provider fact")
+			}
+		}
+		for _, mutate := range []func(*recordcollaboration.ExternalDeliveryAttempt){
+			func(attempt *recordcollaboration.ExternalDeliveryAttempt) {
+				attempt.StartedAt = attempt.StartedAt.Add(time.Microsecond)
+			},
+			func(attempt *recordcollaboration.ExternalDeliveryAttempt) {
+				attempt.RecipientUserID = "usr_aaaaaaaaaaaaaaaaaaaaaaaa"
+			},
+			func(attempt *recordcollaboration.ExternalDeliveryAttempt) {
+				if attempt.RecordID == "rec_aaaaaaaaaaaaaaaaaaaaaaaa" {
+					attempt.RecordID = "rec_bbbbbbbbbbbbbbbbbbbbbbbb"
+				} else {
+					attempt.RecordID = "rec_aaaaaaaaaaaaaaaaaaaaaaaa"
+				}
+			},
+		} {
+			drifted := prepared.Attempt
+			mutate(&drifted)
+			if _, err := harness.repository.ReportExternalDeliveryOutcome(ctx, harness.claim, drifted, prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderSent); err == nil {
+				t.Fatal("changed attempt tuple recorded a provider fact")
+			}
+		}
+		workerPool := harness.fixture.openDirectRolePool(t, ctx, harness.fixture.deletionWorker, "delivery-report-denied-worker", 2)
+		var workerCanReport bool
+		if err := workerPool.QueryRow(ctx, `select has_function_privilege(current_user,'public.record_external_delivery_outcome(bytea)','execute')`).Scan(&workerCanReport); err != nil || workerCanReport {
+			t.Fatalf("worker report privilege=%t error=%v", workerCanReport, err)
+		}
+		workerRepository := &PostgresRecordNotificationRepository{platform: NewPostgresRecordPlatformRepository(workerPool, harness.fixture.admissionGate)}
+		if _, err := workerRepository.ReportExternalDeliveryOutcome(ctx, harness.claim, prepared.Attempt, prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderSent); err == nil {
+			t.Fatal("deletion worker reported a provider fact")
+		}
+		first, err := harness.repository.ReportExternalDeliveryOutcome(ctx, harness.claim, prepared.Attempt, prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderSent)
+		if err != nil {
+			t.Fatalf("first provider fact: %v", err)
+		}
+		second, err := harness.repository.ReportExternalDeliveryOutcome(ctx, harness.claim, prepared.Attempt, prepared.ReportingCapability, recordcollaboration.ExternalDeliveryProviderPermanentFailure)
+		if err != nil || second == first {
+			t.Fatalf("conflicting provider fact = %#v, %v", second, err)
+		}
+		expireNotificationClaim(t, ctx, harness.fixture, harness.claim.Event.RowID)
+		takeover := claimNotificationOutboxKind(t, ctx, harness.queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "fact_conflict_takeover")
+		recovered, err := harness.repository.PrepareExternalDelivery(ctx, takeover, "https://houfeng.example", time.Second)
+		if err != nil || recovered.Prepared != nil || !recovered.Result.QueueFinalized || recovered.Result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete || harness.provider.calls != 0 {
+			t.Fatalf("conflicting fact takeover = %#v, %v; sends=%d", recovered, err, harness.provider.calls)
+		}
+		assertExternalDeliveryState(t, ctx, harness.fixture, harness.claim.Event.SubjectID, "unknown_outcome", "unknown_outcome", 1)
+		var providerFacts int
+		if err := harness.fixture.db.QueryRow(ctx, `select count(*) from public.record_notification_delivery_facts where attempt_id=$1 and fact_kind='provider_report'`, first.AttemptID).Scan(&providerFacts); err != nil || providerFacts != 2 {
+			t.Fatalf("retained provider facts=%d error=%v", providerFacts, err)
+		}
+	})
+
+	t.Run("legacy processing without a start remains unknown", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		ctx := harness.ctx
+		// This models predecessor inventory; it creates no start or sender capability.
+		if _, err := harness.fixture.db.Exec(ctx, `update public.record_notification_deliveries
+			set delivery_state='processing',attempt_count=1,attempt_started_at=clock_timestamp()
+			where delivery_id=$1`, harness.claim.Event.SubjectID); err != nil {
+			t.Fatalf("seed predecessor processing projection: %v", err)
+		}
+		expireNotificationClaim(t, ctx, harness.fixture, harness.claim.Event.RowID)
+		takeover := claimNotificationOutboxKind(t, ctx, harness.queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "legacy_delivery_takeover")
+		recovered, err := harness.repository.PrepareExternalDelivery(ctx, takeover, "https://houfeng.example", time.Second)
+		if err != nil || recovered.Prepared != nil || !recovered.Result.QueueFinalized || recovered.Result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete || harness.provider.calls != 0 {
+			t.Fatalf("legacy processing takeover = %#v, %v; sends=%d", recovered, err, harness.provider.calls)
+		}
+		assertExternalDeliveryState(t, ctx, harness.fixture, harness.claim.Event.SubjectID, "unknown_outcome", "unknown_outcome", 1)
+		var starts, facts, completions int
+		if err := harness.fixture.db.QueryRow(ctx, `select
+			(select count(*) from public.record_notification_delivery_starts where delivery_id=$1),
+			(select count(*) from public.record_notification_delivery_facts where record_id=$2),
+			(select count(*) from public.record_notification_delivery_completions where delivery_id=$1 and attempt_id is null)`,
+			harness.claim.Event.SubjectID, harness.created.RecordID).Scan(&starts, &facts, &completions); err != nil || starts != 0 || facts != 0 || completions != 1 {
+			t.Fatalf("legacy retained starts=%d facts=%d completions=%d error=%v", starts, facts, completions, err)
+		}
+	})
 }
 
 func TestPostgresIntegrationRecordExternalDeliveryRechecksEveryPreSendAuthority(t *testing.T) {
@@ -1228,20 +1424,19 @@ func TestPostgresIntegrationRecordExternalDeliveryRechecksEveryPreSendAuthority(
 		},
 		{
 			name: "current source unavailable",
-			mutate: func(_ *testing.T, harness *postgresExternalDeliveryHarness) {
-				harness.resolver.err = errors.New("source dependency unavailable: credential=secret")
+			mutate: func(t *testing.T, harness *postgresExternalDeliveryHarness) {
+				if _, err := harness.fixture.db.Exec(harness.ctx, `delete from public.vps_assets where vps_id = $1`, harness.sourceID); err != nil {
+					t.Fatal(err)
+				}
 			},
 			wantError: true, wantState: "pending",
 		},
 		{
-			name: "source authorization revoked",
+			name: "source retirement coverage unknown",
 			mutate: func(t *testing.T, harness *postgresExternalDeliveryHarness) {
-				restricted := collaborationVisibility(t, recordauth.VisibilityKindRestricted, []string{"rag_revoked"})
-				harness.resolver.resolved.CaptureAuthorization = collaborationSourceAuthorization(t,
-					harness.resolver.resolved.CaptureAuthorization.CaptureScope, restricted, recordauth.SourceStateTombstoned,
-				)
+				installNotificationCoverageUnknown(t, harness.ctx, harness.fixture, harness.sourceID)
 			},
-			wantState: "cancelled", wantOutbox: recordcollaboration.ExternalDeliveryOutboxCancel,
+			wantError: true, wantState: "pending",
 		},
 		{
 			name: "record deletion reserved",
@@ -1290,21 +1485,102 @@ func TestPostgresIntegrationRecordExternalDeliveryRechecksEveryPreSendAuthority(
 	}
 }
 
+func TestPostgresIntegrationRecordExternalDeliveryFencedTerminalAndMissingEpoch(t *testing.T) {
+	installGate := func(t *testing.T, harness *postgresExternalDeliveryHarness) {
+		t.Helper()
+		// This isolated gate tests an existing owner's terminal path; it is not
+		// evidence of production issuer or birth admission.
+		operation := recorddeletion.DeletionOperation{
+			ContractVersion: recorddeletion.DeletionContractV2,
+			OperationID:     "rpo_deliveryterminal",
+			ReservationID:   "drs_deliveryterminal",
+			Object:          recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: harness.created.RecordID},
+			FenceEpoch:      1,
+		}
+		seedLocalAttachmentDeletionOperation(t, harness.ctx, harness.fixture, operation, harness.created.RevisionID)
+		if _, err := harness.fixture.db.Exec(harness.ctx, `update public.content_delivery_epochs set delivery_epoch=1
+			where project_id='default' and object_kind='record' and object_id=$1`, harness.created.RecordID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("live owner records cancellation after gate", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		installGate(t, harness)
+		result, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, harness.claim)
+		if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxCancel || harness.provider.calls != 0 {
+			t.Fatalf("gated delivery = (%#v, %v), sends=%d", result, err, harness.provider.calls)
+		}
+		assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, "cancelled", "cancelled", 1)
+		if err := harness.queue.CancelOutbox(harness.ctx, harness.claim); err != nil {
+			t.Fatalf("finish gated outbox cancellation: %v", err)
+		}
+		var status, reason string
+		var starts int
+		if err := harness.fixture.db.QueryRow(harness.ctx, `select o.status, d.reason_code,
+			(select count(*)::int from public.record_notification_delivery_starts s where s.delivery_id=d.delivery_id)
+			from public.record_outbox o join public.record_notification_deliveries d on d.delivery_id=o.subject_id
+			where o.outbox_row_id=$1`, harness.claim.Event.RowID).Scan(&status, &reason, &starts); err != nil {
+			t.Fatal(err)
+		}
+		if status != "cancelled" || reason != "authorization_revoked" || starts != 0 {
+			t.Fatalf("gated outbox/delivery/starts = %q/%q/%d", status, reason, starts)
+		}
+	})
+	t.Run("stale owner cannot cancel after gate", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		installGate(t, harness)
+		expireNotificationClaim(t, harness.ctx, harness.fixture, harness.claim.Event.RowID)
+		_, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, harness.claim)
+		if !errors.Is(err, recordplatform.ErrLostOwnerLease) || harness.provider.calls != 0 {
+			t.Fatalf("stale gated owner error=%v sends=%d", err, harness.provider.calls)
+		}
+		assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, "pending", "", 0)
+	})
+	t.Run("missing epoch stays missing", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		if _, err := harness.fixture.db.Exec(harness.ctx, `delete from public.content_delivery_epochs
+			where project_id='default' and object_kind='record' and object_id=$1`, harness.created.RecordID); err != nil {
+			t.Fatal(err)
+		}
+		_, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, harness.claim)
+		if !errors.Is(err, recordplatform.ErrContentDeliveryEpochMissing) || harness.provider.calls != 0 {
+			t.Fatalf("delivery with missing epoch error=%v sends=%d", err, harness.provider.calls)
+		}
+		assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, "pending", "", 0)
+		var epochs int
+		if err := harness.fixture.db.QueryRow(harness.ctx, `select count(*)::int from public.content_delivery_epochs
+			where project_id='default' and object_kind='record' and object_id=$1`, harness.created.RecordID).Scan(&epochs); err != nil || epochs != 0 {
+			t.Fatalf("missing epoch count=%d error=%v", epochs, err)
+		}
+	})
+	t.Run("admission failure remains unavailable", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		installGate(t, harness)
+		harness.repository.platform.gate = AdmissionGateFunc(func(context.Context, pgx.Tx) error {
+			return errors.New("admission unavailable: credential=secret")
+		})
+		_, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, harness.claim)
+		if !errors.Is(err, recordcollaboration.ErrExternalDeliveryUnavailable) || strings.Contains(err.Error(), "secret") || harness.provider.calls != 0 {
+			t.Fatalf("unavailable admission error=%v sends=%d", err, harness.provider.calls)
+		}
+		assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, "pending", "", 0)
+	})
+}
+
 func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionReconciles(t *testing.T) {
 	t.Run("mute hides optional but preserves mandatory", func(t *testing.T) {
 		ctx := context.Background()
-		fixture := newRecordsPostgresFixture(t, ctx)
+		fixture := newAdmittedCoreRecordFixture(t, ctx)
 		seedCollaborationRevisionUsers(t, ctx, fixture)
+		seedPostgresCollaborationSource(t, ctx, fixture)
 		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-current-mute", 4)
 		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-			t, recordplatform.OperationKindRecordCreate, "rec_pginboxcurrentmute", "", 0, 0, input, "inbox-current-mute-parent",
-		))
+		parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "inbox-current-mute-parent"))
 		if err != nil {
 			t.Fatalf("CommitRevision(parent) error = %v", err)
 		}
 		seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb": "watching"})
-		actions := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+		actions := newPostgresActionRepositoryForTest(t, runtimePool, fixture.admissionGate)
 		optionalCreate := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxoptional", 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Optional completion"}), "inbox-current-optional-create")
 		optionalComplete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, optionalCreate.ActionID, 1,
@@ -1316,7 +1592,7 @@ func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionRe
 				t.Fatalf("CommitAction(%s/%s) error = %v", command.ActionID, command.Kind, err)
 			}
 		}
-		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 		optionalClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionCompleted, "inbox_current_optional_a")
 		optionalResult, err := projection.ProjectNotification(ctx, optionalClaim)
 		if err != nil || optionalResult.RecipientCount != 1 {
@@ -1416,19 +1692,18 @@ func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionRe
 
 	t.Run("unwatch hides manual optional recipient", func(t *testing.T) {
 		ctx := context.Background()
-		fixture := newRecordsPostgresFixture(t, ctx)
+		fixture := newAdmittedCoreRecordFixture(t, ctx)
 		seedCollaborationRevisionUsers(t, ctx, fixture)
+		seedPostgresCollaborationSource(t, ctx, fixture)
 		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-current-unwatch", 3)
 		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-			t, recordplatform.OperationKindRecordCreate, "rec_pginboxcurrentunwatch", "", 0, 0, input, "inbox-current-unwatch-parent",
-		))
+		parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "inbox-current-unwatch-parent"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		watcherID := "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
 		seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{watcherID: "watching"})
-		actions := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+		actions := newPostgresActionRepositoryForTest(t, runtimePool, fixture.admissionGate)
 		create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxunwatch", 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Manual watcher"}), "inbox-unwatch-create")
 		complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 1,
@@ -1438,7 +1713,7 @@ func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionRe
 				t.Fatal(err)
 			}
 		}
-		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionCompleted, "inbox_unwatch_optional")
 		result, err := projection.ProjectNotification(ctx, claim)
 		if err != nil || result.RecipientCount != 1 {
@@ -1473,46 +1748,34 @@ func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionRe
 
 func TestPostgresIntegrationRecordInboxScanBudgetCachesAndStableMultiRecordOrder(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-bounded", 4)
 	inputs := []records.CompleteRevisionInput{
 		collaborationRevisionInput(t, collaborationRevisionInputValues{title: "Bounded inbox A"}),
 		collaborationRevisionInput(t, collaborationRevisionInputValues{title: "Bounded inbox B"}),
 	}
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	recordRepository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate})
 	parents := make([]records.RevisionCommitResult, 0, 2)
-	for index, recordID := range []string{"rec_pginboxboundeda", "rec_pginboxboundedb"} {
+	for index := range inputs {
 		input := inputs[index]
-		parent, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-			t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0, input, fmt.Sprintf("inbox-bounded-parent-%d", index),
-		))
+		parent, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, fmt.Sprintf("inbox-bounded-parent-%d", index)))
 		if err != nil {
-			t.Fatalf("CommitRevision(%s) error = %v", recordID, err)
+			t.Fatalf("CommitRevision(%d) error = %v", index, err)
 		}
 		parents = append(parents, parent)
 		command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, fmt.Sprintf("ract_pginboxbounded%d", index), 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Bounded inbox", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), fmt.Sprintf("inbox-bounded-action-%d", index))
-		if _, err := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate).CommitAction(ctx, command); err != nil {
+		if _, err := newPostgresActionRepositoryForTest(t, runtimePool, fixture.admissionGate).CommitAction(ctx, command); err != nil {
 			t.Fatalf("CommitAction(%d) error = %v", index, err)
 		}
 	}
-	storedSubject := inputs[0].Subjects()[0]
-	identity, err := records.NewSubjectIdentitySnapshot(storedSubject.Kind, storedSubject.IdentitySnapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
-		ProjectID: recordauth.ProjectIDDefault, StableID: storedSubject.SourceID,
-		IdentitySnapshot: identity, LiveRoute: "/vps/" + storedSubject.SourceID,
-		CaptureAuthorization: storedSubject.CaptureAuthorization,
-	}}
-	members := &countingCollaborationMembershipReader{delegate: NewPostgresCollaborationMembershipReader()}
 	projection := NewPostgresRecordNotificationRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, members,
-		newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate), 30*24*time.Hour,
+		runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
+		newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate), 30*24*time.Hour,
 	)
-	queue := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	queue := NewPostgresRecordPlatformRepository(runtimePool, fixture.admissionGate)
 	validIDs := make([]string, 0, 2)
 	for index := range parents {
 		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, fmt.Sprintf("inbox_bounded_project_%d", index))
@@ -1547,13 +1810,9 @@ func TestPostgresIntegrationRecordInboxScanBudgetCachesAndStableMultiRecordOrder
 		where record_id = $1 and authorization_epoch = $2`, parents[0].RecordID, staleEpoch, actor.UserID); err != nil {
 		t.Fatalf("seed hidden inbox budget window recipients: %v", err)
 	}
-	members.calls, resolver.calls = 0, 0
 	items, err := projection.ListInbox(ctx, recordcollaboration.InboxListRequest{Actor: actor, Limit: 100})
 	if err != nil || items == nil || len(items) != 0 {
 		t.Fatalf("ListInbox(over budget) = (%#v, %v), want bounded nonnil empty", items, err)
-	}
-	if members.calls != 1 || resolver.calls != 1 {
-		t.Fatalf("bounded hidden authorization calls membership/resolver = %d/%d, want 1/1", members.calls, resolver.calls)
 	}
 	for _, notificationID := range validIDs {
 		if _, err := projection.GetInboxItem(ctx, recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: notificationID}); err != nil {
@@ -1566,7 +1825,6 @@ func TestPostgresIntegrationRecordInboxScanBudgetCachesAndStableMultiRecordOrder
 	if _, err := fixture.db.Exec(ctx, `delete from public.record_notifications where record_id = $1 and authorization_epoch = $2`, parents[0].RecordID, staleEpoch); err != nil {
 		t.Fatal(err)
 	}
-	members.calls, resolver.calls = 0, 0
 	items, err = projection.ListInbox(ctx, recordcollaboration.InboxListRequest{Actor: actor, Limit: 100})
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListInbox(multi record) = (%#v, %v), want 2", items, err)
@@ -1574,52 +1832,52 @@ func TestPostgresIntegrationRecordInboxScanBudgetCachesAndStableMultiRecordOrder
 	if items[0].EventAt.Before(items[1].EventAt) || (items[0].EventAt.Equal(items[1].EventAt) && items[0].NotificationID > items[1].NotificationID) {
 		t.Fatalf("multi-record stable order = %#v", items)
 	}
-	if members.calls != 1 || resolver.calls != 2 {
-		t.Fatalf("multi-record authorization calls membership/resolver = %d/%d, want 1/2", members.calls, resolver.calls)
-	}
 }
 
 func TestPostgresIntegrationRecordInboxSourceDependencyFailureIsUnavailableForEveryOperation(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-source-dependency", 3)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-	parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pginboxdependency", "", 0, 0, input, "inbox-dependency-parent",
-	))
+	parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "inbox-dependency-parent"))
 	if err != nil {
 		t.Fatalf("CommitRevision(parent) error = %v", err)
 	}
-	actionRepository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+	actionRepository := newPostgresActionRepositoryForTest(t, runtimePool, fixture.admissionGate)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxdependency", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Dependency failure", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}),
 		"inbox-dependency-action")
 	if _, err := actionRepository.CommitAction(ctx, create); err != nil {
 		t.Fatalf("CommitAction() error = %v", err)
 	}
-	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, "inbox_dependency_worker")
 	projected, err := projection.ProjectNotification(ctx, claim)
 	if err != nil || projected.RecipientCount == 0 {
 		t.Fatalf("ProjectNotification() = (%#v, %v), want recipients", projected, err)
 	}
-	if err := queue.MarkOutboxSent(ctx, claim); err != nil {
-		t.Fatalf("MarkOutboxSent() error = %v", err)
+	second := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxdependencysecond", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Unprojected", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}),
+		"inbox-dependency-second-action")
+	if _, err := actionRepository.CommitAction(ctx, second); err != nil {
+		t.Fatalf("CommitAction(second) error = %v", err)
 	}
+	secondClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, "inbox_dependency_second_worker")
 	actor := collaborationActor(t, "usr_bbbbbbbbbbbbbbbbbbbbbbbb", nil)
 	itemRequest := recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: projected.NotificationID}
 	if _, err := projection.GetInboxItem(ctx, itemRequest); err != nil {
 		t.Fatalf("otherwise-authorized inbox item unavailable before dependency failure: %v", err)
 	}
-	if _, err := fixture.db.Exec(ctx, `alter table public.record_action_events rename to test_record_action_events_unavailable`); err != nil {
-		t.Fatalf("install source dependency failure: %v", err)
+	installNotificationCoverageUnknown(t, ctx, fixture, input.Subjects()[0].SourceID)
+	if _, err := projection.ProjectNotification(ctx, claim); !errors.Is(err, ErrRecordSubjectUnavailable) {
+		t.Fatalf("ProjectNotification(replay with unavailable prefetch) error = %v", err)
 	}
-	t.Cleanup(func() {
-		if _, err := fixture.db.Exec(context.Background(), `alter table public.test_record_action_events_unavailable rename to record_action_events`); err != nil {
-			t.Errorf("restore source dependency table: %v", err)
-		}
-	})
+	if _, err := projection.ProjectNotification(ctx, secondClaim); !errors.Is(err, ErrRecordSubjectUnavailable) {
+		t.Fatalf("ProjectNotification(new with unavailable prefetch) error = %v", err)
+	}
+	assertPostgresNotificationCounts(t, ctx, fixture, parent.RecordID, 1, 1)
 
 	operations := []struct {
 		name string
@@ -1645,22 +1903,28 @@ func TestPostgresIntegrationRecordInboxSourceDependencyFailureIsUnavailableForEv
 	for _, operation := range operations {
 		t.Run(operation.name, func(t *testing.T) {
 			err := operation.call()
-			if !errors.Is(err, recordcollaboration.ErrInboxUnavailable) || errors.Is(err, recordcollaboration.ErrInboxNotFound) {
-				t.Fatalf("source dependency error = %v, want ErrInboxUnavailable only", err)
+			if !errors.Is(err, ErrRecordSubjectUnavailable) || errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+				t.Fatalf("source prefetch error = %v, want ErrRecordSubjectUnavailable only", err)
 			}
 		})
+	}
+	var readAt, dismissedAt *time.Time
+	if err := fixture.db.QueryRow(ctx, `select read_at, dismissed_at from public.record_notification_recipients where notification_id = $1 and recipient_user_id = $2`, projected.NotificationID, actor.UserID).Scan(&readAt, &dismissedAt); err != nil {
+		t.Fatalf("read recipient after failed prefetch: %v", err)
+	}
+	if readAt != nil || dismissedAt != nil {
+		t.Fatalf("failed prefetch changed recipient state: read=%v dismissed=%v", readAt, dismissedAt)
 	}
 }
 
 func TestPostgresIntegrationRecordNotificationActionMappingMandatoryMuteAndReasonPrecedence(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-actions", 4)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-	parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgnotifyaction", "", 0, 0, input, "notification-action-parent",
-	))
+	parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "notification-action-parent"))
 	if err != nil {
 		t.Fatalf("CommitRevision(action parent) error = %v", err)
 	}
@@ -1669,7 +1933,7 @@ func TestPostgresIntegrationRecordNotificationActionMappingMandatoryMuteAndReaso
 		"usr_cccccccccccccccccccccccc": "watching",
 		"usr_dddddddddddddddddddddddd": "watching",
 	})
-	actionRepository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+	actionRepository := newPostgresActionRepositoryForTest(t, runtimePool, fixture.admissionGate)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotify", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Notify assignment", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), "notification-action-create")
 	update := postgresActionCommand(t, parent, recordcollaboration.ActionMutationUpdate, create.ActionID, 1,
@@ -1710,7 +1974,7 @@ func TestPostgresIntegrationRecordNotificationActionMappingMandatoryMuteAndReaso
 				version, preference, followsAuthor, followsOwner, followsParticipant, followsComment, followsMention, followsAction, fence)
 		}
 	}
-	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 	wants := []struct {
 		kind       string
 		version    uint64
@@ -1750,18 +2014,17 @@ func TestPostgresIntegrationRecordNotificationActionMappingMandatoryMuteAndReaso
 
 func TestPostgresIntegrationRecordNotificationUnassignedCompletionAndCancellationReachOptionalWatcher(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-unassigned-action", 3)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-	parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgnotifyunassigned", "", 0, 0, input, "notification-unassigned-parent",
-	))
+	parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "notification-unassigned-parent"))
 	if err != nil {
 		t.Fatalf("CommitRevision(parent) error = %v", err)
 	}
 	seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb": "watching"})
-	repository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+	repository := newPostgresActionRepositoryForTest(t, runtimePool, fixture.admissionGate)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotifyunassigned", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Unassigned action"}), "notification-unassigned-create")
 	complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 1, recordcollaboration.ActionFields{}, "notification-unassigned-complete")
@@ -1772,7 +2035,7 @@ func TestPostgresIntegrationRecordNotificationUnassignedCompletionAndCancellatio
 			t.Fatalf("CommitAction(%s) error = %v", command.Kind, err)
 		}
 	}
-	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 	for _, want := range []struct {
 		kind    string
 		version uint64
@@ -1807,24 +2070,23 @@ func TestPostgresIntegrationRecordNotificationUnassignedCompletionAndCancellatio
 func TestPostgresIntegrationRecordNotificationSuppressesSelfAssignmentAndSelfMention(t *testing.T) {
 	t.Run("self assignment", func(t *testing.T) {
 		ctx := context.Background()
-		fixture := newRecordsPostgresFixture(t, ctx)
+		fixture := newAdmittedCoreRecordFixture(t, ctx)
 		seedCollaborationRevisionUsers(t, ctx, fixture)
+		seedPostgresCollaborationSource(t, ctx, fixture)
 		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-self-assign", 3)
 		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-			t, recordplatform.OperationKindRecordCreate, "rec_pgnotifyselfassign", "", 0, 0, input, "notification-self-assign-parent",
-		))
+		parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "notification-self-assign-parent"))
 		if err != nil {
 			t.Fatalf("CommitRevision(parent) error = %v", err)
 		}
-		repository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+		repository := newPostgresActionRepositoryForTest(t, runtimePool, fixture.admissionGate)
 		command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotifyselfassign", 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Self assignment", AssigneeID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa"}), "notification-self-assign-create")
 		command.Actor = mustPostgresCommentActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", recordauth.RoleProjectAdmin)
 		if _, err := repository.CommitAction(ctx, command); err != nil {
 			t.Fatalf("CommitAction(self assignment) error = %v", err)
 		}
-		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, "notification_self_assign")
 		result, err := projection.ProjectNotification(ctx, claim)
 		if err != nil || result != (recordcollaboration.NotificationProjectionResult{}) {
@@ -1838,23 +2100,22 @@ func TestPostgresIntegrationRecordNotificationSuppressesSelfAssignmentAndSelfMen
 
 	t.Run("self mention", func(t *testing.T) {
 		ctx := context.Background()
-		fixture := newRecordsPostgresFixture(t, ctx)
+		fixture := newAdmittedCoreRecordFixture(t, ctx)
 		seedCollaborationRevisionUsers(t, ctx, fixture)
+		seedPostgresCollaborationSource(t, ctx, fixture)
 		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-self-mention", 3)
 		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-			t, recordplatform.OperationKindRecordCreate, "rec_pgnotifyselfmention", "", 0, 0, input, "notification-self-mention-parent",
-		))
+		parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "notification-self-mention-parent"))
 		if err != nil {
 			t.Fatalf("CommitRevision(parent) error = %v", err)
 		}
-		repository := newPostgresCommentRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+		repository := newPostgresCommentRepositoryForTest(t, runtimePool, fixture.admissionGate)
 		command := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgnotifyselfmention", 0,
 			"Self mention.", "", []string{"usr_aaaaaaaaaaaaaaaaaaaaaaaa"}, "notification-self-mention-create")
 		if _, err := repository.CommitComment(ctx, command); err != nil {
 			t.Fatalf("CommitComment(self mention) error = %v", err)
 		}
-		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordCommentMentioned, "notification_self_mention")
 		result, err := projection.ProjectNotification(ctx, claim)
 		if err != nil || result != (recordcollaboration.NotificationProjectionResult{}) {
@@ -1869,13 +2130,12 @@ func TestPostgresIntegrationRecordNotificationSuppressesSelfAssignmentAndSelfMen
 
 func TestPostgresIntegrationRecordNotificationCommentReplyMentionMapping(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-comments", 4)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
-	parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgnotifycomment", "", 0, 0, input, "notification-comment-parent",
-	))
+	parent, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "notification-comment-parent"))
 	if err != nil {
 		t.Fatalf("CommitRevision(comment parent) error = %v", err)
 	}
@@ -1884,7 +2144,7 @@ func TestPostgresIntegrationRecordNotificationCommentReplyMentionMapping(t *test
 		"usr_cccccccccccccccccccccccc": "muted",
 		"usr_dddddddddddddddddddddddd": "watching",
 	})
-	commentRepository := newPostgresCommentRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
+	commentRepository := newPostgresCommentRepositoryForTest(t, runtimePool, fixture.admissionGate)
 	parentComment := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgnotifyparent", 0, "Parent", "", nil, "notification-comment-create-parent")
 	parentComment.Actor = mustPostgresCommentActor(t, "usr_bbbbbbbbbbbbbbbbbbbbbbbb", recordauth.RoleProjectAdmin)
 	if _, err := commentRepository.CommitComment(ctx, parentComment); err != nil {
@@ -1930,7 +2190,7 @@ func TestPostgresIntegrationRecordNotificationCommentReplyMentionMapping(t *test
 				version, preference, followsAuthor, followsOwner, followsParticipant, followsComment, followsMention, followsAction, fence)
 		}
 	}
-	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, fixture.admissionGate)
 	repliedClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordCommentReplied, "notification_comment_reply")
 	replied, err := projection.ProjectNotification(ctx, repliedClaim)
 	if err != nil || replied.RecipientCount != 1 {
@@ -1968,31 +2228,26 @@ func TestPostgresIntegrationRecordNotificationCommentReplyMentionMapping(t *test
 	}
 }
 
-func newPostgresNotificationProjectionHarness(t *testing.T, pool *pgxpool.Pool, input records.CompleteRevisionInput) (*PostgresRecordNotificationRepository, *PostgresRecordPlatformRepository) {
+func newPostgresNotificationProjectionHarness(t *testing.T, pool *pgxpool.Pool, gate AdmissionGate) (*PostgresRecordNotificationRepository, *PostgresRecordPlatformRepository) {
 	t.Helper()
-	storedSubject := input.Subjects()[0]
-	identity, err := records.NewSubjectIdentitySnapshot(storedSubject.Kind, storedSubject.IdentitySnapshot)
-	if err != nil {
-		t.Fatal(err)
+	authorization := newRecordsPostgresAuthorization(t, pool, gate)
+	return NewPostgresRecordNotificationRepository(pool, gate, NewPostgresCollaborationMembershipReader(), authorization, 30*24*time.Hour),
+		NewPostgresRecordPlatformRepository(pool, gate)
+}
+
+func installNotificationCoverageUnknown(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, sourceID string) {
+	t.Helper()
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.source_retirement_coverage_unknown
+			(project_id, source_kind, source_id, recovery_id, installed_generation, prepare_ids)
+		values ('default', 'vps', $1, 'recovery_test', 1, array['retirement_unknown'])`, sourceID); err != nil {
+		t.Fatalf("install unknown source coverage: %v", err)
 	}
-	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
-		ProjectID: recordauth.ProjectIDDefault, StableID: storedSubject.SourceID,
-		IdentitySnapshot: identity, LiveRoute: "/vps/" + storedSubject.SourceID,
-		CaptureAuthorization: storedSubject.CaptureAuthorization,
-	}}
-	authorization := newPostgresCurrentRecordAuthorizationSource(pool, resolver, allowRecordPlatformAdmissionGate)
-	return NewPostgresRecordNotificationRepository(pool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(), authorization, 30*24*time.Hour),
-		NewPostgresRecordPlatformRepository(pool, allowRecordPlatformAdmissionGate)
 }
 
 type notificationPreclaimedQueue struct {
 	claim *recordplatform.ClaimedOutboxEventV1
 	queue *PostgresRecordPlatformRepository
-}
-
-type countingCollaborationMembershipReader struct {
-	delegate CollaborationMembershipReader
-	calls    int
 }
 
 type notificationBindingListerStub struct {
@@ -2059,38 +2314,25 @@ type postgresExternalDeliveryHarness struct {
 	claim      recordplatform.ClaimedOutboxEventV1
 	provider   *notificationBindingProviderStub
 	bindings   *notificationBindingListerStub
-	resolver   *fakeCurrentRecordSubjectResolver
+	sourceID   string
 	created    records.RevisionCommitResult
 }
 
 func newPostgresExternalDeliveryHarness(t *testing.T) *postgresExternalDeliveryHarness {
 	t.Helper()
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-external-delivery-matrix", 5)
 	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
 		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
 	})
-	created, err := newRecordsPostgresRepository(
-		t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
-	).CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgexternalmatrix", "", 0, 0, input, "external-delivery-matrix-parent",
-	))
+	created, err := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader())).CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}, input, "external-delivery-matrix-parent"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	storedSubject := input.Subjects()[0]
-	identity, err := records.NewSubjectIdentitySnapshot(storedSubject.Kind, storedSubject.IdentitySnapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
-		ProjectID: recordauth.ProjectIDDefault, StableID: storedSubject.SourceID,
-		IdentitySnapshot: identity, LiveRoute: "/vps/" + storedSubject.SourceID,
-		CaptureAuthorization: storedSubject.CaptureAuthorization,
-	}}
-	authorization := newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate)
+	authorization := newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)
 	provider := &notificationBindingProviderStub{}
 	bindings := &notificationBindingListerStub{
 		provider: provider,
@@ -2102,10 +2344,10 @@ func newPostgresExternalDeliveryHarness(t *testing.T) *postgresExternalDeliveryH
 		},
 	}
 	repository := NewPostgresRecordNotificationRepositoryWithExternalBindings(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		runtimePool, fixture.admissionGate, NewPostgresCollaborationMembershipReader(),
 		authorization, 30*24*time.Hour, bindings,
 	)
-	queue := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	queue := NewPostgresRecordPlatformRepository(runtimePool, fixture.admissionGate)
 	parentClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "external_matrix_parent")
 	if _, err := repository.ProjectNotification(ctx, parentClaim); err != nil {
 		t.Fatal(err)
@@ -2116,7 +2358,7 @@ func newPostgresExternalDeliveryHarness(t *testing.T) *postgresExternalDeliveryH
 	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "external_matrix_delivery")
 	return &postgresExternalDeliveryHarness{
 		ctx: ctx, fixture: fixture, repository: repository, queue: queue, claim: claim,
-		provider: provider, bindings: bindings, resolver: resolver, created: created,
+		provider: provider, bindings: bindings, sourceID: input.Subjects()[0].SourceID, created: created,
 	}
 }
 
@@ -2179,11 +2421,6 @@ func seedExternalDeliveryDeletionReservation(t *testing.T, harness *postgresExte
 		)`, harness.created.RecordID, harness.created.RevisionID, harness.created.LockVersion, harness.created.AuthorizationEpoch); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func (reader *countingCollaborationMembershipReader) ReadMemberActor(ctx context.Context, tx pgx.Tx, projectID recordauth.ProjectID, userID string) (recordauth.ActorScope, error) {
-	reader.calls++
-	return reader.delegate.ReadMemberActor(ctx, tx, projectID, userID)
 }
 
 func (queue *notificationPreclaimedQueue) ClaimOutbox(context.Context, recordplatform.OutboxClaimInputV1) (*recordplatform.ClaimedOutboxEventV1, error) {

@@ -372,6 +372,26 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	if len(allTestChains) != 98303 {
 		t.Fatalf("independent C80 predecessor chain cases = %d, want 98303", len(allTestChains))
 	}
+	c81Chains := append([]struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}(nil), allTestChains...)
+	allTestChains = append(allTestChains, struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{name: "P80", profiles: []appACLCurrentProfileID{appACLCurrentProfileP80}})
+	for _, tc := range c81Chains {
+		profiles := make([]appACLCurrentProfileID, len(tc.profiles)+1)
+		copy(profiles, tc.profiles)
+		profiles[len(tc.profiles)] = appACLCurrentProfileP80
+		allTestChains = append(allTestChains, struct {
+			name     string
+			profiles []appACLCurrentProfileID
+		}{name: "C80-" + tc.name, profiles: profiles})
+	}
+	if len(allTestChains) != 196607 {
+		t.Fatalf("independent C81 predecessor chain cases = %d, want 196607", len(allTestChains))
+	}
 	if len(allTestChains) != len(appACLCurrentAcceptedPredecessorProfileChains) {
 		t.Fatalf("test chain cases = %d, production accepted chains = %d", len(allTestChains), len(appACLCurrentAcceptedPredecessorProfileChains))
 	}
@@ -474,6 +494,7 @@ func TestClassifyAppACLCurrentManifestShapeAcceptsCustomP64Bindings(t *testing.T
 	bindings := []AppACLRoleBinding{
 		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "profile_test_runtime"},
 		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "profile_test_admin"},
+		{Subject: AppACLSubjectRecordDeletionWorker, CatalogRole: "profile_test_worker"},
 	}
 	p64 := transitions[1]
 	oldPrivileges, err := appACLCurrentTransitionPrivilegeBodyFor(p64.predecessor, databaseName, bindings, migratorRole)

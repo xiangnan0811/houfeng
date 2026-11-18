@@ -2,15 +2,20 @@ package store
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
+	"houfeng/internal/center/records"
 )
 
 var ErrRecordPlatformAdmissionUnavailable = errors.New("record platform admission unavailable")
@@ -58,8 +63,71 @@ type RecordPlatformTransactionCallback func(context.Context, *RecordPlatformTran
 // methods. It deliberately has no generic SQL, sender, HTTP client, renderer,
 // or other network API.
 type RecordPlatformTransaction struct {
-	repository *PostgresRecordPlatformRepository
-	tx         pgx.Tx
+	repository               *PostgresRecordPlatformRepository
+	tx                       pgx.Tx
+	mutationRecords          map[string]struct{}
+	idempotencyScopes        map[recordplatform.IdempotencyKey]struct{}
+	idempotencyScopesSealed  bool
+	idempotencyScopeConflict bool
+}
+
+// The resource coordinator calls this only after the complete sorted scope
+// set has actually been acquired. This tracks ordering within this Go
+// transaction; it is not database authorization or evidence of a SQL lock.
+func (transaction *RecordPlatformTransaction) registerAcquiredIdempotencyScopes(resources recordMutationResources) {
+	items := resources.resources.Idempotency
+	if transaction.idempotencyScopesSealed {
+		if len(items) != len(transaction.idempotencyScopes) {
+			transaction.idempotencyScopeConflict = true
+			return
+		}
+		for _, item := range items {
+			if _, held := transaction.idempotencyScopes[item.Key]; !held {
+				transaction.idempotencyScopeConflict = true
+				return
+			}
+		}
+		return
+	}
+	if len(items) != 0 {
+		transaction.idempotencyScopes = make(map[recordplatform.IdempotencyKey]struct{}, len(items))
+		for _, item := range items {
+			transaction.idempotencyScopes[item.Key] = struct{}{}
+		}
+	}
+	transaction.idempotencyScopesSealed = true
+}
+
+func (transaction *RecordPlatformTransaction) requireIdempotencyScope(ctx context.Context, key recordplatform.IdempotencyKey) error {
+	if transaction.idempotencyScopeConflict {
+		return &pgconn.PgError{Code: "40001", Message: "idempotency scope set changed; restart transaction"}
+	}
+	if transaction.idempotencyScopesSealed {
+		if _, held := transaction.idempotencyScopes[key]; !held {
+			return &pgconn.PgError{Code: "40001", Message: "undeclared idempotency scope; restart transaction"}
+		}
+		return nil
+	}
+	// An otherwise uncoordinated primitive may acquire one scope. Once its row
+	// has been touched, acquiring another physical scope could invert rank 71.
+	if err := lockRecordIdempotencyScope(ctx, transaction.tx, key); err != nil {
+		return err
+	}
+	transaction.idempotencyScopes = map[recordplatform.IdempotencyKey]struct{}{key: {}}
+	transaction.idempotencyScopesSealed = true
+	return nil
+}
+
+// Only the coordinator that has acquired and rechecked the complete resource
+// set may register routes here; a declaration alone grants no authority.
+func (transaction *RecordPlatformTransaction) registerAcquiredRecordMutationResources(resources recordMutationResources) {
+	transaction.registerAcquiredIdempotencyScopes(resources)
+	if transaction.mutationRecords == nil {
+		transaction.mutationRecords = make(map[string]struct{}, len(resources.resources.Records))
+	}
+	for _, record := range resources.resources.Records {
+		transaction.mutationRecords[record.ProjectID+"\x00"+record.RecordID] = struct{}{}
+	}
 }
 
 // RunRecordPlatformTransaction executes one business callback atomically with
@@ -69,10 +137,108 @@ func (repository *PostgresRecordPlatformRepository) RunRecordPlatformTransaction
 	return repository.runRecordPlatformTransaction(ctx, pgx.TxOptions{}, callback)
 }
 
+// Source authorization and its effects share the asset-graph fence. W2 proof
+// preparation must finish before entering this callback; no external I/O is
+// permitted while the generation and graph locks are held.
+func (repository *PostgresRecordPlatformRepository) runSourceAuthorizedTransaction(ctx context.Context, callback RecordPlatformTransactionCallback) error {
+	if callback == nil {
+		return errors.New("source-authorized transaction callback is nil")
+	}
+	return repository.runRecordPlatformTransaction(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := lockAssetGraphForSync(ctx, transaction.tx); err != nil {
+			return err
+		}
+		return callback(ctx, transaction)
+	})
+}
+
 func (repository *PostgresRecordPlatformRepository) runRecordPlatformTransaction(ctx context.Context, options pgx.TxOptions, callback RecordPlatformTransactionCallback) error {
 	if callback == nil {
 		return errors.New("record platform transaction callback is nil")
 	}
+	return repository.runRecordPlatformTransactionAttempt(ctx, options, callback)
+}
+
+// Mutation callbacks explicitly opt in to whole-transaction reselection. They
+// reset captured results on entry and perform no external I/O. Read callbacks
+// and unknown commit outcomes are never retried by the general wrapper.
+func (repository *PostgresRecordPlatformRepository) runRecordMutationTransaction(ctx context.Context, callback RecordPlatformTransactionCallback) error {
+	if ctx == nil || callback == nil {
+		return errors.New("invalid record mutation transaction")
+	}
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := repository.runRecordPlatformTransactionAttempt(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, callback)
+		var postgresError *pgconn.PgError
+		if attempt == 2 || !errors.As(err, &postgresError) || postgresError.Code != "40001" {
+			return err
+		}
+	}
+}
+
+// Each birth-dependent attempt reads continuity before opening its APP
+// transaction. A serialization retry must not reuse the previous observation.
+func (repository *PostgresRecordPlatformRepository) runRecordBirthMutationTransaction(ctx context.Context, source recordbirth.ContinuitySource, callback func(context.Context, *RecordPlatformTransaction, []byte) error) error {
+	if ctx == nil || callback == nil {
+		return errors.New("invalid record birth mutation transaction")
+	}
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		proof := []byte{}
+		if !nilRecordSubjectDependency(source) {
+			var err error
+			proof, err = source.ReadContinuity(ctx)
+			if err != nil {
+				return err
+			}
+			if proof == nil {
+				proof = []byte{}
+			}
+		}
+		err := repository.runRecordPlatformTransactionAttempt(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+			// The epoch guard authenticates this signed token before rank 55;
+			// setting it alone does not grant authority or acquire the head lock.
+			if _, err := transaction.tx.Exec(ctx, `select set_config('houfeng.birth_continuity_proof',$1,true)`, hex.EncodeToString(proof)); err != nil {
+				return err
+			}
+			return callback(ctx, transaction, proof)
+		})
+		var postgresError *pgconn.PgError
+		if attempt == 2 || !errors.As(err, &postgresError) || postgresError.Code != "40001" {
+			return err
+		}
+	}
+}
+
+func (repository *PostgresRecordPlatformRepository) runSourceAuthorizedBirthMutationTransaction(ctx context.Context, source recordbirth.ContinuitySource, callback func(context.Context, *RecordPlatformTransaction, []byte) error) error {
+	if callback == nil {
+		return errors.New("source-authorized birth mutation callback is nil")
+	}
+	return repository.runRecordBirthMutationTransaction(ctx, source, func(ctx context.Context, transaction *RecordPlatformTransaction, proof []byte) error {
+		if err := lockAssetGraphForSync(ctx, transaction.tx); err != nil {
+			return err
+		}
+		return callback(ctx, transaction, proof)
+	})
+}
+
+func (repository *PostgresRecordPlatformRepository) runSourceAuthorizedMutationTransaction(ctx context.Context, callback RecordPlatformTransactionCallback) error {
+	if callback == nil {
+		return errors.New("source-authorized mutation callback is nil")
+	}
+	return repository.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := lockAssetGraphForSync(ctx, transaction.tx); err != nil {
+			return err
+		}
+		return callback(ctx, transaction)
+	})
+}
+
+func (repository *PostgresRecordPlatformRepository) runRecordPlatformTransactionAttempt(ctx context.Context, options pgx.TxOptions, callback RecordPlatformTransactionCallback) error {
 	tx, err := repository.startTransactionWithOptions(ctx, options)
 	if err != nil {
 		return err
@@ -101,6 +267,9 @@ func (transaction *RecordPlatformTransaction) ClaimIdempotency(ctx context.Conte
 	if err := transaction.repository.admit(ctx, transaction.tx); err != nil {
 		return recordplatform.IdempotencyClaimResultV1{}, err
 	}
+	if err := transaction.requireIdempotencyScope(ctx, input.Key); err != nil {
+		return recordplatform.IdempotencyClaimResultV1{}, err
+	}
 	return transaction.repository.claimIdempotencyInTransaction(ctx, transaction.tx, input)
 }
 
@@ -114,6 +283,9 @@ func (transaction *RecordPlatformTransaction) CompleteIdempotency(ctx context.Co
 	if err := transaction.repository.admit(ctx, transaction.tx); err != nil {
 		return err
 	}
+	if err := transaction.requireIdempotencyScope(ctx, key); err != nil {
+		return err
+	}
 	return completeIdempotencyInTransaction(ctx, transaction.tx, key, owner, result)
 }
 
@@ -124,6 +296,9 @@ func (transaction *RecordPlatformTransaction) RenewIdempotency(ctx context.Conte
 		return recordplatform.OwnerLease{}, err
 	}
 	if err := transaction.repository.admit(ctx, transaction.tx); err != nil {
+		return recordplatform.OwnerLease{}, err
+	}
+	if err := transaction.requireIdempotencyScope(ctx, input.Key); err != nil {
 		return recordplatform.OwnerLease{}, err
 	}
 	return renewIdempotencyInTransaction(ctx, transaction.tx, input)
@@ -141,6 +316,9 @@ func (transaction *RecordPlatformTransaction) ReleaseIdempotency(ctx context.Con
 	if err := transaction.repository.admit(ctx, transaction.tx); err != nil {
 		return err
 	}
+	if err := transaction.requireIdempotencyScope(ctx, key); err != nil {
+		return err
+	}
 	return releaseIdempotencyInTransaction(ctx, transaction.tx, key, owner)
 }
 
@@ -148,39 +326,36 @@ func (transaction *RecordPlatformTransaction) ReleaseIdempotency(ctx context.Con
 // transaction as the business fact. Its worker must reauthorize the subject
 // before every later delivery attempt.
 func (transaction *RecordPlatformTransaction) EnqueueOutbox(ctx context.Context, input recordplatform.OutboxEnqueueInputV1) (recordplatform.OutboxEventRecordV1, error) {
+	if transaction == nil || transaction.tx == nil || transaction.repository == nil {
+		return recordplatform.OutboxEventRecordV1{}, recordplatform.ErrInvalidOutboxEnqueue
+	}
 	if err := input.Validate(); err != nil {
 		return recordplatform.OutboxEventRecordV1{}, err
 	}
+	recordID, err := transaction.requireAcquiredOutboxRoute(ctx, input.Event)
+	if err != nil {
+		return recordplatform.OutboxEventRecordV1{}, fmt.Errorf("enqueue outbox record route: %w", err)
+	}
 
+	command := outboxEventCommand(input.Event, recordID)
+	command["expires_after_us"] = input.ExpiresAfter.Microseconds()
+	body, err := json.Marshal(command)
+	if err != nil {
+		return recordplatform.OutboxEventRecordV1{}, fmt.Errorf("encode outbox enqueue: %w", err)
+	}
 	var rowID int64
-	if err := transaction.tx.QueryRow(ctx, `
-		insert into public.record_outbox (
-			project_id,
-			event_kind,
-			subject_kind,
-			subject_id,
-			source_version,
-			authorization_epoch,
-			record_fence_epoch,
-			expires_at
-		) values (
-			$1, $2, $3, $4, $5, $6, $7,
-			transaction_timestamp() + ($8 * interval '1 microsecond')
-		)
-		returning outbox_row_id`,
-		input.Event.ProjectID,
-		input.Event.EventKind,
-		input.Event.SubjectKind,
-		input.Event.SubjectID,
-		input.Event.SourceVersion,
-		input.Event.AuthorizationEpoch,
-		input.Event.RecordFenceEpoch,
-		input.ExpiresAfter.Microseconds(),
-	).Scan(&rowID); err != nil {
+	if err := transaction.tx.QueryRow(ctx, `select outbox_row_id from public.record_outbox_enqueue($1::bytea)`, body).Scan(&rowID); err != nil {
 		return recordplatform.OutboxEventRecordV1{}, fmt.Errorf("enqueue outbox event: %w", err)
 	}
 	if rowID <= 0 {
 		return recordplatform.OutboxEventRecordV1{}, fmt.Errorf("%w: outbox row id", recordplatform.ErrInvalidOutboxEvent)
+	}
+	currentRecordID, err := transaction.requireAcquiredOutboxRoute(ctx, input.Event)
+	if err != nil && !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		return recordplatform.OutboxEventRecordV1{}, fmt.Errorf("recheck outbox enqueue route: %w", err)
+	}
+	if err != nil || currentRecordID != recordID {
+		return recordplatform.OutboxEventRecordV1{}, &pgconn.PgError{Code: "40001", Message: "outbox enqueue route changed; restart transaction"}
 	}
 	event := input.Event
 	event.RowID = rowID
@@ -198,8 +373,15 @@ func (transaction *RecordPlatformTransaction) AssertOutboxClaim(ctx context.Cont
 	if err := transaction.repository.admit(ctx, transaction.tx); err != nil {
 		return err
 	}
+	recordID, err := transaction.requireAcquiredOutboxRoute(ctx, claim.Event)
+	if err != nil {
+		return fmt.Errorf("assert outbox record route: %w", err)
+	}
+	if err := lockRecordMutationProtectedRow(ctx, transaction.tx, map[string]any{"family": "outbox", "outbox_row_id": claim.Event.RowID}); err != nil {
+		return fmt.Errorf("lock outbox projection owner: %w", err)
+	}
 	var present int
-	err := transaction.tx.QueryRow(ctx, `
+	err = transaction.tx.QueryRow(ctx, `
 		select 1
 		from public.record_outbox
 		where outbox_row_id = $1
@@ -215,12 +397,12 @@ func (transaction *RecordPlatformTransaction) AssertOutboxClaim(ctx context.Cont
 		  and authorization_epoch = $10
 		  and record_fence_epoch = $11
 		  and expires_at = $12
-		  and owner_expires_at > transaction_timestamp()
-		  and expires_at > transaction_timestamp()
-		for update`,
+		  and (record_id is null or record_id = $13)
+		  and owner_expires_at > clock_timestamp()
+		  and expires_at > clock_timestamp()`,
 		claim.Event.RowID, claim.Owner.OwnerID, claim.Owner.Generation, claim.Owner.ExpiresAt,
 		claim.Event.ProjectID, claim.Event.EventKind, claim.Event.SubjectKind, claim.Event.SubjectID,
-		claim.Event.SourceVersion, claim.Event.AuthorizationEpoch, claim.Event.RecordFenceEpoch, claim.ExpiresAt,
+		claim.Event.SourceVersion, claim.Event.AuthorizationEpoch, claim.Event.RecordFenceEpoch, claim.ExpiresAt, recordID,
 	).Scan(&present)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordplatform.ErrLostOwnerLease
@@ -230,6 +412,21 @@ func (transaction *RecordPlatformTransaction) AssertOutboxClaim(ctx context.Cont
 	}
 	if present != 1 {
 		return recordplatform.ErrLostOwnerLease
+	}
+	var live bool
+	if err := transaction.tx.QueryRow(ctx, `select owner_expires_at > clock_timestamp() and expires_at > clock_timestamp()
+		from public.record_outbox where outbox_row_id=$1`, claim.Event.RowID).Scan(&live); err != nil {
+		return fmt.Errorf("recheck outbox owner after lock: %w", err)
+	}
+	if !live {
+		return recordplatform.ErrLostOwnerLease
+	}
+	currentRecordID, err := transaction.requireAcquiredOutboxRoute(ctx, claim.Event)
+	if err != nil && !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		return fmt.Errorf("recheck outbox claim route: %w", err)
+	}
+	if err != nil || currentRecordID != recordID {
+		return &pgconn.PgError{Code: "40001", Message: "outbox claim route changed; restart transaction"}
 	}
 	return nil
 }
@@ -241,51 +438,76 @@ func (repository *PostgresRecordPlatformRepository) ClaimOutbox(ctx context.Cont
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
-	tx, err := repository.startTransaction(ctx)
-	if err != nil {
+	var ceiling int64
+	if err := repository.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		return transaction.tx.QueryRow(ctx, `select coalesce(max(outbox_row_id),0) from public.record_outbox`).Scan(&ceiling)
+	}); err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := repository.admit(ctx, tx); err != nil {
-		return nil, err
+	var after int64
+	for after < ceiling {
+		var candidates []int64
+		err := repository.runRecordMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+			candidates = nil
+			rows, err := transaction.tx.Query(ctx, `select outbox_row_id from public.record_outbox
+				where outbox_row_id>$1 and outbox_row_id<=$2 and expires_at>clock_timestamp()+($3 * interval '1 microsecond')
+				  and ((status='pending' and next_attempt_at<=clock_timestamp()) or
+				       (status='processing' and owner_expires_at<=clock_timestamp()))
+				order by outbox_row_id limit 128`, after, ceiling, input.OwnerLeaseDuration.Microseconds())
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				candidates = append(candidates, id)
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(candidates) == 0 {
+			return nil, nil
+		}
+		for _, id := range candidates {
+			after = id
+			var claim *recordplatform.ClaimedOutboxEventV1
+			err := repository.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+				claim = nil
+				var err error
+				claim, err = claimOutboxInTransaction(ctx, transaction, input, id)
+				return err
+			})
+			if err != nil {
+				var pgErr *pgconn.PgError
+				if errors.Is(err, records.ErrRecordDeletionReserved) || errors.Is(err, recordplatform.ErrLostOwnerLease) ||
+					errors.Is(err, recordplatform.ErrContentDeliveryEpochMissing) ||
+					(errors.As(err, &pgErr) && (pgErr.Code == "55P03" || pgErr.Code == "40001" || pgErr.Code == "55000")) {
+					continue
+				}
+				return nil, err
+			}
+			if claim != nil {
+				return claim, nil
+			}
+		}
 	}
-
-	claim, err := claimOutboxInTransaction(ctx, tx, input)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit outbox claim transaction: %w", err)
-	}
-	return claim, nil
+	return nil, nil
 }
 
-// CancelOutbox fences an undeliverable event with the exact committed owner
-// generation. It cannot cancel a newer owner's claim.
+// CancelOutbox fences an undeliverable event with the exact committed owner.
 func (repository *PostgresRecordPlatformRepository) CancelOutbox(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1) error {
 	if err := claim.Validate(); err != nil {
 		return err
 	}
-	return repository.finalizeOutbox(ctx, claim, `
-		update public.record_outbox
-		set status = 'cancelled',
-		    owner_id = '',
-		    owner_expires_at = null
-		where outbox_row_id = $1
-		  and status = 'processing'
-		  and owner_id = $2
-		  and owner_generation = $3
-		  and owner_expires_at = $4
-		  and owner_expires_at > transaction_timestamp()`,
-		claim.Event.RowID,
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	return repository.finalizeOutbox(ctx, claim, outboxCancel, 0)
 }
 
-// RetryOutbox releases a still-live claim back to pending with a database-time
-// retry point. It refuses to schedule an attempt that would outlive the event.
+// RetryOutbox releases a still-live claim back to pending with a database-time retry point.
 func (repository *PostgresRecordPlatformRepository) RetryOutbox(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1, retryAfter time.Duration) error {
 	if err := claim.Validate(); err != nil {
 		return err
@@ -293,137 +515,57 @@ func (repository *PostgresRecordPlatformRepository) RetryOutbox(ctx context.Cont
 	if retryAfter.Microseconds() <= 0 {
 		return fmt.Errorf("%w: retry delay", recordplatform.ErrInvalidOutboxClaim)
 	}
-	return repository.finalizeOutbox(ctx, claim, `
-		update public.record_outbox
-		set status = 'pending',
-		    owner_id = '',
-		    owner_expires_at = null,
-		    next_attempt_at = transaction_timestamp() + ($4 * interval '1 microsecond')
-		where outbox_row_id = $1
-		  and status = 'processing'
-		  and owner_id = $2
-		  and owner_generation = $3
-		  and owner_expires_at = $5
-		  and owner_expires_at > transaction_timestamp()
-		  and expires_at > transaction_timestamp() + ($4 * interval '1 microsecond')`,
-		claim.Event.RowID,
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		retryAfter.Microseconds(),
-		claim.Owner.ExpiresAt,
-	)
+	return repository.finalizeOutbox(ctx, claim, outboxRetry, retryAfter)
 }
 
-// MarkOutboxSent records a successful delivery only while the exact owner
-// fence remains live. An expired claim cannot finalize after a newer takeover.
+// MarkOutboxSent records a successful delivery only while the exact owner is live.
 func (repository *PostgresRecordPlatformRepository) MarkOutboxSent(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1) error {
 	if err := claim.Validate(); err != nil {
 		return err
 	}
-	return repository.finalizeOutbox(ctx, claim, `
-		update public.record_outbox
-		set status = 'sent',
-		    owner_id = '',
-		    owner_expires_at = null,
-		    sent_at = transaction_timestamp()
-		where outbox_row_id = $1
-		  and status = 'processing'
-		  and owner_id = $2
-		  and owner_generation = $3
-		  and owner_expires_at = $4
-		  and owner_expires_at > transaction_timestamp()
-		  and expires_at > transaction_timestamp()`,
-		claim.Event.RowID,
-		claim.Owner.OwnerID,
-		claim.Owner.Generation,
-		claim.Owner.ExpiresAt,
-	)
+	return repository.finalizeOutbox(ctx, claim, outboxSent, 0)
 }
 
-func claimOutboxInTransaction(ctx context.Context, tx pgx.Tx, input recordplatform.OutboxClaimInputV1) (*recordplatform.ClaimedOutboxEventV1, error) {
-	row := observedOutboxClaimRow{}
-	err := tx.QueryRow(ctx, `
-		with candidate as (
-			select outbox_row_id
-			from public.record_outbox
-			where (
-				(status = 'pending' and next_attempt_at <= transaction_timestamp())
-				or (status = 'processing' and owner_expires_at <= transaction_timestamp())
-			)
-			and expires_at > transaction_timestamp() + ($2 * interval '1 microsecond')
-			order by outbox_row_id
-			for update skip locked
-			limit 1
-		)
-		update public.record_outbox as outbox
-		set status = 'processing',
-		    owner_id = $1,
-		    owner_generation = owner_generation + 1,
-		    owner_expires_at = transaction_timestamp() + ($2 * interval '1 microsecond'),
-		    attempt_count = outbox.attempt_count + 1
-		from candidate
-		where outbox.outbox_row_id = candidate.outbox_row_id
-		returning outbox.outbox_row_id,
-		          outbox.project_id,
-		          outbox.event_kind,
-		          outbox.subject_kind,
-		          outbox.subject_id,
-		          outbox.source_version,
-		          outbox.authorization_epoch,
-		          outbox.record_fence_epoch,
-		          outbox.owner_id,
-		          outbox.owner_generation,
-		          outbox.owner_expires_at,
-		          outbox.expires_at`,
-		input.OwnerID,
-		input.OwnerLeaseDuration.Microseconds(),
-	).Scan(
-		&row.rowID,
-		&row.projectID,
-		&row.eventKind,
-		&row.subjectKind,
-		&row.subjectID,
-		&row.sourceVersion,
-		&row.authorizationEpoch,
-		&row.recordFenceEpoch,
-		&row.ownerID,
-		&row.ownerGeneration,
-		&row.ownerExpiresAt,
-		&row.expiresAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("claim outbox row: %w", err)
-	}
-	claim, err := row.claim()
-	if err != nil {
-		return nil, err
-	}
-	return &claim, nil
-}
+type outboxFinalization uint8
 
-func (repository *PostgresRecordPlatformRepository) finalizeOutbox(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1, sql string, arguments ...any) error {
-	tx, err := repository.startTransaction(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := repository.admit(ctx, tx); err != nil {
-		return err
-	}
-	command, err := tx.Exec(ctx, sql, arguments...)
-	if err != nil {
-		return fmt.Errorf("finalize outbox row: %w", err)
-	}
-	if command.RowsAffected() != 1 {
-		return recordplatform.ErrLostOwnerLease
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit outbox finalization transaction: %w", err)
-	}
-	return nil
+const (
+	outboxCancel outboxFinalization = iota
+	outboxRetry
+	outboxSent
+)
+
+func (repository *PostgresRecordPlatformRepository) finalizeOutbox(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1, operation outboxFinalization, delay time.Duration) error {
+	return repository.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		candidate, recordID, err := acquireOutboxFinalizationRoute(ctx, transaction, claim, operation != outboxRetry)
+		if err != nil {
+			return err
+		}
+		body, err := outboxCandidateCommand(candidate, recordID, "", delay)
+		if err != nil {
+			return fmt.Errorf("encode outbox finalization: %w", err)
+		}
+		var row pgx.Row
+		switch operation {
+		case outboxCancel:
+			row = transaction.tx.QueryRow(ctx, `select outbox_row_id from public.record_outbox_cancel($1::bytea)`, body)
+		case outboxRetry:
+			row = transaction.tx.QueryRow(ctx, `select outbox_row_id from public.record_outbox_retry($1::bytea)`, body)
+		case outboxSent:
+			row = transaction.tx.QueryRow(ctx, `select outbox_row_id from public.record_outbox_sent($1::bytea)`, body)
+		default:
+			return recordplatform.ErrInvalidOutboxClaim
+		}
+		var rowID int64
+		if err := row.Scan(&rowID); errors.Is(err, pgx.ErrNoRows) {
+			return recordplatform.ErrLostOwnerLease
+		} else if err != nil {
+			return fmt.Errorf("finalize outbox row: %w", err)
+		}
+		if rowID != claim.Event.RowID {
+			return recordplatform.ErrLostOwnerLease
+		}
+		return nil
+	})
 }
 
 func (repository *PostgresRecordPlatformRepository) PeekCompletedIdempotency(
@@ -464,8 +606,7 @@ func (repository *PostgresRecordPlatformRepository) PeekCompletedIdempotency(
 }
 
 // ClaimIdempotency creates, replays, or takes over one idempotency row while
-// holding its serialization-key row lock. Every durable timestamp is computed
-// by PostgreSQL transaction_timestamp().
+// holding its serialization scope and using fresh database time after waits.
 func (repository *PostgresRecordPlatformRepository) ClaimIdempotency(ctx context.Context, input recordplatform.IdempotencyClaimInputV1) (recordplatform.IdempotencyClaimResultV1, error) {
 	if err := input.Validate(); err != nil {
 		return recordplatform.IdempotencyClaimResultV1{}, err
@@ -476,6 +617,9 @@ func (repository *PostgresRecordPlatformRepository) ClaimIdempotency(ctx context
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := repository.admit(ctx, tx); err != nil {
+		return recordplatform.IdempotencyClaimResultV1{}, err
+	}
+	if err := lockRecordIdempotencyScope(ctx, tx, input.Key); err != nil {
 		return recordplatform.IdempotencyClaimResultV1{}, err
 	}
 
@@ -504,6 +648,9 @@ func (repository *PostgresRecordPlatformRepository) CompleteIdempotency(ctx cont
 	if err := repository.admit(ctx, tx); err != nil {
 		return err
 	}
+	if err := lockRecordIdempotencyScope(ctx, tx, key); err != nil {
+		return err
+	}
 	if err := completeIdempotencyInTransaction(ctx, tx, key, owner, result); err != nil {
 		return err
 	}
@@ -525,6 +672,9 @@ func (repository *PostgresRecordPlatformRepository) RenewIdempotency(ctx context
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := repository.admit(ctx, tx); err != nil {
+		return recordplatform.OwnerLease{}, err
+	}
+	if err := lockRecordIdempotencyScope(ctx, tx, input.Key); err != nil {
 		return recordplatform.OwnerLease{}, err
 	}
 	owner, err := renewIdempotencyInTransaction(ctx, tx, input)
@@ -554,6 +704,9 @@ func (repository *PostgresRecordPlatformRepository) ReleaseIdempotency(ctx conte
 	if err := repository.admit(ctx, tx); err != nil {
 		return err
 	}
+	if err := lockRecordIdempotencyScope(ctx, tx, key); err != nil {
+		return err
+	}
 	if err := releaseIdempotencyInTransaction(ctx, tx, key, owner); err != nil {
 		return err
 	}
@@ -577,10 +730,23 @@ func validateIdempotencyCompletion(key recordplatform.IdempotencyKey, owner reco
 	return nil
 }
 
+func lockIdempotencyRow(ctx context.Context, tx pgx.Tx, key recordplatform.IdempotencyKey) error {
+	_, err := tx.Exec(ctx, `select 1 from public.record_idempotency_keys
+		where project_id=$1 and operation_kind=$2 and idempotency_key=$3 for update`,
+		key.ProjectID, key.OperationKind, key.Key)
+	if err != nil {
+		return fmt.Errorf("lock idempotency row: %w", err)
+	}
+	return nil
+}
+
 func completeIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, key recordplatform.IdempotencyKey, owner recordplatform.OwnerLease, result recordplatform.RequestFingerprintV1) error {
 	persisted, err := result.PersistedBytes()
 	if err != nil {
 		return fmt.Errorf("encode completed idempotency fingerprint: %w", err)
+	}
+	if err := lockIdempotencyRow(ctx, tx, key); err != nil {
+		return err
 	}
 	command, err := tx.Exec(ctx, `
 		update public.record_idempotency_keys
@@ -596,7 +762,7 @@ func completeIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, key record
 		  and owner_id = $5
 		  and owner_generation = $6
 		  and owner_expires_at = $7
-		  and owner_expires_at > transaction_timestamp()`,
+		  and owner_expires_at > clock_timestamp()`,
 		string(key.ProjectID),
 		string(key.OperationKind),
 		key.Key,
@@ -615,10 +781,15 @@ func completeIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, key record
 }
 
 func renewIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, input recordplatform.IdempotencyRenewInputV1) (recordplatform.OwnerLease, error) {
+	if err := lockIdempotencyRow(ctx, tx, input.Key); err != nil {
+		return recordplatform.OwnerLease{}, err
+	}
 	owner, err := scanIdempotencyOwner(tx.QueryRow(ctx, `
+		with tick as materialized (select clock_timestamp() as now)
 		update public.record_idempotency_keys
-		set owner_expires_at = transaction_timestamp() + ($5 * interval '1 microsecond'),
-		    expires_at = transaction_timestamp() + ($6 * interval '1 microsecond')
+		set owner_expires_at = tick.now + ($5 * interval '1 microsecond'),
+		    expires_at = tick.now + ($6 * interval '1 microsecond')
+		from tick
 		where project_id = $1
 		  and operation_kind = $2
 		  and idempotency_key = $3
@@ -626,8 +797,8 @@ func renewIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, input recordp
 		  and owner_id = $4
 		  and owner_generation = $7
 		  and owner_expires_at = $8
-		  and owner_expires_at > transaction_timestamp()
-		  and expires_at > transaction_timestamp() + ($5 * interval '1 microsecond')
+		  and owner_expires_at > tick.now
+		  and expires_at > tick.now + ($5 * interval '1 microsecond')
 		returning owner_id, owner_generation, owner_expires_at`,
 		string(input.Key.ProjectID),
 		string(input.Key.OperationKind),
@@ -648,9 +819,14 @@ func renewIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, input recordp
 }
 
 func releaseIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, key recordplatform.IdempotencyKey, owner recordplatform.OwnerLease) error {
+	if err := lockIdempotencyRow(ctx, tx, key); err != nil {
+		return err
+	}
 	command, err := tx.Exec(ctx, `
+		with tick as materialized (select clock_timestamp() as now)
 		update public.record_idempotency_keys
-		set owner_expires_at = transaction_timestamp()
+		set owner_expires_at = tick.now
+		from tick
 		where project_id = $1
 		  and operation_kind = $2
 		  and idempotency_key = $3
@@ -658,7 +834,7 @@ func releaseIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, key recordp
 		  and owner_id = $4
 		  and owner_generation = $5
 		  and owner_expires_at = $6
-		  and owner_expires_at > transaction_timestamp()`,
+		  and owner_expires_at > tick.now`,
 		string(key.ProjectID),
 		string(key.OperationKind),
 		key.Key,
@@ -676,6 +852,9 @@ func releaseIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, key recordp
 }
 
 func (repository *PostgresRecordPlatformRepository) claimIdempotencyInTransaction(ctx context.Context, tx pgx.Tx, input recordplatform.IdempotencyClaimInputV1) (recordplatform.IdempotencyClaimResultV1, error) {
+	if err := lockIdempotencyRow(ctx, tx, input.Key); err != nil {
+		return recordplatform.IdempotencyClaimResultV1{}, err
+	}
 	row := observedIdempotencyRow{}
 	err := tx.QueryRow(ctx, `
 		select request_fingerprint,
@@ -685,7 +864,7 @@ func (repository *PostgresRecordPlatformRepository) claimIdempotencyInTransactio
 		       owner_generation,
 		       owner_expires_at,
 		       expires_at,
-		       transaction_timestamp()
+		       clock_timestamp()
 		from public.record_idempotency_keys
 		where project_id = $1
 		  and operation_kind = $2
@@ -736,6 +915,7 @@ func (repository *PostgresRecordPlatformRepository) insertIdempotencyClaim(ctx c
 		return recordplatform.IdempotencyClaimResultV1{}, fmt.Errorf("%w: request fingerprint", recordplatform.ErrInvalidIdempotencyClaim)
 	}
 	owner, err := scanIdempotencyOwner(tx.QueryRow(ctx, `
+		with tick as materialized (select clock_timestamp() as now)
 		insert into public.record_idempotency_keys (
 			project_id,
 			operation_kind,
@@ -746,11 +926,11 @@ func (repository *PostgresRecordPlatformRepository) insertIdempotencyClaim(ctx c
 			owner_generation,
 			owner_expires_at,
 			expires_at
-		) values (
-			$1, $2, $3, $4, 'in_progress', $5, 1,
-			transaction_timestamp() + ($6 * interval '1 microsecond'),
-			transaction_timestamp() + ($7 * interval '1 microsecond')
 		)
+		select $1, $2, $3, $4, 'in_progress', $5, 1,
+			tick.now + ($6 * interval '1 microsecond'),
+			tick.now + ($7 * interval '1 microsecond')
+		from tick where true
 		on conflict (project_id, operation_kind, idempotency_key) do nothing
 		returning owner_id, owner_generation, owner_expires_at`,
 		string(input.Key.ProjectID),
@@ -780,17 +960,19 @@ func takeoverIdempotencyClaim(ctx context.Context, tx pgx.Tx, input recordplatfo
 		return recordplatform.IdempotencyClaimResultV1{}, fmt.Errorf("%w: request fingerprint", recordplatform.ErrInvalidIdempotencyClaim)
 	}
 	owner, err := scanIdempotencyOwner(tx.QueryRow(ctx, `
+		with tick as materialized (select clock_timestamp() as now)
 		update public.record_idempotency_keys
 		set owner_id = $4,
 		    owner_generation = owner_generation + 1,
-		    owner_expires_at = transaction_timestamp() + ($5 * interval '1 microsecond'),
-		    expires_at = transaction_timestamp() + ($6 * interval '1 microsecond')
+		    owner_expires_at = tick.now + ($5 * interval '1 microsecond'),
+		    expires_at = tick.now + ($6 * interval '1 microsecond')
+		from tick
 		where project_id = $1
 		  and operation_kind = $2
 		  and idempotency_key = $3
 		  and request_fingerprint = $7
 		  and status = 'in_progress'
-		  and owner_expires_at <= transaction_timestamp()
+		  and owner_expires_at <= tick.now
 		returning owner_id, owner_generation, owner_expires_at`,
 		string(input.Key.ProjectID),
 		string(input.Key.OperationKind),

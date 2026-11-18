@@ -99,7 +99,7 @@ func TestPostgresIntegrationAccessManagementLifecycleAndIdempotency(t *testing.T
 func TestPostgresIntegrationAccessManagementABRecordAuthorizationRevocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "access-management-records", 2)
 	defer runtimePool.Close()
 	now := time.Date(2026, time.October, 8, 12, 0, 0, 0, time.UTC)
@@ -123,35 +123,27 @@ func TestPostgresIntegrationAccessManagementABRecordAuthorizationRevocation(t *t
 		t.Fatalf("SetMember(B): %v", err)
 	}
 
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
-	recordID := "rec_accessmanagement"
-	firstInput := accessManagementRestrictedRevisionInput(t, "A/B first", group.GroupID)
-	first, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0, firstInput, "access-management-create",
-	))
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture)
+	actor := accessManagementActor(t, aID, []string{group.GroupID})
+	firstInput := accessManagementRestrictedRevisionInput(t, "A/B first", group.GroupID, aID)
+	first, err := recordRepository.CommitRevision(ctx,
+		revisionBirthBatchCommandForActor(t, ctx, birthFixture, firstInput, "access-management-create", actor))
 	if err != nil {
 		t.Fatalf("CommitRevision(first): %v", err)
 	}
-	secondInput := accessManagementRestrictedRevisionInput(t, "A/B second", group.GroupID)
-	second, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+	recordID := first.RecordID
+	secondInput := accessManagementRestrictedRevisionInput(t, "A/B second", group.GroupID, aID)
+	second, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommandForActor(
 		t, recordplatform.OperationKindRecordUpdate, recordID, first.RevisionID, first.LockVersion,
-		first.AuthorizationEpoch, secondInput, "access-management-update",
+		first.AuthorizationEpoch, secondInput, "access-management-update", actor,
 	))
 	if err != nil {
 		t.Fatalf("CommitRevision(second): %v", err)
 	}
 
-	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
-		ProjectID:        recordauth.ProjectIDDefault,
-		StableID:         testStoreRecordVPSID,
-		IdentitySnapshot: mustStoreRecordSnapshot(t, records.SubjectKindVPS, map[string]string{"display_name": "A/B VPS"}),
-		LiveRoute:        "/vps/" + testStoreRecordVPSID,
-		CaptureAuthorization: mustStoreLiveSourceAuthorization(
-			t, recordauth.SourceKindVPS, testStoreRecordVPSID, secondInput.VisibilityScope(),
-		),
-	}}
-	authorizations := newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate)
-	aActor := accessManagementActor(t, aID, nil)
+	authorizations := newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)
+	aActor := actor
 	bActor := accessManagementActor(t, bID, []string{group.GroupID})
 	// Both actors are members at record creation; A is then removed and should
 	// lose current, historical, and attachment authorization on the next read.
@@ -206,12 +198,11 @@ func seedAccessManagementUser(t *testing.T, ctx context.Context, pool *pgxpool.P
 	return err
 }
 
-func accessManagementRestrictedRevisionInput(t *testing.T, title, groupID string) records.CompleteRevisionInput {
+func accessManagementRestrictedRevisionInput(t *testing.T, title, groupID, authorID string) records.CompleteRevisionInput {
 	t.Helper()
 	base := recordsPostgresCompleteRevisionInput(t, title)
 	visibility := mustStoreRestrictedVisibility(t, nil, []string{groupID}, 2)
 	subjects := base.Subjects()
-	subjects[0].CaptureAuthorization = mustStoreLiveSourceAuthorization(t, recordauth.SourceKindVPS, testStoreRecordVPSID, visibility)
 	input, err := records.NormalizeCompleteRevisionInput(records.CompleteRevisionValues{
 		Title:                  base.Title(),
 		BodyMarkdown:           base.BodyMarkdown(),
@@ -230,7 +221,7 @@ func accessManagementRestrictedRevisionInput(t *testing.T, title, groupID string
 		EvidenceSnapshotIDs:    base.EvidenceSnapshotIDs(),
 		FollowUpAt:             base.FollowUpAt(),
 		Template:               base.Template(),
-		AuthorID:               base.AuthorID(),
+		AuthorID:               authorID,
 		SaveReason:             base.SaveReason(),
 	})
 	if err != nil {

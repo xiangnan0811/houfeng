@@ -15,14 +15,14 @@ import (
 // way those records become searchable.
 func TestPostgresIntegrationRecordSearchRebuildBackfillsAndPublishesCoverage(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	first := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_rebuildone", "Rebuild one")
-	second := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_rebuildtwo", "Rebuild two")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	first := seedRecordWithoutSearchProjection(t, ctx, fixture, "Rebuild one")
+	second := seedRecordWithoutSearchProjection(t, ctx, fixture, "Rebuild two")
 	seedPublishedSearchGeneration(t, ctx, fixture, 1)
 
 	store := NewPostgresRecordSearchRebuildStore(
 		fixture.openDirectRuntimePool(t, ctx, "record-search-rebuild", 2),
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	needed, err := store.RecordSearchRebuildNeeded(ctx)
 	if err != nil || !needed {
@@ -85,9 +85,12 @@ func TestPostgresIntegrationRecordSearchRebuildBackfillsAndPublishesCoverage(t *
 // worker must continue from the persisted checkpoint, not restart the scan.
 func TestPostgresIntegrationRecordSearchRebuildResumesExpiredLeaseFromCheckpoint(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_resumeone", "Resume one")
-	second := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_resumetwo", "Resume two")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	first := seedRecordWithoutSearchProjection(t, ctx, fixture, "Resume one")
+	second := seedRecordWithoutSearchProjection(t, ctx, fixture, "Resume two")
+	if first.RecordID > second.RecordID {
+		first, second = second, first
+	}
 	seedPublishedSearchGeneration(t, ctx, fixture, 1)
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_search_generations (generation, generation_state) values (2, 'building')`,
@@ -99,14 +102,14 @@ func TestPostgresIntegrationRecordSearchRebuildResumesExpiredLeaseFromCheckpoint
 			job_id, generation, job_state, owner_id, lease_expires_at,
 			resume_after_record_id, processed_count
 		) values ('rsj_crashed', 2, 'running', 'crashed-owner',
-			transaction_timestamp() - interval '1 hour', 'rec_resumeone', 1)`,
+			transaction_timestamp() - interval '1 hour', $1, 1)`, first.RecordID,
 	); err != nil {
 		t.Fatalf("seed crashed rebuild job: %v", err)
 	}
 
 	store := NewPostgresRecordSearchRebuildStore(
 		fixture.openDirectRuntimePool(t, ctx, "record-search-rebuild-resume", 2),
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	lease, err := store.ClaimRecordSearchRebuild(ctx, recordsearch.RebuildClaim{
 		OwnerID: "record_search_rebuilder", LeaseDuration: time.Minute,
@@ -115,13 +118,13 @@ func TestPostgresIntegrationRecordSearchRebuildResumesExpiredLeaseFromCheckpoint
 		t.Fatalf("ClaimRecordSearchRebuild() error = %v", err)
 	}
 	if lease.JobID != "rsj_crashed" || lease.Generation != 2 ||
-		lease.ResumeAfter != "rec_resumeone" || lease.Projected != 1 {
+		lease.ResumeAfter != first.RecordID || lease.Projected != 1 {
 		t.Fatalf("resumed lease = %#v", lease)
 	}
 
 	batch, err := store.ProjectRecordSearchRebuildBatch(ctx, recordsearch.RebuildBatch{
 		JobID: lease.JobID, Generation: lease.Generation, OwnerID: "record_search_rebuilder",
-		ResumeAfter: lease.ResumeAfter, Limit: 200, LeaseDuration: time.Minute,
+		ResumeAfter: lease.ResumeAfter, Limit: 200, LeaseDuration: time.Minute, LeaseExpiresAt: lease.LeaseExpiresAt,
 	})
 	if err != nil {
 		t.Fatalf("ProjectRecordSearchRebuildBatch() error = %v", err)
@@ -146,12 +149,12 @@ func TestPostgresIntegrationRecordSearchRebuildResumesExpiredLeaseFromCheckpoint
 // allowed to interleave writes into a generation another worker will publish.
 func TestPostgresIntegrationRecordSearchRebuildRefusesSecondOwnerOnLiveLease(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_leaseheld", "Lease held")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	seedRecordWithoutSearchProjection(t, ctx, fixture, "Lease held")
 	seedPublishedSearchGeneration(t, ctx, fixture, 1)
 	store := NewPostgresRecordSearchRebuildStore(
 		fixture.openDirectRuntimePool(t, ctx, "record-search-rebuild-lease", 3),
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	held, err := store.ClaimRecordSearchRebuild(ctx, recordsearch.RebuildClaim{
 		OwnerID: "owner-one", LeaseDuration: time.Hour,
@@ -166,9 +169,60 @@ func TestPostgresIntegrationRecordSearchRebuildRefusesSecondOwnerOnLiveLease(t *
 	}
 	if _, err := store.ProjectRecordSearchRebuildBatch(ctx, recordsearch.RebuildBatch{
 		JobID: held.JobID, Generation: held.Generation, OwnerID: "owner-two",
-		Limit: 200, LeaseDuration: time.Minute,
+		Limit: 200, LeaseDuration: time.Minute, LeaseExpiresAt: held.LeaseExpiresAt,
 	}); !errors.Is(err, ErrRebuildLeaseHeld) {
 		t.Fatalf("ProjectRecordSearchRebuildBatch(foreign owner) error = %v, want ErrRebuildLeaseHeld", err)
+	}
+}
+
+// Reacquiring with the same owner still produces a new lease. A stalled pass
+// must not publish, advance, or fail the generation using its old observation.
+func TestPostgresIntegrationRecordSearchRebuildRejectsStaleObservedLease(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	seedRecordWithoutSearchProjection(t, ctx, fixture, "Lease")
+	seedPublishedSearchGeneration(t, ctx, fixture, 1)
+	store := NewPostgresRecordSearchRebuildStore(
+		fixture.openDirectRuntimePool(t, ctx, "record-search-stale-lease", 3), fixture.admissionGate,
+	)
+	claim := recordsearch.RebuildClaim{OwnerID: "same-owner", LeaseDuration: time.Hour}
+	old, err := store.ClaimRecordSearchRebuild(ctx, claim)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	current, err := store.ClaimRecordSearchRebuild(ctx, claim)
+	if err != nil || !current.LeaseExpiresAt.After(old.LeaseExpiresAt) {
+		t.Fatalf("renewed claim = %#v, %v, old %#v", current, err, old)
+	}
+	_, err = store.ProjectRecordSearchRebuildBatch(ctx, recordsearch.RebuildBatch{
+		JobID: old.JobID, Generation: old.Generation, OwnerID: claim.OwnerID,
+		LeaseExpiresAt: old.LeaseExpiresAt, Limit: 100, LeaseDuration: time.Hour,
+	})
+	if !errors.Is(err, ErrRebuildLeaseHeld) {
+		t.Fatalf("stale batch error = %v, want lost lease", err)
+	}
+	_, err = store.PublishRecordSearchRebuild(ctx, recordsearch.RebuildPublish{
+		JobID: old.JobID, Generation: old.Generation, OwnerID: claim.OwnerID, LeaseExpiresAt: old.LeaseExpiresAt,
+	})
+	if !errors.Is(err, ErrRebuildLeaseHeld) {
+		t.Fatalf("stale publish error = %v, want lost lease", err)
+	}
+	err = store.FailRecordSearchRebuild(ctx, recordsearch.RebuildFailure{
+		JobID: old.JobID, Generation: old.Generation, OwnerID: claim.OwnerID,
+		LeaseExpiresAt: old.LeaseExpiresAt, Reason: "source_unavailable",
+	})
+	if !errors.Is(err, ErrRebuildLeaseHeld) {
+		t.Fatalf("stale failure error = %v, want lost lease", err)
+	}
+	var state string
+	if err := fixture.db.QueryRow(ctx, `select generation_state from public.record_search_generations where generation=$1`, int64(current.Generation)).Scan(&state); err != nil || state != "building" {
+		t.Fatalf("generation state = %q, %v, want building", state, err)
+	}
+	if _, err := store.ProjectRecordSearchRebuildBatch(ctx, recordsearch.RebuildBatch{
+		JobID: current.JobID, Generation: current.Generation, OwnerID: claim.OwnerID,
+		LeaseExpiresAt: current.LeaseExpiresAt, Limit: 100, LeaseDuration: time.Hour,
+	}); err != nil {
+		t.Fatalf("current lease batch: %v", err)
 	}
 }
 
@@ -176,12 +230,12 @@ func TestPostgresIntegrationRecordSearchRebuildRefusesSecondOwnerOnLiveLease(t *
 // generation would supersede the index it just installed and leave nothing live.
 func TestPostgresIntegrationRecordSearchRebuildRejectsPublishingNonBuildingGeneration(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_publishcas", "Publish CAS")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	seedRecordWithoutSearchProjection(t, ctx, fixture, "Publish CAS")
 	seedPublishedSearchGeneration(t, ctx, fixture, 1)
 	store := NewPostgresRecordSearchRebuildStore(
 		fixture.openDirectRuntimePool(t, ctx, "record-search-rebuild-cas", 2),
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	worker := mustSearchRebuildWorker(t, store)
 	if _, err := worker.RunOnce(ctx); err != nil {
@@ -214,12 +268,12 @@ func TestPostgresIntegrationRecordSearchRebuildRejectsPublishingNonBuildingGener
 // the newer projection rather than overwrite it.
 func TestPostgresIntegrationRecordSearchRebuildDoesNotOverwriteNewerLiveCommit(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	created := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_rebuildrace", "Race original")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	created := seedRecordWithoutSearchProjection(t, ctx, fixture, "Race original")
 	seedPublishedSearchGeneration(t, ctx, fixture, 1)
 	store := NewPostgresRecordSearchRebuildStore(
 		fixture.openDirectRuntimePool(t, ctx, "record-search-rebuild-race", 3),
-		allowRecordPlatformAdmissionGate,
+		fixture.admissionGate,
 	)
 	lease, err := store.ClaimRecordSearchRebuild(ctx, recordsearch.RebuildClaim{
 		OwnerID: "record_search_rebuilder", LeaseDuration: time.Hour,
@@ -230,10 +284,9 @@ func TestPostgresIntegrationRecordSearchRebuildDoesNotOverwriteNewerLiveCommit(t
 
 	// A live update after the generation opened. The projector writes both the
 	// published and the building generation.
-	repository := newRecordsPostgresRepository(t,
-		fixture.openDirectRuntimePool(t, ctx, "record-search-rebuild-race-commit", 1),
-		NewRecordSearchRevisionParticipant(),
-	)
+	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-rebuild-race-commit", 1)
+	repository := newRevisionMutationAdmittedRepository(t,
+		ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 	updated, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
 		t, recordplatform.OperationKindRecordUpdate, created.RecordID, created.RevisionID,
 		created.LockVersion, created.AuthorizationEpoch,
@@ -245,7 +298,7 @@ func TestPostgresIntegrationRecordSearchRebuildDoesNotOverwriteNewerLiveCommit(t
 
 	if _, err := store.ProjectRecordSearchRebuildBatch(ctx, recordsearch.RebuildBatch{
 		JobID: lease.JobID, Generation: lease.Generation, OwnerID: "record_search_rebuilder",
-		Limit: 200, LeaseDuration: time.Minute,
+		Limit: 200, LeaseDuration: time.Minute, LeaseExpiresAt: lease.LeaseExpiresAt,
 	}); err != nil {
 		t.Fatalf("ProjectRecordSearchRebuildBatch() error = %v", err)
 	}

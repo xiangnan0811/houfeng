@@ -5,6 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../lib/apiRequest'
 import { recordDetailFixture } from './testFixtures'
 import { RecordDetailPage } from './RecordDetailPage'
+import type * as DraftBuffers from './draftBuffer'
+
+vi.mock('./draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof DraftBuffers>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 const api = vi.hoisted(() => ({
   getRecord: vi.fn(),

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
@@ -30,13 +32,13 @@ import (
 func TestPostgresIntegrationAttachmentUploadPreparationPersistsAndReusesTemporaryIdentity(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadprepare", "usr_uploadprepare")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadprepare", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-upload-prepare", 2),
 	)
 	reserve := attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_uploadprepare", AttachmentID: "att_uploadprepare",
-		DraftID: "rdf_uploadprepare", AuthorID: "usr_uploadprepare", DisplayName: "prepare.txt",
+		DraftID: "rdf_uploadprepare", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "prepare.txt",
 		MediaType: "text/plain", TransportKind: attachments.TransportKindS3, DeclaredSizeBytes: 17,
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 		Limits: attachments.Limits{
@@ -101,9 +103,7 @@ func TestPostgresIntegrationAttachmentUploadPreparationPersistsAndReusesTemporar
 		Key: fmt.Sprintf("sha256/%x", survivorDigest), VersionID: "s3-final-after-survivor",
 		SHA256: survivorDigest, SizeBytes: int64(len("must not replace surviving temporary object")),
 	}
-	survivorIntent := preparePublishedAttachmentUploadIntent(
-		t, ctx, repository, reserve, survivorObject,
-	)
+	survivorIntent := preparePublishedAttachmentUploadIntent(t, ctx, fixture, repository, reserve, survivorObject)
 	if _, err := repository.RecordUploadedContent(ctx, attachments.RecordUploadedContentCommand{
 		ProjectID: "default", UploadID: reserve.UploadID, AuthorID: reserve.AuthorID,
 		TemporaryObjectKey: firstKey, Object: survivorObject, PublicationIntent: survivorIntent,
@@ -146,7 +146,7 @@ func TestPostgresIntegrationAttachmentUploadPreparationPersistsAndReusesTemporar
 func TestPostgresIntegrationAttachmentFinalIdentityCompletionAndProcessorReplay(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadcomplete", "usr_uploadcomplete")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadcomplete", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-upload-complete", 2),
 	)
@@ -155,7 +155,7 @@ func TestPostgresIntegrationAttachmentFinalIdentityCompletionAndProcessorReplay(
 	temporaryKey := "temporary/3333333333333333333333333333333333333333333333333333333333333333"
 	reserve := attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_uploadcomplete", AttachmentID: "att_uploadcomplete",
-		DraftID: "rdf_uploadcomplete", AuthorID: "usr_uploadcomplete", DisplayName: "complete.txt",
+		DraftID: "rdf_uploadcomplete", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "complete.txt",
 		MediaType: "text/plain", TransportKind: attachments.TransportKindS3, DeclaredSizeBytes: int64(len(content)),
 		ExpiresAt: time.Now().UTC().Add(time.Hour), Limits: attachments.DefaultLimits(),
 	}
@@ -172,7 +172,7 @@ func TestPostgresIntegrationAttachmentFinalIdentityCompletionAndProcessorReplay(
 		Key: "sha256/" + fmt.Sprintf("%x", digest), VersionID: "s3-final-v1",
 		SHA256: digest, SizeBytes: int64(len(content)),
 	}
-	publicationIntent := preparePublishedAttachmentUploadIntent(t, ctx, repository, reserve, object)
+	publicationIntent := preparePublishedAttachmentUploadIntent(t, ctx, fixture, repository, reserve, object)
 	recordCommand := attachments.RecordUploadedContentCommand{
 		ProjectID: "default", UploadID: reserve.UploadID, AuthorID: reserve.AuthorID,
 		TemporaryObjectKey: temporaryKey, Object: object, PublicationIntent: publicationIntent,
@@ -280,7 +280,7 @@ func TestPostgresIntegrationAttachmentFinalIdentityCompletionAndProcessorReplay(
 func TestPostgresIntegrationAttachmentDirectCompletionAtomicallyPersistsPartAndJob(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_directcomplete", "usr_directcomplete")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_directcomplete", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-direct-complete", 2),
 	)
@@ -289,7 +289,7 @@ func TestPostgresIntegrationAttachmentDirectCompletionAtomicallyPersistsPartAndJ
 	temporaryKey := "temporary/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	reserve := attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_directcomplete", AttachmentID: "att_directcomplete",
-		DraftID: "rdf_directcomplete", AuthorID: "usr_directcomplete", DisplayName: "direct.txt",
+		DraftID: "rdf_directcomplete", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "direct.txt",
 		MediaType: "text/plain", TransportKind: attachments.TransportKindS3,
 		DeclaredSizeBytes: int64(len(content)), ExpiresAt: time.Now().UTC().Add(time.Hour),
 		Limits: attachments.DefaultLimits(),
@@ -335,7 +335,7 @@ func TestPostgresIntegrationAttachmentDirectCompletionAtomicallyPersistsPartAndJ
 		t.Fatalf("GetUploadCompletionPreparation() = %#v", preparation)
 	}
 	complete.TemporaryObjectVersion = "direct-temporary-v1"
-	complete.PublicationIntent = preparePublishedAttachmentUploadIntent(t, ctx, repository, reserve, object)
+	complete.PublicationIntent = preparePublishedAttachmentUploadIntent(t, ctx, fixture, repository, reserve, object)
 	completed, err := repository.CompleteUploadAndEnqueue(ctx, complete)
 	if err != nil {
 		t.Fatalf("CompleteUploadAndEnqueue() error = %v", err)
@@ -371,13 +371,13 @@ func TestPostgresIntegrationAttachmentUploadServiceLocalWorkflow(t *testing.T) {
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-local-workflow", 2),
 	)
-	blob, err := attachments.NewLocalBlobStore(t.TempDir())
+	blob, err := newPostgresLocalBlobStore(t, ctx, fixture, filepath.Join(t.TempDir(), "blob-root"))
 	if err != nil {
 		t.Fatalf("NewLocalBlobStore() error = %v", err)
 	}
 	currentTime := time.Now().UTC()
 	service := newAttachmentUploadWorkflowService(
-		t, repository, blob, attachments.TransportKindLocal, actor, draftID,
+		t, fixture, repository, blob, attachments.TransportKindLocal, actor, draftID,
 		func() time.Time { return currentTime },
 	)
 	content := []byte("cross-layer local upload bytes")
@@ -439,7 +439,7 @@ func TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow(t *testing.T
 	blob := &attachmentUploadWorkflowBlob{S3BlobStore: s3Blob}
 	currentTime := time.Now().UTC()
 	service := newAttachmentUploadWorkflowService(
-		t, repository, blob, attachments.TransportKindS3, actor, draftID,
+		t, fixture, repository, blob, attachments.TransportKindS3, actor, draftID,
 		func() time.Time { return currentTime },
 	)
 	content := []byte("cross-layer direct S3 upload bytes")
@@ -620,13 +620,13 @@ func TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow(t *testing.T
 func TestPostgresIntegrationAttachmentExpiredPreparationIsReconciledAndReleasesReservation(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadexpired", "usr_uploadexpired")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadexpired", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-upload-expired", 2),
 	)
 	reserve := attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_uploadexpired", AttachmentID: "att_uploadexpired",
-		DraftID: "rdf_uploadexpired", AuthorID: "usr_uploadexpired", DisplayName: "expired.txt",
+		DraftID: "rdf_uploadexpired", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "expired.txt",
 		MediaType: "text/plain", TransportKind: attachments.TransportKindS3, DeclaredSizeBytes: 9,
 		ExpiresAt: time.Now().UTC().Add(time.Hour), Limits: attachments.DefaultLimits(),
 	}
@@ -692,13 +692,13 @@ func TestPostgresIntegrationAttachmentExpiredPreparationIsReconciledAndReleasesR
 func TestPostgresIntegrationAttachmentExpiredUploadingSessionReleasesReservation(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadingexpired", "usr_uploadingexpired")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_uploadingexpired", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-uploading-expired", 2),
 	)
 	reserve := attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_uploadingexpired", AttachmentID: "att_uploadingexpired",
-		DraftID: "rdf_uploadingexpired", AuthorID: "usr_uploadingexpired", DisplayName: "expired-local.txt",
+		DraftID: "rdf_uploadingexpired", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "expired-local.txt",
 		MediaType: "text/plain", TransportKind: attachments.TransportKindLocal, DeclaredSizeBytes: 13,
 		ExpiresAt: time.Now().UTC().Add(time.Hour), Limits: attachments.DefaultLimits(),
 	}
@@ -747,14 +747,14 @@ func TestPostgresIntegrationAttachmentExpiredUploadingSessionReleasesReservation
 func TestPostgresIntegrationAttachmentExpiredS3TemporaryVersionCanBeRecordedForCleanup(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_s3expiredcleanup", "usr_s3expiredcleanup")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_s3expiredcleanup", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-s3-expired-cleanup", 2),
 	)
 	key := "temporary/5555555555555555555555555555555555555555555555555555555555555555"
 	reserve := attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_s3expiredcleanup", AttachmentID: "att_s3expiredcleanup",
-		DraftID: "rdf_s3expiredcleanup", AuthorID: "usr_s3expiredcleanup", DisplayName: "expired-s3.txt",
+		DraftID: "rdf_s3expiredcleanup", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "expired-s3.txt",
 		MediaType: "text/plain", TransportKind: attachments.TransportKindS3, DeclaredSizeBytes: 17,
 		ExpiresAt: time.Now().UTC().Add(time.Hour), Limits: attachments.DefaultLimits(),
 	}
@@ -813,7 +813,7 @@ func equalAttachmentIntegrationBytes(left, right []byte) bool {
 func TestPostgresIntegrationAttachmentConcurrentReservationsRespectEffectiveRecordQuota(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_attquota", "usr_attquota")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_attquota", recordsPostgresDraftAuthorID)
 	limits := attachments.Limits{
 		MaxFileBytes:              1024,
 		MaxRecordBytes:            1536,
@@ -837,7 +837,7 @@ func TestPostgresIntegrationAttachmentConcurrentReservationsRespectEffectiveReco
 			UploadID:          fmt.Sprintf("aup_quota%d", index),
 			AttachmentID:      fmt.Sprintf("att_quota%d", index),
 			DraftID:           "rdf_attquota",
-			AuthorID:          "usr_attquota",
+			AuthorID:          recordsPostgresDraftAuthorID,
 			DisplayName:       fmt.Sprintf("quota-%d.txt", index),
 			MediaType:         "text/plain",
 			TransportKind:     attachments.TransportKindLocal,
@@ -889,32 +889,26 @@ func TestPostgresIntegrationAttachmentConcurrentReservationsRespectEffectiveReco
 func TestPostgresIntegrationAttachmentQuotaLifecycleAndPhysicalDedupe(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_attlifecycle", "usr_attlifecycle")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_attlifecycle", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-quota-lifecycle", 2),
 	)
 
-	var digest [32]byte
-	for index := range digest {
-		digest[index] = 0xbb
+	blob, err := newPostgresLocalBlobStore(t, ctx, fixture, filepath.Join(t.TempDir(), "blob-root"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	var completionFingerprint [32]byte
-	for index := range completionFingerprint {
-		completionFingerprint[index] = 0xcc
+	writer, err := attachments.NewManagedBlobWriter(blob, attachments.BackendKindLocal, NewPostgresLocalBlobRepository(fixture.openDirectRuntimePool(t, ctx, "quota-lifecycle-writer", 2), nil, nil))
+	if err != nil {
+		t.Fatal(err)
 	}
-	blob := attachments.BlobObject{
-		Key:           "sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		SHA256:        digest,
-		ObjectVersion: "local-v1",
-		SizeBytes:     9,
-		BackendKind:   attachments.BackendKindLocal,
-	}
+	content := []byte("ninebytes")
 	limits := attachments.Limits{
 		MaxFileBytes:              10,
 		MaxRecordBytes:            30,
 		MaxProjectBytes:           30,
 		WarningPercent:            60,
-		MaxInlineTextPreviewBytes: 5,
+		MaxInlineTextPreviewBytes: 9,
 	}
 
 	for index := 0; index < 2; index++ {
@@ -923,22 +917,11 @@ func TestPostgresIntegrationAttachmentQuotaLifecycleAndPhysicalDedupe(t *testing
 		if _, err := repository.ReserveUpload(ctx, command); err != nil {
 			t.Fatalf("ReserveUpload(%d) error = %v", index, err)
 		}
-		completeAttachmentIntegrationUpload(t, ctx, repository, command, attachments.ObjectVersion{
-			Key: blob.Key, VersionID: blob.ObjectVersion, SHA256: blob.SHA256, SizeBytes: blob.SizeBytes,
-		}, completionFingerprint, fmt.Sprintf("apj_lifecycle%d", index))
-		admitCommand := attachments.AdmitUploadCommand{
-			ProjectID: "default", UploadID: command.UploadID, AuthorID: command.AuthorID, Blob: blob, Limits: limits,
-		}
-		admitted, err := repository.AdmitUpload(ctx, admitCommand)
-		if err != nil {
-			t.Fatalf("AdmitUpload(%d) error = %v", index, err)
-		}
-		admittedReplay, err := repository.AdmitUpload(ctx, admitCommand)
-		if err != nil || admittedReplay != admitted {
-			t.Fatalf("AdmitUpload(%d) replay = (%#v, %v), want %#v", index, admittedReplay, err, admitted)
-		}
+		written := putManagedAttachmentUpload(t, ctx, repository, writer, command, content)
+		enqueueManagedAttachmentUpload(t, ctx, repository, command, written, fmt.Sprintf("apj_lifecycle%d", index))
+		admitted := completeManagedAttachmentProcessor(t, ctx, repository, writer, command.UploadID, content, limits)
 		if index == 1 && !admitted.Quota.ProjectWarning {
-			t.Fatalf("AdmitUpload(%d) custom 60%% warning = %#v", index, admitted.Quota)
+			t.Fatalf("CompleteProcessorJob(%d) custom 60%% warning = %#v", index, admitted.Quota)
 		}
 	}
 
@@ -1013,10 +996,13 @@ func TestPostgresIntegrationAttachmentQuotaLifecycleAndPhysicalDedupe(t *testing
 
 func TestPostgresIntegrationAttachmentExistingRecordDraftUsesEffectiveRecordQuota(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	repository := NewPostgresAttachmentRepository(
-		fixture.openDirectRuntimePool(t, ctx, "attachment-effective-record", 2),
-	)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "attachment-effective-record", 2)
+	repository := NewPostgresAttachmentRepository(runtimePool)
+	if err := repository.ConfigureRecordMutationAuthorization(NewPostgresCollaborationMembershipReader(), newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)); err != nil {
+		t.Fatal(err)
+	}
+	parent := seedAdmittedOutboxRecord(t, ctx, runtimePool, fixture.admissionGate, "attachment-effective-parent")
 	limits := attachments.Limits{
 		MaxFileBytes:              10,
 		MaxRecordBytes:            10,
@@ -1026,83 +1012,64 @@ func TestPostgresIntegrationAttachmentExistingRecordDraftUsesEffectiveRecordQuot
 	}
 
 	if _, err := fixture.db.Exec(ctx, `
-		insert into public.records (record_id) values ('rec_effective1');
-		insert into public.record_revisions (
-			revision_id, record_id, revision_no, title, body_markdown,
-			markdown_dialect_version, record_type, impact_level, visibility_scope,
-			visibility_digest, author_id, canonical_hash
-		) values (
-			'rrv_effective1', 'rec_effective1', 1, 'Effective', '', 1, 'note',
-			'informational', '{}'::jsonb, decode(repeat('51', 32), 'hex'),
-			'usr_effective1', decode(repeat('52', 32), 'hex')
-		);
-		insert into public.record_revision_subjects (
-			revision_id, ordinal, registry_version, subject_kind, relation_role,
-			source_id, is_primary, identity_snapshot, capture_authorization,
-			capture_authorization_digest
-		) values (
-			'rrv_effective1', 0, 1, 'vps', 'affected', 'vps_effective1', true,
-			'{}'::jsonb, '{}'::jsonb, decode(repeat('53', 32), 'hex')
-		);
 		insert into public.blob_objects (
 			blob_key, sha256_digest, object_version, size_bytes, backend_kind
 		) values (
 			'sha256/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
 			decode(repeat('dd', 32), 'hex'), 'local-existing-v1', 5, 'local'
 		);
+		insert into public.attachment_quota_accounts (project_id, logical_bytes, physical_bytes)
+		values ('default', 5, 5)
+		on conflict (project_id) do update set logical_bytes = 5, physical_bytes = 5
+	`); err != nil {
+		t.Fatalf("seed existing-record quota and Blob: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_attachments (
 			attachment_id, record_id, attachment_state, display_name, media_type,
 			logical_size_bytes, blob_key, blob_object_version, created_by
 		) values (
-			'att_effectiveold', 'rec_effective1', 'available', 'old.txt', 'text/plain', 5,
+			'att_effectiveold', $1, 'available', 'old.txt', 'text/plain', 5,
 			'sha256/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
-			'local-existing-v1', 'usr_effective1'
-		);
-		insert into public.attachment_quota_accounts (
-			project_id, logical_bytes, physical_bytes
-		) values ('default', 5, 5);
-		insert into public.record_drafts (
-			draft_id, record_id, base_revision_id, author_id, payload, payload_hash,
-			draft_version, etag_digest, warning_at, expires_at
-		) values (
-			'rdf_effective1', 'rec_effective1', 'rrv_effective1', 'usr_effective1',
-			'{}'::jsonb, decode(repeat('54', 32), 'hex'), 1,
-			decode(repeat('55', 32), 'hex'), now() + interval '1 day', now() + interval '2 days'
-		)
-	`); err != nil {
-		t.Fatalf("seed existing-record attachment quota: %v", err)
+			'local-existing-v1', $2
+		)`, parent.RecordID, recordsPostgresDraftAuthorID); err != nil {
+		t.Fatalf("seed existing-record attachment: %v", err)
+	}
+	drafts := NewPostgresRecordDraftRepository(runtimePool, fixture.admissionGate)
+	if err := drafts.ConfigureRecordMutationAuthorization(NewPostgresCollaborationMembershipReader(), newRecordsPostgresAuthorization(t, runtimePool, fixture.admissionGate)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drafts.CreateDraft(ctx, records.DraftCreateCommand{
+		DraftID: "rdf_effective1", ProjectID: "default", RecordID: parent.RecordID,
+		BaseRevisionID: parent.RevisionID, AuthorID: recordsPostgresDraftAuthorID,
+		Payload: recordsPostgresDraftPayload(t, "Effective quota"), Policy: records.DefaultDraftRetentionPolicy(),
+	}); err != nil {
+		t.Fatalf("create existing-record attachment draft: %v", err)
 	}
 
 	reserve := attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_effective1", AttachmentID: "att_effectivenew",
-		DraftID: "rdf_effective1", AuthorID: "usr_effective1", DisplayName: "new.txt",
+		DraftID: "rdf_effective1", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "new.txt",
 		MediaType: "text/plain", TransportKind: attachments.TransportKindLocal,
 		DeclaredSizeBytes: 4, ExpiresAt: time.Now().UTC().Add(time.Hour), Limits: limits,
 	}
 	if _, err := repository.ReserveUpload(ctx, reserve); err != nil {
 		t.Fatalf("ReserveUpload(existing record) error = %v", err)
 	}
-	var digest [32]byte
-	for index := range digest {
-		digest[index] = 0xee
-	}
-	completeAttachmentIntegrationUpload(t, ctx, repository, reserve, attachments.ObjectVersion{
-		Key:       "sha256/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		VersionID: "local-new-v1", SHA256: digest, SizeBytes: 4,
-	}, [32]byte{1}, "apj_effective1")
-	admitted, err := repository.AdmitUpload(ctx, attachments.AdmitUploadCommand{
-		ProjectID: "default", UploadID: reserve.UploadID, AuthorID: reserve.AuthorID,
-		Blob: attachments.BlobObject{
-			Key:    "sha256/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-			SHA256: digest, ObjectVersion: "local-new-v1", SizeBytes: 4, BackendKind: attachments.BackendKindLocal,
-		},
-		Limits: limits,
-	})
+	blob, err := newPostgresLocalBlobStore(t, ctx, fixture, filepath.Join(t.TempDir(), "blob-root"))
 	if err != nil {
-		t.Fatalf("AdmitUpload(existing record) error = %v", err)
+		t.Fatal(err)
 	}
+	writer, err := attachments.NewManagedBlobWriter(blob, attachments.BackendKindLocal, NewPostgresLocalBlobRepository(fixture.openDirectRuntimePool(t, ctx, "effective-quota-writer", 2), nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("four")
+	written := putManagedAttachmentUpload(t, ctx, repository, writer, reserve, content)
+	enqueueManagedAttachmentUpload(t, ctx, repository, reserve, written, "apj_effective1")
+	admitted := completeManagedAttachmentProcessor(t, ctx, repository, writer, reserve.UploadID, content, limits)
 	if admitted.Quota.EffectiveRecordBytes != 9 {
-		t.Fatalf("AdmitUpload(existing record) effective bytes = %d, want 9", admitted.Quota.EffectiveRecordBytes)
+		t.Fatalf("CompleteProcessorJob(existing record) effective bytes = %d, want 9", admitted.Quota.EffectiveRecordBytes)
 	}
 
 	reserve.UploadID = "aup_effective2"
@@ -1115,41 +1082,47 @@ func TestPostgresIntegrationAttachmentExistingRecordDraftUsesEffectiveRecordQuot
 
 func TestPostgresIntegrationAttachmentCrossRecordCopyRetainsBlobAndChargesLogicalQuota(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	repository := NewPostgresAttachmentRepository(
-		fixture.openDirectRuntimePool(t, ctx, "attachment-cross-record-copy", 2),
-	)
-
-	if _, err := fixture.db.Exec(ctx, `
-		insert into public.records (record_id) values ('rec_copysource'), ('rec_copytarget');
-		insert into public.blob_objects (
-			blob_key, sha256_digest, object_version, size_bytes, backend_kind
-		) values (
-			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-			decode(repeat('bb', 32), 'hex'), 'local-v1', 9, 'local'
-		);
-		insert into public.record_attachments (
-			attachment_id, record_id, attachment_state, display_name, media_type,
-			logical_size_bytes, blob_key, blob_object_version, created_by
-		) values (
-			'att_copysource', 'rec_copysource', 'available', 'source.txt', 'text/plain',
-			9, 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-			'local-v1', 'usr_copysource'
-		);
-		insert into public.attachment_quota_accounts (
-			project_id, logical_bytes, physical_bytes
-		) values ('default', 9, 9)
-	`); err != nil {
-		t.Fatalf("seed cross-record attachment copy: %v", err)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	f := newLocalPublicationFixtureFor(t, ctx, fixture, fixture.admissionGate)
+	repository := f.repository
+	writer, err := attachments.NewManagedBlobWriter(f.blob, attachments.BackendKindLocal, f.local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draftRepository := NewPostgresRecordDraftRepository(f.pool, fixture.admissionGate)
+	birthFixture := ImportAttachmentGCFixture{Runtime: f.pool, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture, NewRecordAttachmentRevisionParticipant())
+	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_copycontract", recordsPostgresDraftPayload(t, "Copy source"))
+	reserve := draftReleaseReservation(draft.DraftID, 0)
+	reserve.AttachmentID, reserve.UploadID, reserve.DeclaredSizeBytes = "att_copysource", "aup_copysource", 9
+	if _, err := repository.ReserveUpload(ctx, reserve); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("copy data")
+	written := putManagedAttachmentUpload(t, ctx, repository, writer, reserve, content)
+	enqueueManagedAttachmentUpload(t, ctx, repository, reserve, written, "apj_copysource")
+	completeManagedAttachmentProcessor(t, ctx, repository, writer, reserve.UploadID, content, reserve.Limits)
+	source := revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Copy source", reserve.AttachmentID), "copy-source-create")
+	source.DraftID, source.DraftETag = draft.DraftID, draft.ETag
+	sourceResult, err := recordRepository.CommitRevision(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Copy target"), "copy-target-create")
+	targetResult, err := recordRepository.CommitRevision(ctx, target)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	result, err := repository.CopyAttachment(ctx, attachments.CopyAttachmentCommand{
 		ProjectID:          "default",
-		SourceRecordID:     "rec_copysource",
-		TargetRecordID:     "rec_copytarget",
+		SourceRecordID:     sourceResult.RecordID,
+		TargetRecordID:     targetResult.RecordID,
 		SourceAttachmentID: "att_copysource",
 		TargetAttachmentID: "att_copytarget",
-		ActorID:            "usr_copyactor",
+		ActorID:            "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
 		Limits:             attachments.DefaultLimits(),
 	})
 	if err != nil {
@@ -1175,78 +1148,46 @@ func TestPostgresIntegrationAttachmentCrossRecordCopyRetainsBlobAndChargesLogica
 	); err != nil {
 		t.Fatalf("read cross-record attachment copy: %v", err)
 	}
-	if recordID != "rec_copytarget" || copiedFromID != "att_copysource" ||
-		blobKey != "sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ||
-		blobVersion != "local-v1" || logicalBytes != 9 || projectLogicalBytes != 18 || projectPhysicalBytes != 9 {
+	if recordID != targetResult.RecordID || copiedFromID != "att_copysource" ||
+		blobKey != written.Version.Key || blobVersion != written.Version.VersionID ||
+		logicalBytes != 9 || projectLogicalBytes != 18 || projectPhysicalBytes != 9 {
 		t.Fatalf("cross-record copy = %s/%s %s@%s logical=%d project=%d/%d",
 			recordID, copiedFromID, blobKey, blobVersion, logicalBytes, projectLogicalBytes, projectPhysicalBytes)
 	}
 
-	if _, err := fixture.db.Exec(ctx, `delete from public.record_attachments where attachment_id = 'att_copysource'`); err != nil {
-		t.Fatalf("delete copied attachment source: %v", err)
-	}
-	var survivingLineage string
-	if err := fixture.db.QueryRow(ctx, `
-		select copied_from_attachment_id from public.record_attachments
-		where attachment_id = 'att_copytarget'
-	`).Scan(&survivingLineage); err != nil {
-		t.Fatalf("read detached copied attachment lineage: %v", err)
-	}
-	if survivingLineage != "att_copysource" {
-		t.Fatalf("detached copied attachment lineage = %q", survivingLineage)
-	}
 }
 
 func TestPostgresIntegrationAttachmentBlobPinAndReferenceProtection(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	repository := NewPostgresAttachmentRepository(
-		fixture.openDirectRuntimePool(t, ctx, "attachment-blob-protection", 2),
-	)
-	blobKey := "sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	blobVersion := "local-protected-v1"
-
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "attachment-blob-protection", 2)
+	repository := NewPostgresAttachmentRepository(runtimePool)
+	first := seedAdmittedOutboxRecord(t, ctx, runtimePool, fixture.admissionGate, "blob-protection-first")
+	second := seedAdmittedOutboxRecord(t, ctx, runtimePool, fixture.admissionGate, "blob-protection-second")
+	blob, err := newPostgresLocalBlobStore(t, ctx, fixture, filepath.Join(t.TempDir(), "blob-root"))
+	if err != nil {
+		t.Fatalf("provision local Blob namespace: %v", err)
+	}
+	version := seedPostgresManagedLocalBlob(t, ctx, fixture, blob, []byte("shared blob")).Version
+	object := attachmentBlobObjectFromVersion(version, attachments.BackendKindLocal)
+	object.NamespaceID = blob.Namespace().NamespaceID
+	seedAttachmentBlobGCObject(t, ctx, fixture, object, time.Now().UTC())
+	blobKey, blobVersion := version.Key, version.VersionID
 	if _, err := fixture.db.Exec(ctx, `
-		insert into public.records (record_id) values ('rec_protecta'), ('rec_protectb');
-		insert into public.record_revisions (
-			revision_id, record_id, revision_no, title, body_markdown,
-			markdown_dialect_version, record_type, impact_level, visibility_scope,
-			visibility_digest, author_id, canonical_hash
-		) values (
-			'rrv_protecta', 'rec_protecta', 1, 'Protected', '', 1, 'note',
-			'informational', '{}'::jsonb, decode(repeat('41', 32), 'hex'),
-			'usr_protecta', decode(repeat('42', 32), 'hex')
-		);
-		insert into public.record_revision_subjects (
-			revision_id, ordinal, registry_version, subject_kind, relation_role,
-			source_id, is_primary, identity_snapshot, capture_authorization,
-			capture_authorization_digest
-		) values (
-			'rrv_protecta', 0, 1, 'vps', 'affected', 'vps_protecta', true,
-			'{}'::jsonb, '{}'::jsonb, decode(repeat('43', 32), 'hex')
-		);
-		insert into public.blob_objects (
-			blob_key, sha256_digest, object_version, size_bytes, backend_kind
-		) values (
-			'sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-			decode(repeat('cc', 32), 'hex'), 'local-protected-v1', 11, 'local'
-		);
 		insert into public.record_attachments (
 			attachment_id, record_id, copied_from_attachment_id, attachment_state,
 			display_name, media_type, logical_size_bytes, blob_key,
 			blob_object_version, created_by
 		) values
-			('att_protecta', 'rec_protecta', null, 'available', 'a.txt', 'text/plain', 11,
-			 'sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-			 'local-protected-v1', 'usr_protecta'),
-			('att_protectb', 'rec_protectb', 'att_protecta', 'available', 'b.txt', 'text/plain', 11,
-			 'sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-			 'local-protected-v1', 'usr_protectb');
-		insert into public.record_revision_attachments (
-			record_id, revision_id, ordinal, attachment_id
-		) values ('rec_protecta', 'rrv_protecta', 0, 'att_protecta')
-	`); err != nil {
-		t.Fatalf("seed Blob protection references: %v", err)
+			('att_protecta', $1, null, 'available', 'a.txt', 'text/plain', 11, $3, $4, $5),
+			('att_protectb', $2, 'att_protecta', 'available', 'b.txt', 'text/plain', 11, $3, $4, $5)`,
+		first.RecordID, second.RecordID, blobKey, blobVersion, recordsPostgresDraftAuthorID); err != nil {
+		t.Fatalf("seed Blob protection attachments: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_revision_attachments (record_id, revision_id, ordinal, attachment_id)
+		values ($1, $2, 0, 'att_protecta')`, first.RecordID, first.RevisionID); err != nil {
+		t.Fatalf("seed Blob protection revision reference: %v", err)
 	}
 
 	create := attachments.CreateBlobGCPinCommand{
@@ -1282,11 +1223,11 @@ func TestPostgresIntegrationAttachmentBlobPinAndReferenceProtection(t *testing.T
 		t.Fatalf("ReleaseBlobGCPin() referenced protection = %#v", protection)
 	}
 
-	if _, err := fixture.db.Exec(ctx, `
-		delete from public.record_revision_attachments where revision_id = 'rrv_protecta';
-		delete from public.record_attachments where attachment_id in ('att_protecta', 'att_protectb')
-	`); err != nil {
-		t.Fatalf("remove Blob protection references: %v", err)
+	if _, err := fixture.db.Exec(ctx, `delete from public.record_revision_attachments where revision_id = $1`, first.RevisionID); err != nil {
+		t.Fatalf("remove Blob revision reference: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `delete from public.record_attachments where attachment_id in ('att_protecta', 'att_protectb')`); err != nil {
+		t.Fatalf("remove Blob attachment references: %v", err)
 	}
 	protection, err = repository.GetBlobProtection(ctx, attachments.BlobProtectionCommand{
 		BlobKey: blobKey, BlobObjectVersion: blobVersion,
@@ -1521,9 +1462,12 @@ func TestPostgresIntegrationAttachmentBlobGCFenceBlocksNewReferences(t *testing.
 	if err != nil {
 		t.Fatalf("begin Blob metadata fence transaction: %v", err)
 	}
-	if inserted, err := ensureAttachmentBlob(ctx, blobTx, object); inserted || !errors.Is(err, attachments.ErrBlobGCProtected) {
+	_, blobErr := blobTx.Exec(ctx, `insert into public.blob_objects(blob_key,sha256_digest,object_version,size_bytes,backend_kind)
+		values($1,$2,$3,$4,$5)`, object.Key, object.SHA256[:], object.ObjectVersion, object.SizeBytes, object.BackendKind)
+	var blobDatabaseError *pgconn.PgError
+	if !errors.As(blobErr, &blobDatabaseError) || blobDatabaseError.Code != "42501" {
 		_ = blobTx.Rollback(ctx)
-		t.Fatalf("ensureAttachmentBlob(after claim) = (%t, %v), want false/ErrBlobGCProtected", inserted, err)
+		t.Fatalf("direct Blob publication error = %v, want insufficient privilege", blobErr)
 	}
 	if err := blobTx.Rollback(ctx); err != nil {
 		t.Fatalf("rollback Blob metadata fence transaction: %v", err)
@@ -1533,9 +1477,12 @@ func TestPostgresIntegrationAttachmentBlobGCFenceBlocksNewReferences(t *testing.
 	if err != nil {
 		t.Fatalf("begin upload-part fence transaction: %v", err)
 	}
-	if err := ensureAttachmentUploadPart(ctx, partTx, "aup_gcfence", storeObjectVersion(object)); !errors.Is(err, attachments.ErrBlobGCProtected) {
+	_, partErr := partTx.Exec(ctx, `insert into public.attachment_upload_parts(upload_id,part_number,size_bytes,sha256_digest,object_version)
+		values($1,1,$2,$3,$4)`, "aup_gcfence", object.SizeBytes, object.SHA256[:], object.ObjectVersion)
+	var partDatabaseError *pgconn.PgError
+	if !errors.As(partErr, &partDatabaseError) || partDatabaseError.Code != "42501" {
 		_ = partTx.Rollback(ctx)
-		t.Fatalf("ensureAttachmentUploadPart(after claim) error = %v, want ErrBlobGCProtected", err)
+		t.Fatalf("direct upload-part publication error = %v, want insufficient privilege", partErr)
 	}
 	if err := partTx.Rollback(ctx); err != nil {
 		t.Fatalf("rollback upload-part fence transaction: %v", err)
@@ -1571,29 +1518,27 @@ func TestPostgresIntegrationAttachmentBlobGCFenceBlocksNewReferences(t *testing.
 func TestPostgresIntegrationAttachmentBlobGCLocalWorkerWorkflow(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	repository := NewPostgresAttachmentRepository(
-		fixture.openDirectRuntimePool(t, ctx, "attachment-blob-gc-local-worker", 2),
-	)
-	blob, err := attachments.NewLocalBlobStore(t.TempDir())
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "attachment-blob-gc-local-worker", 2)
+	repository := NewPostgresAttachmentRepository(runtimePool)
+	blob, err := newPostgresLocalBlobStore(t, ctx, fixture, filepath.Join(t.TempDir(), "blob-root"))
 	if err != nil {
 		t.Fatalf("NewLocalBlobStore() error = %v", err)
 	}
+	coordinator, err := attachments.NewLocalCleanupCoordinator(blob, NewPostgresLocalBlobRepository(runtimePool, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
 	worker, err := attachments.NewBlobGCWorker(repository, blob, attachments.BlobGCWorkerOptions{
-		BackendKind: attachments.BackendKindLocal, OwnerID: "postgres_local_gc_worker",
+		BackendKind: attachments.BackendKindLocal, OwnerID: "postgres_local_gc_worker", LocalCleanup: coordinator,
 	})
 	if err != nil {
 		t.Fatalf("NewBlobGCWorker() error = %v", err)
 	}
 
 	content := []byte("real local Blob GC bytes")
-	digest := sha256.Sum256(content)
-	version, err := blob.Put(ctx, attachments.PutRequest{
-		ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
-	}, bytes.NewReader(content))
-	if err != nil {
-		t.Fatalf("LocalBlobStore.Put() error = %v", err)
-	}
+	version := seedPostgresManagedLocalBlob(t, ctx, fixture, blob, content).Version
 	object := attachmentBlobObjectFromVersion(version, attachments.BackendKindLocal)
+	object.NamespaceID = blob.Namespace().NamespaceID
 	seedAttachmentBlobGCObject(t, ctx, fixture, object, time.Now().UTC().Add(-48*time.Hour))
 	worked, err := worker.RunOnce(ctx)
 	if err != nil || !worked {
@@ -1605,26 +1550,6 @@ func TestPostgresIntegrationAttachmentBlobGCLocalWorkerWorkflow(t *testing.T) {
 	assertAttachmentBlobGCTerminalResult(t, ctx, fixture, object, "deleted")
 	assertAttachmentBlobGCQuota(t, ctx, fixture, 0, 1)
 
-	absentContent := []byte("already absent local Blob GC bytes")
-	absentDigest := sha256.Sum256(absentContent)
-	absentVersion, err := blob.Put(ctx, attachments.PutRequest{
-		ExpectedSHA256: absentDigest, ExpectedSizeBytes: int64(len(absentContent)),
-	}, bytes.NewReader(absentContent))
-	if err != nil {
-		t.Fatalf("LocalBlobStore.Put(already absent) error = %v", err)
-	}
-	deleted, err := blob.Delete(ctx, absentVersion)
-	if err != nil || !deleted.Deleted {
-		t.Fatalf("LocalBlobStore.Delete(pre-GC) = (%#v, %v)", deleted, err)
-	}
-	absentObject := attachmentBlobObjectFromVersion(absentVersion, attachments.BackendKindLocal)
-	seedAttachmentBlobGCObject(t, ctx, fixture, absentObject, time.Now().UTC().Add(-48*time.Hour))
-	worked, err = worker.RunOnce(ctx)
-	if err != nil || !worked {
-		t.Fatalf("BlobGCWorker.RunOnce(already absent) = (%t, %v), want true/nil", worked, err)
-	}
-	assertAttachmentBlobGCTerminalResult(t, ctx, fixture, absentObject, "already_absent")
-	assertAttachmentBlobGCQuota(t, ctx, fixture, 0, 2)
 	worked, err = worker.RunOnce(ctx)
 	if err != nil || worked {
 		t.Fatalf("BlobGCWorker.RunOnce(replay) = (%t, %v), want false/nil", worked, err)
@@ -1900,7 +1825,7 @@ func assertAttachmentHistoricalGCObjects(
 func TestPostgresIntegrationAttachmentTemporaryObjectCleanupPersistsVersionAndMarker(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	seedAttachmentDraft(t, ctx, fixture, "rdf_cleanuprestart", "usr_cleanuprestart")
+	seedAttachmentDraft(t, ctx, fixture, "rdf_cleanuprestart", recordsPostgresDraftAuthorID)
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-cleanup-restart", 2),
 	)
@@ -1908,7 +1833,7 @@ func TestPostgresIntegrationAttachmentTemporaryObjectCleanupPersistsVersionAndMa
 	limits := attachments.DefaultLimits()
 	if _, err := repository.ReserveUpload(ctx, attachments.ReserveUploadCommand{
 		ProjectID: "default", UploadID: "aup_cleanuprestart", AttachmentID: "att_cleanuprestart",
-		DraftID: "rdf_cleanuprestart", AuthorID: "usr_cleanuprestart", DisplayName: "restart.zip",
+		DraftID: "rdf_cleanuprestart", AuthorID: recordsPostgresDraftAuthorID, DisplayName: "restart.zip",
 		MediaType: "application/zip", TransportKind: attachments.TransportKindS3,
 		DeclaredSizeBytes: 32, ExpiresAt: expiresAt, Limits: limits,
 	}); err != nil {
@@ -1916,7 +1841,7 @@ func TestPostgresIntegrationAttachmentTemporaryObjectCleanupPersistsVersionAndMa
 	}
 	key := "temporary/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if _, err := repository.PrepareUpload(ctx, attachments.PrepareUploadCommand{
-		ProjectID: "default", UploadID: "aup_cleanuprestart", AuthorID: "usr_cleanuprestart",
+		ProjectID: "default", UploadID: "aup_cleanuprestart", AuthorID: recordsPostgresDraftAuthorID,
 		CandidateTemporaryObjectKey: key,
 	}); err != nil {
 		t.Fatalf("PrepareUpload() error = %v", err)
@@ -3282,13 +3207,16 @@ func TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow(t *testi
 	}
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	repository := NewPostgresAttachmentRepository(
-		fixture.openDirectRuntimePool(t, ctx, "attachment-processor-s3-workspace", 2),
-	)
+	runtime := fixture.openDirectRuntimePool(t, ctx, "attachment-processor-s3-workspace", 2)
+	repository := NewPostgresAttachmentRepository(runtime)
 	client, bucket := newAttachmentUploadWorkflowMinIO(t)
 	blob, err := attachments.NewS3BlobStore(client, bucket)
 	if err != nil {
 		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	writer, err := attachments.NewManagedBlobWriter(blob, attachments.BackendKindS3, NewPostgresLocalBlobRepository(runtime, nil, nil))
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	content := []byte("real PostgreSQL MinIO processor workspace\n")
@@ -3339,6 +3267,7 @@ func TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow(t *testi
 		OwnerID: "processor_s3_workspace", OwnerLeaseDuration: time.Minute,
 		Limits: limits, AdmissionLimits: admissionLimits,
 		PreviewBackendKind: attachments.BackendKindS3,
+		Writer:             writer,
 	})
 	if err != nil {
 		t.Fatalf("NewProcessorWorker() error = %v", err)
@@ -3454,9 +3383,7 @@ func TestPostgresIntegrationAttachmentProcessorCleanCompletionIsAtomicReplaySafe
 	completionInput := attachments.ProcessorCompletionInput{
 		Claim: *firstClaim, Result: processorResult, Limits: attachments.DefaultLimits(),
 	}
-	completionInput.PreviewPublicationIntent = preparePublishedAttachmentPreviewIntent(
-		t, ctx, repository, *firstClaim, preview,
-	)
+	completionInput.PreviewPublicationIntent = preparePublishedAttachmentPreviewIntent(t, ctx, fixture, repository, *firstClaim, preview)
 	completed, err := repository.CompleteProcessorJob(ctx, completionInput)
 	if err != nil {
 		t.Fatalf("CompleteProcessorJob(first clean) error = %v", err)
@@ -3526,9 +3453,10 @@ func TestPostgresIntegrationAttachmentProcessorCleanCompletionIsAtomicReplaySafe
 		t.Fatalf("clean replay quota version/blob count = %d/%d, want %d/2",
 			afterReplayVersion, afterReplayBlobCount, replayQuotaVersion)
 	}
-	mismatchedPreview := attachmentProcessorBlob(0x43, 9, "clean-preview-other-v1")
 	mismatchedResult := processorResult
-	mismatchedResult.Preview.Blob = mismatchedPreview
+	mismatchedResult.Code = attachments.ProcessorResultCodeMalware
+	mismatchedResult.HasPreview = false
+	mismatchedResult.Preview = attachments.ManagedPreview{}
 	beforeMismatchToken := readAttachmentProcessorPersistenceToken(t, ctx, fixture, firstSeed.ProcessorJobID)
 	if _, err := repository.CompleteProcessorJob(ctx, attachments.ProcessorCompletionInput{
 		Claim: *firstClaim, Result: mismatchedResult, Limits: attachments.DefaultLimits(),
@@ -3550,9 +3478,7 @@ func TestPostgresIntegrationAttachmentProcessorCleanCompletionIsAtomicReplaySafe
 	secondCompletionInput := attachments.ProcessorCompletionInput{
 		Claim: *secondClaim, Result: processorResult, Limits: attachments.DefaultLimits(),
 	}
-	secondCompletionInput.PreviewPublicationIntent = preparePublishedAttachmentPreviewIntent(
-		t, ctx, repository, *secondClaim, preview,
-	)
+	secondCompletionInput.PreviewPublicationIntent = preparePublishedAttachmentPreviewIntent(t, ctx, fixture, repository, *secondClaim, preview)
 	secondCompleted, err := repository.CompleteProcessorJob(ctx, secondCompletionInput)
 	if err != nil {
 		t.Fatalf("CompleteProcessorJob(second clean) error = %v", err)
@@ -3594,20 +3520,16 @@ func TestPostgresIntegrationAttachmentProcessorPreviewBoundaryRejectsInitialAndR
 	repository := NewPostgresAttachmentRepository(
 		fixture.openDirectRuntimePool(t, ctx, "attachment-processor-preview-boundary", 2),
 	)
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	source := attachmentProcessorBlob(0x47, 47, "preview-boundary-source-v1")
-	preview := attachmentProcessorBlob(0x48, 48, "preview-boundary-preview-v1")
-	seed := seedAttachmentProcessorJob(t, ctx, fixture, attachmentProcessorSeed{
-		Suffix: "previewboundary", Source: source, State: attachments.ProcessorStateQueued,
-		Profile: attachments.ProcessorProfileText, CreatedAt: now.Add(-time.Minute),
-		ExpiresAt: now.Add(time.Hour), MaxAttempts: 3, ReservedQuotaBytes: source.SizeBytes,
-	})
+	writer := newDraftReleaseWriter(t, ctx, fixture)
+	seed := seedManagedAttachmentProcessor(t, ctx, fixture, repository, writer, "previewboundary", bytes.Repeat([]byte("s"), 47))
+	source := seed.Source
 	claim, err := repository.ClaimProcessorJob(ctx, attachments.ProcessorClaimInput{
 		OwnerID: "processor_preview_boundary", OwnerLeaseDuration: 5 * time.Minute,
 	})
 	if err != nil || claim == nil {
 		t.Fatalf("ClaimProcessorJob(preview boundary) = (%#v, %v)", claim, err)
 	}
+	preview, previewIntent := prepareManagedAttachmentPreview(t, ctx, repository, writer, *claim, bytes.Repeat([]byte("p"), 48))
 	limits := attachments.DefaultLimits()
 	oversized := preview
 	oversized.SizeBytes = limits.MaxInlineTextPreviewBytes + 1
@@ -3636,9 +3558,7 @@ func TestPostgresIntegrationAttachmentProcessorPreviewBoundaryRejectsInitialAndR
 	validResult := oversizedResult
 	validResult.Preview.Blob = preview
 	validInput := attachments.ProcessorCompletionInput{Claim: *claim, Result: validResult, Limits: limits}
-	validInput.PreviewPublicationIntent = preparePublishedAttachmentPreviewIntent(
-		t, ctx, repository, *claim, preview,
-	)
+	validInput.PreviewPublicationIntent = previewIntent
 	if _, err := repository.CompleteProcessorJob(ctx, validInput); err != nil {
 		t.Fatalf("CompleteProcessorJob(valid preview after rejected initial) error = %v", err)
 	}
@@ -4037,20 +3957,19 @@ func TestPostgresIntegrationAttachmentProcessorCompletionRollsBackAtWriteCutpoin
 			repository := NewPostgresAttachmentRepository(
 				fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("attachment-processor-cutpoint-%d", index), 2),
 			)
-			now := time.Now().UTC().Truncate(time.Microsecond)
-			source := attachmentProcessorBlob(byte(0x81+index), int64(81+index), fmt.Sprintf("cutpoint-source-%d-v1", index))
-			preview := attachmentProcessorBlob(byte(0x91+index), int64(21+index), fmt.Sprintf("cutpoint-preview-%d-v1", index))
-			seed := seedAttachmentProcessorJob(t, ctx, fixture, attachmentProcessorSeed{
-				Suffix: fmt.Sprintf("cutpoint%d", index), Source: source,
-				State: attachments.ProcessorStateQueued, Profile: attachments.ProcessorProfileText,
-				CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
-				MaxAttempts: 3, ReservedQuotaBytes: source.SizeBytes,
-			})
+			writer := newDraftReleaseWriter(t, ctx, fixture)
+			seed := seedManagedAttachmentProcessor(t, ctx, fixture, repository, writer, fmt.Sprintf("cutpoint%d", index), bytes.Repeat([]byte("s"), 81+index))
+			source := seed.Source
 			claim, err := repository.ClaimProcessorJob(ctx, attachments.ProcessorClaimInput{
 				OwnerID: fmt.Sprintf("processor_cutpoint_%d", index), OwnerLeaseDuration: 5 * time.Minute,
 			})
 			if err != nil || claim == nil {
 				t.Fatalf("ClaimProcessorJob(cutpoint) = (%#v, %v)", claim, err)
+			}
+			preview, previewIntent := prepareManagedAttachmentPreview(t, ctx, repository, writer, *claim, bytes.Repeat([]byte("p"), 21+index))
+			var beforeQuotaVersion int64
+			if err := fixture.db.QueryRow(ctx, `select quota_version from public.attachment_quota_accounts where project_id='default'`).Scan(&beforeQuotaVersion); err != nil {
+				t.Fatal(err)
 			}
 			if test.previewConflict {
 				if _, err := fixture.db.Exec(ctx, `
@@ -4075,9 +3994,7 @@ func TestPostgresIntegrationAttachmentProcessorCompletionRollsBackAtWriteCutpoin
 			completionInput := attachments.ProcessorCompletionInput{
 				Claim: *claim, Result: processorResult, Limits: attachments.DefaultLimits(),
 			}
-			completionInput.PreviewPublicationIntent = preparePublishedAttachmentPreviewIntent(
-				t, ctx, repository, *claim, preview,
-			)
+			completionInput.PreviewPublicationIntent = previewIntent
 			_, err = repository.CompleteProcessorJob(ctx, completionInput)
 			if err == nil {
 				t.Fatal("CompleteProcessorJob(cutpoint) error = nil")
@@ -4090,7 +4007,7 @@ func TestPostgresIntegrationAttachmentProcessorCompletionRollsBackAtWriteCutpoin
 			}
 			assertAttachmentProcessorFailedCompletionRolledBack(
 				t, ctx, fixture, seed, *claim, test.wantBlobCount,
-				attachments.QuotaUsage{ReservedBytes: source.SizeBytes}, 0,
+				attachments.QuotaUsage{ReservedBytes: source.SizeBytes}, beforeQuotaVersion,
 			)
 		})
 	}
@@ -4117,6 +4034,7 @@ func TestPostgresIntegrationAttachmentProcessorCompletionProtectsQuotaVersionAnd
 			)
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			source := attachmentProcessorBlob(byte(0xa1+index), int64(31+index), fmt.Sprintf("overflow-source-%d-v1", index))
+			source.BackendKind = attachments.BackendKindS3
 			seed := seedAttachmentProcessorJob(t, ctx, fixture, attachmentProcessorSeed{
 				Suffix: fmt.Sprintf("overflow%d", index), Source: source,
 				State: attachments.ProcessorStateQueued, Profile: attachments.ProcessorProfileArchive,
@@ -4157,7 +4075,7 @@ func TestPostgresIntegrationAttachmentProcessorCompletionProtectsQuotaVersionAnd
 
 func TestPostgresMinIOIntegrationAttachmentDownloadLifecycle(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "attachment-download-lifecycle", 8)
 	client, bucket := newAttachmentUploadWorkflowMinIO(t)
 	requestCounter := &attachmentDownloadRequestCounter{}
@@ -4182,12 +4100,11 @@ func TestPostgresMinIOIntegrationAttachmentDownloadLifecycle(t *testing.T) {
 		t.Fatalf("S3BlobStore.Put() error = %v", err)
 	}
 
-	recordID := "rec_downloadlifecycle"
-	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}
+	recordRepository := newRevisionMutationAdmittedRepository(t, birthFixture)
 	recordInput := recordsPostgresCompleteRevisionInput(t, "Attachment download lifecycle")
-	record, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
-		recordInput, "attachment-download-lifecycle-record",
+	record, err := recordRepository.CommitRevision(ctx, revisionBirthBatchCommand(
+		t, ctx, birthFixture, recordInput, "attachment-download-lifecycle-record",
 	))
 	if err != nil {
 		t.Fatalf("CommitRevision() error = %v", err)
@@ -4257,9 +4174,9 @@ func TestPostgresMinIOIntegrationAttachmentDownloadLifecycle(t *testing.T) {
 		CaptureAuthorization: storedSubject.CaptureAuthorization,
 	}}
 	authorizer := newPostgresCurrentRecordAuthorizationSource(
-		runtimePool, resolver, allowRecordPlatformAdmissionGate,
+		runtimePool, resolver, fixture.admissionGate,
 	)
-	leases := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	leases := NewPostgresRecordPlatformRepository(runtimePool, fixture.admissionGate)
 	repository := NewPostgresAttachmentRepository(runtimePool)
 	newService := func(blob attachments.BlobStore) *attachments.DownloadService {
 		t.Helper()
@@ -4456,23 +4373,18 @@ func TestPostgresMinIOIntegrationAttachmentDownloadLifecycle(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatal("record download did not reach delayed Stat")
 		}
-		fencePool := fixture.openDirectRuntimePool(t, ctx, "attachment-download-fence", 2)
-		fenceRepository := NewPostgresRecordPlatformRepository(fencePool, allowRecordPlatformAdmissionGate)
-		fence, fenceErr := fenceRepository.AcquireDeletionFenceLease(ctx,
-			recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: record.RecordID},
-			recordplatform.LeaseClaimInputV1{OwnerID: "download_lifecycle_fence", LeaseDuration: time.Minute},
-		)
-		if fenceErr != nil {
-			close(blob.allowStat)
-			t.Fatalf("AcquireDeletionFenceLease() error = %v", fenceErr)
-		}
+		// The download observes a fence installed by the isolated fixture owner;
+		// current runtime has no raw fence-issuance permission.
+		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: record.RecordID}
+		seedServingTestFence(t, ctx, fixture, object, "clock_timestamp() + interval '1 minute'")
 		close(blob.allowStat)
 		openErr := <-resultCh
 		if openErr == nil {
 			t.Fatal("Open(record during deletion fence) succeeded")
 		}
-		if err := fenceRepository.ReleaseDeletionFenceLease(ctx, fence.Object, fence.Owner); err != nil {
-			t.Fatalf("ReleaseDeletionFenceLease() error = %v", err)
+		if _, err := fixture.db.Exec(ctx, `update public.deletion_fence_leases set expires_at=clock_timestamp()-interval '1 second'
+			where project_id=$1 and object_kind=$2 and object_id=$3`, object.ProjectID, object.ObjectKind, object.ObjectID); err != nil {
+			t.Fatalf("expire isolated download fence: %v", err)
 		}
 	})
 
@@ -4860,6 +4772,7 @@ func attachmentUploadWorkflowActor(t *testing.T) recordauth.ActorScope {
 
 func newAttachmentUploadWorkflowService(
 	t *testing.T,
+	fixture recordPlatformPostgresFixture,
 	repository attachments.UploadServiceRepository,
 	blob attachments.BlobStore,
 	transport attachments.TransportKind,
@@ -4868,12 +4781,17 @@ func newAttachmentUploadWorkflowService(
 	now func() time.Time,
 ) *attachments.UploadService {
 	t.Helper()
+	writer, err := attachments.NewManagedBlobWriter(blob, attachments.BackendKind(transport), NewPostgresLocalBlobRepository(fixture.openDirectRuntimePool(t, context.Background(), "upload-workflow-writer", 2), nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
 	service, err := attachments.NewUploadService(
 		attachmentUploadWorkflowAuthorizer{actor: actor, draftID: draftID},
 		repository,
 		blob,
 		attachments.UploadServiceOptions{
 			TransportKind: transport, Limits: attachments.DefaultLimits(), Now: now, ProcessorMaxAttempts: 3,
+			Writer: writer,
 		},
 	)
 	if err != nil {
@@ -5137,10 +5055,10 @@ func seedAttachmentBlobGCObject(
 	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, `
 		insert into public.blob_objects (
-			blob_key, sha256_digest, object_version, size_bytes, backend_kind, created_at
-		) values ($1, $2, $3, $4, $5, $6)`,
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind, created_at, namespace_id
+		) values ($1, $2, $3, $4, $5, $6, nullif($7,'')::uuid)`,
 		object.Key, object.SHA256[:], object.ObjectVersion, object.SizeBytes,
-		object.BackendKind, createdAt.UTC(),
+		object.BackendKind, createdAt.UTC(), object.NamespaceID,
 	); err != nil {
 		t.Fatalf("seed Blob GC object %q: %v", object.Key, err)
 	}
@@ -5166,7 +5084,7 @@ func seedAttachmentBlobGCOriginalReference(
 	object attachments.BlobObject,
 ) {
 	t.Helper()
-	draftID, authorID := "rdf_"+suffix, "usr_"+suffix
+	draftID, authorID := "rdf_"+suffix, attachmentFixtureAuthorID(suffix)
 	seedAttachmentDraft(t, ctx, fixture, draftID, authorID)
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_attachments (
@@ -5194,7 +5112,7 @@ func seedAttachmentBlobGCPreviewReference(
 		"original for "+suffix, "local-gc-"+suffix+"-original-v1", attachments.BackendKindLocal,
 	)
 	seedAttachmentBlobGCObject(t, ctx, fixture, original, createdAt.Add(-time.Hour))
-	draftID, authorID := "rdf_"+suffix, "usr_"+suffix
+	draftID, authorID := "rdf_"+suffix, attachmentFixtureAuthorID(suffix)
 	seedAttachmentDraft(t, ctx, fixture, draftID, authorID)
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_attachments (
@@ -5222,7 +5140,7 @@ func seedAttachmentBlobGCUploadShell(
 	suffix string,
 ) {
 	t.Helper()
-	draftID, authorID := "rdf_"+suffix, "usr_"+suffix
+	draftID, authorID := "rdf_"+suffix, attachmentFixtureAuthorID(suffix)
 	seedAttachmentDraft(t, ctx, fixture, draftID, authorID)
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_attachments (
@@ -5334,8 +5252,22 @@ func assertAttachmentBlobGCTerminalResult(
 	}
 }
 
+func attachmentFixtureAuthorID(label string) string {
+	digest := sha256.Sum256([]byte("attachment-fixture-author:" + label))
+	return "usr_" + hex.EncodeToString(digest[:12])
+}
+
 func seedAttachmentDraft(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, draftID, authorID string) {
 	t.Helper()
+	if err := recordauth.ValidateActorUserID(authorID); err != nil {
+		t.Fatalf("invalid attachment draft author %q: %v", authorID, err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.users(user_id, username, password_hash, display_name, role)
+		values ($1, $1, 'test-hash', 'Attachment fixture author', 'admin')
+		on conflict (user_id) do nothing`, authorID); err != nil {
+		t.Fatalf("seed attachment draft author %q: %v", authorID, err)
+	}
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_drafts (
 			draft_id, author_id, payload, payload_hash, draft_version,
@@ -5355,7 +5287,7 @@ func attachmentLifecycleReservationCommand(index int) attachments.ReserveUploadC
 		UploadID:          fmt.Sprintf("aup_lifecycle%d", index),
 		AttachmentID:      fmt.Sprintf("att_lifecycle%d", index),
 		DraftID:           "rdf_attlifecycle",
-		AuthorID:          "usr_attlifecycle",
+		AuthorID:          recordsPostgresDraftAuthorID,
 		DisplayName:       fmt.Sprintf("lifecycle-%d.txt", index),
 		MediaType:         "text/plain",
 		TransportKind:     attachments.TransportKindLocal,
@@ -5365,68 +5297,23 @@ func attachmentLifecycleReservationCommand(index int) attachments.ReserveUploadC
 	}
 }
 
-func completeAttachmentIntegrationUpload(
-	t *testing.T,
-	ctx context.Context,
-	repository *PostgresAttachmentRepository,
-	reserve attachments.ReserveUploadCommand,
-	object attachments.ObjectVersion,
-	fingerprint [sha256.Size]byte,
-	processorJobID string,
-) attachments.UploadMutationResult {
-	t.Helper()
-	if _, err := repository.PrepareUpload(ctx, attachments.PrepareUploadCommand{
-		ProjectID: reserve.ProjectID, UploadID: reserve.UploadID, AuthorID: reserve.AuthorID,
-	}); err != nil {
-		t.Fatalf("PrepareUpload(%s) error = %v", reserve.UploadID, err)
-	}
-	publicationIntent := preparePublishedAttachmentUploadIntent(t, ctx, repository, reserve, object)
-	if _, err := repository.RecordUploadedContent(ctx, attachments.RecordUploadedContentCommand{
-		ProjectID: reserve.ProjectID, UploadID: reserve.UploadID, AuthorID: reserve.AuthorID,
-		Object: object, PublicationIntent: publicationIntent,
-	}); err != nil {
-		t.Fatalf("RecordUploadedContent(%s) error = %v", reserve.UploadID, err)
-	}
-	command := attachments.CompleteUploadAndEnqueueCommand{
-		ProjectID: reserve.ProjectID, UploadID: reserve.UploadID, AuthorID: reserve.AuthorID,
-		ActualSizeBytes: object.SizeBytes, ActualSHA256: object.SHA256, Object: object,
-		CompletionFingerprint: fingerprint, ProcessorJobID: processorJobID,
-		ProcessorProfile: attachments.ProcessorProfileText, ProcessorMaxAttempts: 3,
-		ProcessorExpiresAt: reserve.ExpiresAt,
-	}
-	completed, err := repository.CompleteUploadAndEnqueue(ctx, command)
-	if err != nil {
-		t.Fatalf("CompleteUploadAndEnqueue(%s) error = %v", reserve.UploadID, err)
-	}
-	completedReplay, err := repository.CompleteUploadAndEnqueue(ctx, command)
-	if err != nil || completedReplay != completed {
-		t.Fatalf("CompleteUploadAndEnqueue(%s replay) = (%#v, %v), want %#v", reserve.UploadID, completedReplay, err, completed)
-	}
-	return completed
-}
-
 func preparePublishedAttachmentUploadIntent(
 	t *testing.T,
 	ctx context.Context,
+	fixture recordPlatformPostgresFixture,
 	repository *PostgresAttachmentRepository,
 	reserve attachments.ReserveUploadCommand,
 	object attachments.ObjectVersion,
 ) attachments.BlobPublicationIntent {
 	t.Helper()
-	var backend attachments.BackendKind
-	switch reserve.TransportKind {
-	case attachments.TransportKindLocal:
-		backend = attachments.BackendKindLocal
-	case attachments.TransportKindS3:
-		backend = attachments.BackendKindS3
-	default:
-		t.Fatalf("unsupported attachment publication transport %q", reserve.TransportKind)
+	if reserve.TransportKind != attachments.TransportKindS3 {
+		t.Fatal("database return fixture requires S3; local bytes must use a managed writer")
 	}
-	return preparePublishedAttachmentIntent(t, ctx, repository, attachments.BlobPublicationPrepareRequest{
+	return preparePublishedAttachmentIntent(t, ctx, fixture, repository, reserve.DraftID, attachments.BlobPublicationPrepareRequest{
 		ProjectID: reserve.ProjectID, OwnerKind: attachments.BlobPublicationOwnerUpload,
 		OwnerID: reserve.UploadID, OwnerGeneration: 1,
 		Target: attachments.BlobPublicationTarget{
-			Key: object.Key, SHA256: object.SHA256, SizeBytes: object.SizeBytes, BackendKind: backend,
+			Key: object.Key, SHA256: object.SHA256, SizeBytes: object.SizeBytes, BackendKind: attachments.BackendKindS3,
 		},
 		PublishExpiresAt: reserve.ExpiresAt,
 	}, object)
@@ -5435,14 +5322,16 @@ func preparePublishedAttachmentUploadIntent(
 func preparePublishedAttachmentPreviewIntent(
 	t *testing.T,
 	ctx context.Context,
+	fixture recordPlatformPostgresFixture,
 	repository *PostgresAttachmentRepository,
 	claim attachments.ProcessorClaim,
 	preview attachments.BlobObject,
 ) attachments.BlobPublicationIntent {
 	t.Helper()
-	return preparePublishedAttachmentIntent(t, ctx, repository, attachments.BlobPublicationPrepareRequest{
+	return preparePublishedAttachmentIntent(t, ctx, fixture, repository, claim.DraftID, attachments.BlobPublicationPrepareRequest{
 		ProjectID: claim.ProjectID, OwnerKind: attachments.BlobPublicationOwnerProcessorPreview,
 		OwnerID: claim.ProcessorJobID, OwnerGeneration: claim.OwnerGeneration,
+		ClaimOwnerID: claim.OwnerID, ClaimExpiresAt: claim.LeaseExpiresAt,
 		Target: attachments.BlobPublicationTarget{
 			Key: preview.Key, SHA256: preview.SHA256,
 			SizeBytes: preview.SizeBytes, BackendKind: preview.BackendKind,
@@ -5457,11 +5346,18 @@ func preparePublishedAttachmentPreviewIntent(
 func preparePublishedAttachmentIntent(
 	t *testing.T,
 	ctx context.Context,
+	fixture recordPlatformPostgresFixture,
 	repository *PostgresAttachmentRepository,
+	draftID string,
 	request attachments.BlobPublicationPrepareRequest,
 	object attachments.ObjectVersion,
 ) attachments.BlobPublicationIntent {
 	t.Helper()
+	// This database-only fixture supplies an S3 return event, not physical I/O
+	// evidence. Local fixtures and MinIO workflows exercise the real writer.
+	if request.Target.BackendKind != attachments.BackendKindS3 {
+		t.Fatal("S3 return fixture cannot create local provenance")
+	}
 	intent, err := repository.PrepareBlobPublication(ctx, request)
 	if err != nil {
 		t.Fatalf("PrepareBlobPublication(%s/%s) error = %v", request.OwnerKind, request.OwnerID, err)
@@ -5473,8 +5369,27 @@ func preparePublishedAttachmentIntent(
 		}
 		return intent
 	}
+	managed := NewPostgresLocalBlobRepository(fixture.openDirectRuntimePool(t, ctx, "s3-return-fixture", 2), nil, nil)
+	origin := attachments.WriteOrigin{Kind: string(request.OwnerKind), ID: request.OwnerID, Generation: request.OwnerGeneration, DraftID: &draftID, PublicationID: &intent.PublicationID}
+	if request.OwnerKind == attachments.BlobPublicationOwnerProcessorPreview {
+		origin.OwnerID, origin.OwnerGeneration, origin.OwnerExpiresAt = &request.ClaimOwnerID, &request.OwnerGeneration, &request.ClaimExpiresAt
+	}
+	binding := configuredTestS3Binding(t)
+	registration := attachments.WriteRegistration{WriteOrigin: origin, ObligationID: "rwo_" + strings.ReplaceAll(localBlobFixtureUUID(t), "-", ""), WriterInstance: localBlobFixtureUUID(t), RequestSeq: 1,
+		ProjectID: request.ProjectID, BackendKind: attachments.BackendKindS3, StorageBinding: &binding, Key: object.Key, SHA256: hex.EncodeToString(object.SHA256[:]), Size: object.SizeBytes}
+	if _, err := managed.RegisterWrite(ctx, registration); err != nil {
+		t.Fatal(err)
+	}
+	identity := attachments.WriteIdentity{ObligationID: registration.ObligationID, WriterInstance: registration.WriterInstance}
+	dispatchID := localBlobFixtureUUID(t)
+	if _, err := managed.DispatchWrite(ctx, attachments.WriteDispatch{WriteIdentity: identity, DispatchID: dispatchID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := managed.RecordWriteReturn(ctx, attachments.WriteReturn{WriteIdentity: identity, DispatchID: dispatchID, Outcome: "materialized", Key: object.Key, SHA256: registration.SHA256, Size: object.SizeBytes, Version: &object.VersionID}); err != nil {
+		t.Fatal(err)
+	}
 	published, err := repository.RecordBlobPublicationVersion(ctx, attachments.BlobPublicationVersionRequest{
-		Intent: intent, Object: object,
+		Intent: intent, Object: object, ObligationID: registration.ObligationID,
 	})
 	if err != nil {
 		t.Fatalf("RecordBlobPublicationVersion(%s/%s) error = %v", request.OwnerKind, request.OwnerID, err)
@@ -5569,11 +5484,15 @@ func seedAttachmentProcessorJob(
 		DisplayName:       displayName,
 		DeclaredMediaType: declaredMediaType,
 		DraftID:           "rdf_" + seed.Suffix,
-		AuthorID:          "usr_" + seed.Suffix,
+		AuthorID:          "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
 		Source:            seed.Source,
 		Profile:           seed.Profile,
 		MaxAttempts:       seed.MaxAttempts,
 		ExpiresAt:         seed.ExpiresAt,
+	}
+	if _, err := fixture.db.Exec(ctx, `insert into public.users(user_id,username,password_hash,display_name,role)
+		values ($1,'attachment-processor-author','test-hash','Attachment author','admin') on conflict(user_id) do nothing`, result.AuthorID); err != nil {
+		t.Fatalf("seed processor author: %v", err)
 	}
 	seedAttachmentDraft(t, ctx, fixture, result.DraftID, result.AuthorID)
 
@@ -5605,6 +5524,10 @@ func seedAttachmentProcessorJob(
 		transport = attachments.TransportKindS3
 	}
 	completionFingerprint := sha256.Sum256([]byte("completion-" + seed.Suffix))
+	initialUploadState := seed.UploadState
+	if seed.Source.BackendKind == attachments.BackendKindS3 {
+		initialUploadState = attachments.UploadStateCreated
+	}
 	tx, err := fixture.db.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin attachment processor seed %q: %v", seed.Suffix, err)
@@ -5619,7 +5542,7 @@ func seedAttachmentProcessorJob(
 		) values ($1, 'default', $2, $2, $3, $4, $5, $6, $7, $8, $8)`,
 		result.AttachmentID,
 		result.DraftID,
-		seed.UploadState,
+		initialUploadState,
 		result.DisplayName,
 		result.DeclaredMediaType,
 		seed.Source.SizeBytes,
@@ -5639,7 +5562,7 @@ func seedAttachmentProcessorJob(
 		result.AttachmentID,
 		result.DraftID,
 		result.AuthorID,
-		seed.UploadState,
+		initialUploadState,
 		transport,
 		seed.Source.SizeBytes,
 		seed.Source.SHA256[:],
@@ -5649,17 +5572,19 @@ func seedAttachmentProcessorJob(
 	); err != nil {
 		t.Fatalf("seed attachment processor upload %q: %v", seed.Suffix, err)
 	}
-	if _, err := tx.Exec(ctx, `
+	if seed.Source.BackendKind != attachments.BackendKindS3 {
+		if _, err := tx.Exec(ctx, `
 		insert into public.attachment_upload_parts (
 			upload_id, part_number, size_bytes, sha256_digest, object_version, created_at
 		) values ($1, 1, $2, $3, $4, $5)`,
-		result.UploadID,
-		seed.Source.SizeBytes,
-		seed.Source.SHA256[:],
-		seed.Source.ObjectVersion,
-		seed.CreatedAt,
-	); err != nil {
-		t.Fatalf("seed attachment processor upload part %q: %v", seed.Suffix, err)
+			result.UploadID,
+			seed.Source.SizeBytes,
+			seed.Source.SHA256[:],
+			seed.Source.ObjectVersion,
+			seed.CreatedAt,
+		); err != nil {
+			t.Fatalf("seed attachment processor upload part %q: %v", seed.Suffix, err)
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		insert into public.attachment_processor_jobs (
@@ -5699,6 +5624,29 @@ func seedAttachmentProcessorJob(
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit attachment processor seed %q: %v", seed.Suffix, err)
+	}
+	if seed.Source.BackendKind == attachments.BackendKindS3 {
+		repository := NewPostgresAttachmentRepository(fixture.openDirectRuntimePool(t, ctx, "processor-source-return", 2))
+		temporaryKey, err := attachments.NewBlobTemporaryKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.PrepareUpload(ctx, attachments.PrepareUploadCommand{ProjectID: "default", UploadID: result.UploadID, AuthorID: result.AuthorID, CandidateTemporaryObjectKey: temporaryKey}); err != nil {
+			t.Fatal(err)
+		}
+		object := attachments.ObjectVersion{Key: seed.Source.Key, VersionID: seed.Source.ObjectVersion, SHA256: seed.Source.SHA256, SizeBytes: seed.Source.SizeBytes}
+		intent := preparePublishedAttachmentUploadIntent(t, ctx, fixture, repository, attachments.ReserveUploadCommand{
+			ProjectID: "default", UploadID: result.UploadID, DraftID: result.DraftID, TransportKind: attachments.TransportKindS3, ExpiresAt: result.ExpiresAt,
+		}, object)
+		if _, err := repository.RecordUploadedContent(ctx, attachments.RecordUploadedContentCommand{ProjectID: "default", UploadID: result.UploadID, AuthorID: result.AuthorID, TemporaryObjectKey: temporaryKey, Object: object, PublicationIntent: intent}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.db.Exec(ctx, `update public.attachment_uploads set upload_state=$2,temporary_object_key=null where upload_id=$1`, result.UploadID, seed.UploadState); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.db.Exec(ctx, `update public.record_attachments set attachment_state=$2 where attachment_id=$1`, result.AttachmentID, seed.UploadState); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return result
 }

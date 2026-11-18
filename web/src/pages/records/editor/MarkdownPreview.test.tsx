@@ -41,6 +41,23 @@ describe('MarkdownPreview', () => {
     expect(screen.getByText('引用已失效')).toBeInTheDocument()
   })
 
+  it('shows unknown references as unconfirmed during publication without granting a link', () => {
+    const model = { version: DOCUMENT_MARKDOWN_VERSION_V1, nodes: [
+      { type: 'reference', kind: 'evidence', id: 'ev_known', children: [{ type: 'text', text: '已知证据' }] },
+      { type: 'reference', kind: 'evidence', id: 'ev_unknown', children: [{ type: 'text', text: '待确认证据' }] },
+    ] }
+    const source = '[已知证据](houfeng-evidence:ev_known)\n\n[待确认证据](houfeng-evidence:ev_unknown)'
+    for (const props of [{ model }, { source }]) {
+      const { unmount } = render(<MarkdownPreview {...props} references={[{ kind: 'evidence', id: 'ev_known' }]} pendingReferences />)
+      expect(screen.getByText('确认中')).toBeInTheDocument()
+      expect(screen.queryByText('引用已失效')).not.toBeInTheDocument()
+      expect(screen.getByText('已知证据').closest('.card--dim')).toBeNull()
+      expect(screen.getByText('待确认证据').closest('.card--dim')).not.toBeNull()
+      expect(screen.queryByRole('link', { name: /待确认证据/ })).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+
   it('falls back to sanitized source when the closed model is invalid', () => {
     render(
       <MarkdownPreview

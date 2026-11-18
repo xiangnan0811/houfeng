@@ -27,6 +27,7 @@ type Lifecycle string
 const (
 	LifecycleActive   Lifecycle = "active"
 	LifecycleArchived Lifecycle = "archived"
+	LifecycleTrashed  Lifecycle = "trashed"
 )
 
 type RecordType string
@@ -241,7 +242,7 @@ const (
 )
 
 func ValidateLifecycle(lifecycle Lifecycle) error {
-	if lifecycle != LifecycleActive && lifecycle != LifecycleArchived {
+	if lifecycle != LifecycleActive && lifecycle != LifecycleArchived && lifecycle != LifecycleTrashed {
 		return fmt.Errorf("%w: %q", ErrInvalidLifecycle, lifecycle)
 	}
 	return nil

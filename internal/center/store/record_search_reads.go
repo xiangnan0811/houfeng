@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/recordsearch"
 )
@@ -111,7 +112,7 @@ func (store *PostgresRecordSearchStore) ListSearchCandidates(
 				return fmt.Errorf("scan search candidate: %w", err)
 			}
 			candidate.UpdatedAt = candidate.UpdatedAt.UTC()
-			if !validStoredRecordIdentity(candidate.RecordID, "rec_") || candidate.UpdatedAt.IsZero() {
+			if !recordidentity.IsValid(candidate.RecordID) || candidate.UpdatedAt.IsZero() {
 				return fmt.Errorf("%w: candidate row", recordsearch.ErrInvalidSearchRequest)
 			}
 			candidates = append(candidates, candidate)
@@ -203,7 +204,7 @@ func buildRecordSearchCandidateQuery(page recordsearch.CandidatePage) (string, [
 		comparison, direction = ">", "asc"
 	}
 	if page.After != nil {
-		if page.After.UpdatedAt.IsZero() || !validStoredRecordIdentity(page.After.RecordID, "rec_") {
+		if page.After.UpdatedAt.IsZero() || !recordidentity.IsValid(page.After.RecordID) {
 			return "", nil, fmt.Errorf("%w: candidate position", recordsearch.ErrInvalidSearchRequest)
 		}
 		builder.require(fmt.Sprintf(

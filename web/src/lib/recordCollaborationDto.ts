@@ -1,4 +1,5 @@
 import { decodeCommentRenderModelV1 } from './commentMarkdown'
+import { isRecordId } from './recordIdentity'
 import type {
   RecordAction,
   RecordActionListResponse,
@@ -58,6 +59,12 @@ function prefixedID(value: unknown, prefix: string, allowEmpty = false): string 
   if (allowEmpty && candidate === '') return candidate
   const suffix = candidate.slice(prefix.length)
   if (!candidate.startsWith(prefix) || suffix.length < 1 || suffix.length > 64 || !/^[a-z0-9]+$/u.test(suffix)) invalid()
+  return candidate
+}
+
+function decodeRecordID(value: unknown): string {
+  const candidate = text(value, false)
+  if (!isRecordId(candidate)) invalid()
   return candidate
 }
 
@@ -130,7 +137,7 @@ export function decodeRecordAction(value: unknown): RecordAction {
 		Array.from(details).length > 4_096 || hasDisallowedMultilineControl(details)) invalid()
   return {
     action_id: prefixedID(item.action_id, 'ract_'),
-    record_id: prefixedID(item.record_id, 'rec_'),
+    record_id: decodeRecordID(item.record_id),
     version: integer(item.version),
     status,
     title,
@@ -157,7 +164,7 @@ export function decodeRecordActionMutation(value: unknown): RecordActionMutation
   if (eventKind === 'completed' && status !== 'completed') invalid()
   if (eventKind === 'cancelled' && status !== 'cancelled') invalid()
   return {
-    action_id: prefixedID(item.action_id, 'ract_'), record_id: prefixedID(item.record_id, 'rec_'),
+    action_id: prefixedID(item.action_id, 'ract_'), record_id: decodeRecordID(item.record_id),
     version: integer(item.version), status, event_kind: eventKind,
     replayed: booleanValue(item.replayed), changed_at: timestamp(item.changed_at),
   }
@@ -184,7 +191,7 @@ export function decodeRecordComment(value: unknown): RecordComment {
   if (timestampOrder(updatedAt) < timestampOrder(createdAt) ||
     (redactedAt !== null && timestampOrder(redactedAt) < timestampOrder(createdAt))) invalid()
   return {
-    comment_id: prefixedID(item.comment_id, 'rcm_'), record_id: prefixedID(item.record_id, 'rec_'),
+    comment_id: prefixedID(item.comment_id, 'rcm_'), record_id: decodeRecordID(item.record_id),
     author_id: userID(item.author_id), version: integer(item.version), state,
     body_markdown: body, render_model: renderModel,
     reply_to_comment_id: prefixedID(item.reply_to_comment_id, 'rcm_', true), mention_user_ids: mentions,
@@ -203,7 +210,7 @@ export function decodeRecordCommentMutation(value: unknown): RecordCommentMutati
   const eventKind = enumValue(item.event_kind, ['created', 'edited', 'redacted'])
   if ((eventKind === 'redacted') !== (state === 'redacted')) invalid()
   return {
-    comment_id: prefixedID(item.comment_id, 'rcm_'), record_id: prefixedID(item.record_id, 'rec_'),
+    comment_id: prefixedID(item.comment_id, 'rcm_'), record_id: decodeRecordID(item.record_id),
     version: integer(item.version), state, event_kind: eventKind,
     replayed: booleanValue(item.replayed), changed_at: timestamp(item.changed_at),
   }
@@ -225,7 +232,7 @@ export function decodeRecordWatch(value: unknown): RecordWatch {
     if (preference !== 'default' || hasSources || updatedAt !== null) invalid()
 	} else if (updatedAt === null) invalid()
   return {
-    record_id: prefixedID(item.record_id, 'rec_'), user_id: userID(item.user_id), version, preference,
+    record_id: decodeRecordID(item.record_id), user_id: userID(item.user_id), version, preference,
     sources: decodedSources, updated_at: updatedAt,
   }
 }
@@ -249,8 +256,8 @@ export function decodeRecordNotification(value: unknown): RecordNotification {
   ])
   const eventKind = enumValue(item.event_kind, notificationEvents)
   const subjectKind = enumValue(item.subject_kind, ['record', 'action', 'comment'])
-  const recordID = prefixedID(item.record_id, 'rec_')
-  const subjectID = subjectKind === 'record' ? prefixedID(item.subject_id, 'rec_')
+  const recordID = decodeRecordID(item.record_id)
+  const subjectID = subjectKind === 'record' ? decodeRecordID(item.subject_id)
     : subjectKind === 'action' ? prefixedID(item.subject_id, 'ract_') : prefixedID(item.subject_id, 'rcm_')
   const reason = enumValue(item.reason, ['owner', 'participant', 'assignee', 'mention', 'reply', 'follower', 'security'])
   const mandatory = booleanValue(item.mandatory)
@@ -276,8 +283,8 @@ export function decodeRecordNotificationList(value: unknown): RecordNotification
 export function decodeRecordNotificationTarget(value: unknown): RecordNotificationTarget {
   const item = objectValue(value, ['record_id', 'subject_id', 'subject_kind'])
   const subjectKind = enumValue(item.subject_kind, ['record', 'action', 'comment'])
-  const recordID = prefixedID(item.record_id, 'rec_')
-  const subjectID = subjectKind === 'record' ? prefixedID(item.subject_id, 'rec_')
+  const recordID = decodeRecordID(item.record_id)
+  const subjectID = subjectKind === 'record' ? decodeRecordID(item.subject_id)
     : subjectKind === 'action' ? prefixedID(item.subject_id, 'ract_') : prefixedID(item.subject_id, 'rcm_')
   if (subjectKind === 'record' && subjectID !== recordID) invalid()
   return { record_id: recordID, subject_kind: subjectKind, subject_id: subjectID }

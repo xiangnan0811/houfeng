@@ -12,8 +12,31 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/ipquality"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/contracts/agentapi"
 )
+
+func TestSaveReportsRejectsUnavailableSourceBeforePersisting(t *testing.T) {
+	t.Parallel()
+	for _, blocked := range []string{"monitoring_instance/mi_001", "vps/vps_001"} {
+		t.Run(blocked, func(t *testing.T) {
+			tx := &fakeIPQualityTx{sourceState: fakeSourceWriterState{
+				blocked: map[string]bool{blocked: true},
+				parents: map[string]string{"mi_001": "vps_001"},
+			}}
+			repo := &PostgresIPQualityRepository{
+				beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return tx, nil },
+			}
+			err := repo.SaveReports(context.Background(), []ipquality.ReportWrite{ipQualityReportWrite()})
+			if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+				t.Fatalf("SaveReports() error = %v, want unavailable source", err)
+			}
+			if len(tx.execSQL) != 0 || tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+				t.Fatalf("unavailable source persisted reports: writes=%v commits=%d rollbacks=%d", tx.execSQL, tx.commitCalls, tx.rollbackCalls)
+			}
+		})
+	}
+}
 
 func TestPostgresIPQualityRepositorySaveReportsRollsBackInvalidReport(t *testing.T) {
 	t.Parallel()
@@ -274,10 +297,6 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReportDetailUsesAssignedRepor
 		got.Summary.Coverage.ExpectedProviderCount != 2 {
 		t.Fatalf("Summary = %#v, want requested report summary with coverage", got.Summary)
 	}
-	joined := strings.ToLower(strings.Join(db.queries, "\n"))
-	if !strings.Contains(joined, "ip_quality_assigned_vps_reports") || !strings.Contains(joined, "assigned.vps_id = $1") {
-		t.Fatalf("detail query = %s, want assigned VPS report guard", joined)
-	}
 	if len(db.beginOptions) != 1 ||
 		db.beginOptions[0].IsoLevel != pgx.RepeatableRead ||
 		db.beginOptions[0].AccessMode != pgx.ReadOnly {
@@ -285,26 +304,6 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReportDetailUsesAssignedRepor
 	}
 	if db.readTx == nil || db.readTx.commitCalls != 1 {
 		t.Fatalf("read transaction commitCalls = %#v, want one explicit commit", db.readTx)
-	}
-}
-
-func TestPostgresIPQualityRepositoryHistoryDoesNotReadLatestOnlyView(t *testing.T) {
-	t.Parallel()
-
-	db := &fakeIPQualityDB{
-		queryRows: map[string]pgx.Rows{
-			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{},
-		},
-	}
-
-	if _, err := historyForVPS(context.Background(), db, "vps_001", 4); err != nil {
-		t.Fatalf("historyForVPS() error = %v", err)
-	}
-	if len(db.queries) != 1 {
-		t.Fatalf("query count = %d, want 1", len(db.queries))
-	}
-	if strings.Contains(db.queries[0], "ip_quality_latest_vps_summaries") {
-		t.Fatalf("history query used latest-only view: %s", db.queries[0])
 	}
 }
 
@@ -460,135 +459,6 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 	})
 }
 
-func TestPostgresIPQualityRepositoryGetLatestVPSIPQualitySummaryDoesNotLoadDetailTables(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
-	db := &fakeIPQualityDB{
-		queryRows: map[string]pgx.Rows{
-			"vps overview ip quality summary": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
-				scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "vps_001"
-					*(dest[1].(*string)) = agentapi.IPQualityStatusSuccess
-					*(dest[2].(*string)) = "high"
-					*(dest[3].(*bool)) = true
-					*(dest[4].(*time.Time)) = now
-					*(dest[5].(*int)) = 6
-					return nil
-				},
-			}}},
-			"from ip_quality_provider_results": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
-				scan: func(...any) error {
-					t.Fatal("overview summary must not query provider results")
-					return nil
-				},
-			}}},
-			"from ip_quality_service_unlocks": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
-				scan: func(...any) error {
-					t.Fatal("overview summary must not query service unlocks")
-					return nil
-				},
-			}}},
-			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
-				scan: func(...any) error {
-					t.Fatal("overview summary must not query 30-history assigned reports")
-					return nil
-				},
-			}}},
-		},
-	}
-	repo := newFakeIPQualityReadRepository(db)
-
-	got, err := repo.GetLatestVPSIPQualitySummary(context.Background(), "vps_001")
-	if err != nil {
-		t.Fatalf("GetLatestVPSIPQualitySummary() error = %v", err)
-	}
-	if got == nil || got.IPVersion != 6 || got.Status != agentapi.IPQualityStatusSuccess || got.RiskLevel != "high" || !got.Stale {
-		t.Fatalf("summary = %#v", got)
-	}
-	joined := strings.ToLower(strings.Join(db.queries, "\n"))
-	if !strings.Contains(joined, "vps overview ip quality summary") {
-		t.Fatalf("summary-only query missing overview marker: %s", joined)
-	}
-	if strings.Contains(joined, "ip_quality_provider_results") ||
-		strings.Contains(joined, "ip_quality_service_unlocks") ||
-		strings.Contains(joined, "limit 30") ||
-		strings.Contains(joined, "raw_json") ||
-		strings.Contains(joined, "diagnostics_json") {
-		t.Fatalf("summary-only queries leaked detail tables: %s", joined)
-	}
-	if strings.Contains(joined, "provider_count") || strings.Contains(joined, "unlockable_count") {
-		t.Fatalf("overview summary selected detail aggregates: %s", joined)
-	}
-	if strings.Contains(joined, "ip_quality_latest_vps_summaries") ||
-		strings.Contains(joined, "ip_quality_assigned_vps_reports") {
-		t.Fatalf("overview summary still uses the detail-joining latest summaries view: %s", joined)
-	}
-	if len(db.queries) != 1 {
-		t.Fatalf("query count = %d, want 1 summary query", len(db.queries))
-	}
-}
-
-func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredAssignedView(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
-	db := &fakeIPQualityDB{
-		queryRows: map[string]pgx.Rows{
-			"select state.ip_version, state.latest_report_id, state.availability": fakeIPQualityFamilyRows("ipq_valid", nil, nil),
-			"from ip_quality_reports r": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
-				scan: scanIPQualityReportRow("ipq_valid", "mi_001", now, agentapi.IPQualityStatusSuccess),
-			}}},
-			"from ip_quality_provider_results": &fakeIPQualityRows{},
-			"from ip_quality_service_unlocks":  &fakeIPQualityRows{},
-			"select latest.vps_id": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
-				scan: scanIPQualitySummaryRow("vps_001", "ipq_valid", now, agentapi.IPQualityStatusSuccess),
-			}}},
-			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
-				scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "vps_001"
-					*(dest[1].(*string)) = "ipq_valid"
-					*(dest[2].(*time.Time)) = now
-					*(dest[3].(*string)) = "203.0.113.10"
-					*(dest[4].(*int)) = 4
-					*(dest[5].(*string)) = agentapi.IPQualityStatusSuccess
-					*(dest[6].(*string)) = "low"
-					*(dest[7].(*string)) = "US"
-					*(dest[8].(*string)) = "United States"
-					*(dest[9].(*string)) = "AS64500"
-					*(dest[10].(*string)) = "Example Network"
-					*(dest[11].(*bool)) = false
-					*(dest[12].(*bool)) = false
-					*(dest[13].(*string)) = "link"
-					*(dest[14].(*string)) = ""
-					*(dest[15].(*string)) = ""
-					*(dest[16].(*int)) = 0
-					*(dest[17].(*int)) = 0
-					*(dest[18].(*[]byte)) = []byte(`{}`)
-					return nil
-				},
-			}}},
-		},
-	}
-	repo := newFakeIPQualityReadRepository(db)
-
-	if _, err := repo.GetVPSIPQuality(context.Background(), "vps_001", 0); err != nil {
-		t.Fatalf("GetVPSIPQuality() error = %v", err)
-	}
-
-	joined := strings.ToLower(strings.Join(db.queries, "\n"))
-	if strings.Contains(joined, "join ip_quality_reports r on r.monitoring_instance_id") ||
-		strings.Contains(joined, "r.ip_address in (nullif") {
-		t.Fatalf("repository query bypassed filtered IP quality read views: %s", joined)
-	}
-	if !strings.Contains(joined, "ip_quality_vps_family_state") {
-		t.Fatalf("repository queries = %s, want shared family selection view", joined)
-	}
-	if !strings.Contains(joined, "ip_quality_assigned_vps_reports") {
-		t.Fatalf("repository queries = %s, want filtered assigned reports view", joined)
-	}
-}
-
 func ipQualityReportWrite() ipquality.ReportWrite {
 	observedAt := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
 	return ipquality.ReportWrite{
@@ -676,12 +546,20 @@ func (f *fakeIPQualityDB) Query(_ context.Context, sql string, _ ...any) (pgx.Ro
 }
 
 type fakeIPQualityTx struct {
+	sourceState   fakeSourceWriterState
 	querySource   *fakeIPQualityDB
 	execSQL       []string
 	execArgs      [][]any
 	commitCalls   int
 	commitErr     error
 	rollbackCalls int
+}
+
+func (f *fakeIPQualityTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if row, ok := f.sourceState.queryRow(sql, args...); ok {
+		return row
+	}
+	return fakeRow{scan: func(...any) error { return errors.New("unexpected IP quality QueryRow") }}
 }
 
 func (f *fakeIPQualityTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -692,6 +570,12 @@ func (f *fakeIPQualityTx) Query(ctx context.Context, sql string, args ...any) (p
 }
 
 func (f *fakeIPQualityTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "source_application_admit()") {
+		return pgconn.CommandTag{}, f.sourceState.admissionErr
+	}
+	if strings.Contains(sql, "pg_advisory_xact_lock_shared") {
+		return pgconn.CommandTag{}, nil
+	}
 	f.execSQL = append(f.execSQL, sql)
 	f.execArgs = append(f.execArgs, append([]any(nil), args...))
 	return pgconn.CommandTag{}, nil

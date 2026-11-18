@@ -42,6 +42,8 @@ type recordsRunnerRunOptions struct {
 	bodyStatus             int
 	bodyStdout             string
 	bodyStderr             string
+	omitPass               string
+	gateResidue            bool
 	failContainer          string
 	failVolume             bool
 	failVolumeCreate       bool
@@ -237,6 +239,39 @@ func TestRecordsRunnerLifecycleSuccessUsesExactLabeledResourcesAndLeavesNoTempSt
 				t.Fatalf("successful lifecycle exit code = %d, stderr %q, want 0", code, stderr)
 			}
 			assertRecordsRunnerResourceLifecycle(t, spec, fake, "records-test-run")
+			assertRecordsRunnerTMPDirEmpty(t, fake)
+		})
+	}
+}
+
+func TestRecordsRunnerLifecycleRejectsMissingRequiredIntegrationEvidence(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		profile string
+		missing string
+	}{
+		{"local namespace", "integration local", "TestLocalBlobManagedNamespaceAndGuard/unknown_return_keeps_both_owned_names"},
+		{"local process cutpoint", "integration local", "TestPostgresIntegrationLocalBlobProcessRecovery/after-temp-link"},
+		{"local commit loss", "integration local", "TestPostgresIntegrationLocalWriteCommitLoss/dispatch_ack_lost_resolved"},
+		{"local mutation authority", "integration local", "TestPostgresIntegrationLocalMutationAuthority"},
+		{"local repeatable-read publication", "integration local", "TestPostgresIntegrationLocalPublicationRepeatableRead"},
+		{"local V1 nested authority", "integration local", "TestPostgresIntegrationRecordDeletionV1AdapterContinuation/authority_and_crash_cuts/command_authority_matrix/all_wrapper_acl"},
+		{"s3 publication", "integration s3", "TestPostgresMinIOIntegrationPublicationCleanupContract"},
+		{"s3 shared commit loss", "integration s3", "TestPostgresIntegrationLocalWriteCommitLoss/return_ack_lost_resolve_unavailable"},
+		{"s3 V1 nested portability", "integration s3", "TestPostgresMinIOIntegrationRecordDeletionV1Portability/historical_version_preserves_current/obligation_only"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			spec := recordsRunnerLifecycleSpecByName(t, tc.profile)
+			fake := newRecordsRunnerFakeToolchain(t)
+			code, stdout, stderr := runRecordsRunner(t, spec, fake, recordsRunnerRunOptions{omitPass: tc.missing})
+			if code != 1 || !strings.Contains(stderr, "required integration RUN/PASS evidence missing: ") || !strings.Contains(stderr, tc.missing) {
+				t.Fatalf("missing evidence exit code = %d, stdout %q, stderr %q", code, stdout, stderr)
+			}
+			assertRecordsRunnerCleanupAttempted(t, spec, fake)
 			assertRecordsRunnerTMPDirEmpty(t, fake)
 		})
 	}
@@ -854,150 +889,39 @@ func TestRecordsRunnerLifecycleDefaultRunIDComesFromOuterWorkspace(t *testing.T)
 	assertRecordsRunnerTMPDirEmpty(t, fake)
 }
 
-func TestRecordsRunnerLifecycleSourcesVerifyExactOwnershipAndDoNotMaskCleanup(t *testing.T) {
+func TestRecordsS3LifecycleGateCleansOnlyItsRunResidue(t *testing.T) {
 	t.Parallel()
 
-	root := recordsRunnerRepositoryRoot(t)
-	for _, rel := range []string{
-		filepath.Join("scripts", "run-records-integration.sh"),
-		filepath.Join("scripts", "run-records-recovery.sh"),
-		filepath.Join("scripts", "test-record-platform-integration.sh"),
-	} {
-		payload, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			t.Fatalf("read %s: %v", rel, err)
+	spec := recordsRunnerLifecycleSpec{
+		name:         "records s3 lifecycle gate",
+		relativePath: filepath.Join(recordsRunnerRepositoryRoot(t), "scripts", "test-records-s3-lifecycle.sh"),
+	}
+	fake := newRecordsRunnerFakeToolchain(t)
+	code, stdout, stderr := runRecordsRunner(t, spec, fake, recordsRunnerRunOptions{gateResidue: true})
+	if code != 1 || !strings.Contains(stderr, "leaked containers for run") || !strings.Contains(stderr, "leaked volumes for run") {
+		t.Fatalf("residue gate exit code = %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	log := readRecordsRunnerLog(t, fake.dockerLog)
+	if got := countRecordsRunnerLogLines(log, "rm\tfake-residue-container-"); got != 2 {
+		t.Fatalf("residue container removals = %d, log %q, want one per run", got, log)
+	}
+	if got := countRecordsRunnerLogLines(log, "volume-rm\tfake-residue-volume-"); got != 2 {
+		t.Fatalf("residue volume removals = %d, log %q, want one per run", got, log)
+	}
+	if strings.Contains(log, "fake-foreign-") {
+		t.Fatalf("gate touched foreign resources: %q", log)
+	}
+	for _, line := range strings.Split(log, "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 2 || (fields[0] != "ps" && fields[0] != "volume-ls") {
+			continue
 		}
-		script := string(payload)
-		trackAt := strings.Index(script, `containers+=("$name")`)
-		runAt := strings.Index(script, "docker run -d")
-		if trackAt < 0 || runAt < 0 || trackAt > runAt {
-			t.Fatalf("%s must track the exact container candidate before docker run", rel)
-		}
-		if !strings.Contains(script, `--label "com.houfeng.records.owner=$records_owner_id"`) {
-			t.Fatalf("%s must label each container with the workspace-unique owner", rel)
-		}
-		if strings.Contains(script, "docker run --rm") {
-			t.Fatalf("%s must not auto-remove lifecycle-managed containers", rel)
-		}
-		validateAt := strings.Index(script, "records_runner_validate_run_id_override")
-		toolsAt := strings.Index(script, "records_runner_require_signal_tools")
-		workspaceAt := strings.Index(script, "workspace=$(mktemp")
-		if validateAt < 0 || workspaceAt < 0 || validateAt > workspaceAt {
-			t.Fatalf("%s must reject an invalid run id before workspace creation", rel)
-		}
-		if toolsAt < 0 || toolsAt > workspaceAt {
-			t.Fatalf("%s must validate signal-tool support before workspace or Docker side effects", rel)
+		if !strings.HasPrefix(fields[1], "label=com.houfeng.records.run=houfeng-records-s3-lifecycle.") ||
+			(!strings.HasSuffix(fields[1], "-integration") && !strings.HasSuffix(fields[1], "-recovery")) {
+			t.Fatalf("gate queried resources outside its run labels: %q", line)
 		}
 	}
-	for _, rel := range []string{
-		filepath.Join("scripts", "run-records-integration.sh"),
-		filepath.Join("scripts", "run-records-recovery.sh"),
-	} {
-		payload, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			t.Fatalf("read %s: %v", rel, err)
-		}
-		script := string(payload)
-		nameAt := strings.Index(script, `minio_volume="houfeng-records-`)
-		trackAt := strings.Index(script, `volumes+=("$minio_volume")`)
-		createAt := strings.Index(script, "docker volume create")
-		verifyAt := strings.Index(script, `records_runner_verify_volume_ownership "$minio_volume"`)
-		mountAt := strings.Index(script, `start_minio "$minio_name"`)
-		if nameAt < 0 || trackAt < 0 || createAt < 0 || verifyAt < 0 || mountAt < 0 ||
-			!(nameAt < trackAt && trackAt < createAt && createAt < verifyAt && verifyAt < mountAt) {
-			t.Fatalf("%s must name and track the exact owner volume before create, then verify before MinIO mount", rel)
-		}
-		if strings.Contains(script, `minio_volume=$(docker volume create`) {
-			t.Fatalf("%s must not depend on post-create stdout to discover volume ownership", rel)
-		}
-	}
-
-	payload, err := os.ReadFile(filepath.Join(root, "scripts", "lib", "records-runner-lifecycle.sh"))
-	if err != nil {
-		t.Fatalf("read records runner lifecycle helper: %v", err)
-	}
-	helper := string(payload)
-	for _, want := range []string{
-		"docker container inspect",
-		"docker volume inspect",
-		"com.houfeng.records.owner",
-		`docker rm -f "$container_id"`,
-		"local signal_timeout=30",
-		"signal_timeout=5",
-		"signal_timeout=60",
-		"records_runner_pending_signal_status=$signal_status",
-		`kill -KILL "$watchdog_pid"`,
-		"records_runner_arm_cleanup_signals",
-		"trap '' INT TERM",
-	} {
-		if !strings.Contains(helper, want) {
-			t.Fatalf("records runner lifecycle helper must contain %q", want)
-		}
-	}
-	for _, forbidden := range []string{
-		"|| true",
-		">/dev/null 2>&1",
-		"docker system prune",
-		"docker volume prune",
-		"docker ps",
-		"docker volume ls",
-		"signal_timeout=0.7",
-		"trap - EXIT INT TERM",
-		`\"`,
-	} {
-		if strings.Contains(helper, forbidden) {
-			t.Fatalf("records runner lifecycle helper must not contain %q", forbidden)
-		}
-	}
-}
-
-func TestRecordsRunnerLifecycleRealGateUsesUniqueLabelsAndExactEmergencyCleanup(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(recordsRunnerRepositoryRoot(t), "scripts", "test-records-s3-lifecycle.sh")
-	payload, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read real records S3 lifecycle gate: %v", err)
-	}
-	script := string(payload)
-	for _, want := range []string{
-		`run-records-integration.sh" --profile s3`,
-		`run-records-recovery.sh" --profile s3 --all`,
-		`--filter "label=com.houfeng.records.run=$run_id"`,
-		"docker volume ls -q",
-		"docker rm -f \"$container\"",
-		"docker volume rm \"$volume\"",
-		"-u HOUFENG_RECORDS_KEEP_WORKSPACE",
-		"records_runner_kind=records-s3-lifecycle",
-		`source "$root/scripts/lib/records-runner-lifecycle.sh"`,
-		"setsid env",
-		"records_runner_body_pid=$!",
-		"trap 'records_runner_signal 130' INT",
-		"trap 'records_runner_signal 143' TERM",
-		"records_runner_arm_cleanup_signals",
-		"assert_no_residue",
-		"roots=(/tmp/houfeng-records-*)",
-		"find \"${roots[@]}\" -xdev -uid 0",
-		"-printf '%p\\t%U:%G\\t%s\\t%T@\\n'",
-		"-uid 0",
-	} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("real records S3 lifecycle gate missing %q", want)
-		}
-	}
-	for _, forbidden := range []string{
-		"|| true",
-		"docker system prune",
-		"docker volume prune",
-		`--filter "name=`,
-		`rm -rf /tmp`,
-		"-maxdepth 1",
-		"trap - EXIT INT TERM",
-	} {
-		if strings.Contains(script, forbidden) {
-			t.Fatalf("real records S3 lifecycle gate must not contain %q", forbidden)
-		}
-	}
+	assertRecordsRunnerTMPDirEmpty(t, fake)
 }
 
 func recordsRunnerLifecycleSpecs(t *testing.T) []recordsRunnerLifecycleSpec {
@@ -1166,6 +1090,156 @@ then
     sleep 1
   done
 fi
+# This command is a lifecycle test double, not integration-test evidence.
+# Emit selected test names so the real profile runner still validates its report.
+python3 - "$@" <<'PY'
+import glob
+import os
+import re
+import sys
+
+args = sys.argv[1:]
+if "-v" in args and "-run" in args:
+    selector = re.compile(args[args.index("-run") + 1])
+    declarations = re.compile(r"(?m)^func (Test[A-Za-z0-9_]*)\s*\(")
+    omitted = os.environ.get("HOUFENG_RECORDS_FAKE_OMIT_PASS", "")
+    table_subtests = {
+        "TestLocalBlobStoreFailureCutpointsPreserveOwnedRecoveryTargets": [
+            "after-temp-create", "after-copy", "after-file-sync", "before-publish", "after-publish",
+        ],
+        "TestPostgresIntegrationLocalBlobProcessRecovery": [
+            "after-temp-open", "after-temp-identity", "after-temp-registration", "after-temp-link",
+            "after-file-sync", "after-publish", "after-delete",
+        ],
+        "TestPostgresIntegrationLocalWriteCommitLoss": [
+            "dispatch_ack_lost_resolved", "dispatch_ack_lost_resolve_unavailable",
+            "return_ack_lost_resolved", "return_ack_lost_resolve_unavailable",
+        ],
+        # These are synthetic lifecycle-fixture outputs. The continuation uses
+        # helpers and table-driven nested tests that literal t.Run scans miss.
+        "TestPostgresIntegrationRecordDeletionV1AdapterContinuation": """
+            client_event_and_outbox
+            known_local_and_shared_handoff
+            unresolved_inventory_no_dispatch
+            authority_and_crash_cuts
+            reference_serialization_and_terminal_sets
+            unresolved_inventory_no_dispatch/historical_timestamp/finite_producer
+            unresolved_inventory_no_dispatch/historical_timestamp/historical_negative_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/artifact_negative_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/obligation_positive_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/obligation_negative_infinity
+            unresolved_inventory_no_dispatch/nonfinite_sources/persisted_manifest_nonfinite_artifact
+            client_event_and_outbox/late_provider_and_rollback/started_late_provider_root_independent
+            client_event_and_outbox/late_provider_and_rollback/client_comparison_rollback_atomic
+            authority_and_crash_cuts/physical_crash_cuts/claim_commit_unknown
+            authority_and_crash_cuts/physical_crash_cuts/bind_commit_unknown
+            authority_and_crash_cuts/physical_crash_cuts/physical_return_loss_restart
+            authority_and_crash_cuts/physical_crash_cuts/owner_expiry_receipt_rollback
+            authority_and_crash_cuts/physical_crash_cuts/closed_no_final_sources
+            authority_and_crash_cuts/physical_crash_cuts/resolve_no_lease_extension
+            authority_and_crash_cuts/command_authority_matrix/all_wrapper_acl
+            authority_and_crash_cuts/command_authority_matrix/all_wrong_authority_no_effects
+            authority_and_crash_cuts/command_authority_matrix/local_claim_tuple_tamper
+            authority_and_crash_cuts/command_authority_matrix/verify_readonly_missing_proof
+            reference_serialization_and_terminal_sets/genuine_shared_archive/same_statement_last_owners
+            reference_serialization_and_terminal_sets/genuine_shared_archive/retained_artifact_and_obligation_identity
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/attachment_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/upload_part_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/artifact_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/obligation_only
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/handoff_order_and_prerequisites
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/last_owner_serialization
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/parent_route_and_early_constraint_invalidation
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/pending_key_and_distinct_identity
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/creator_first
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/deduplicated_first
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_distinct_owners
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_distinct_owners/read_committed
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_distinct_owners/repeatable_read
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_independent_exports
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_independent_exports/read_committed
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/concurrent_independent_exports/repeatable_read
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/unknown_writer
+            reference_serialization_and_terminal_sets/isolated_owner_handoffs/independent_same_version_local/parent_route_and_creator_identity
+            reference_serialization_and_terminal_sets/epoch_serialization/no_manifest_default_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/snapshot_before_prepare_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/snapshot_before_prepare_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/prepare_before_writer/default_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/prepare_before_writer/default_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/writer_before_prepare/default_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/writer_before_prepare/default_repeatable_read
+            reference_serialization_and_terminal_sets/epoch_serialization/ordinary_gc_unrelated_waits/default_read_committed
+            reference_serialization_and_terminal_sets/epoch_serialization/ordinary_gc_unrelated_waits/default_repeatable_read
+            reference_serialization_and_terminal_sets/nine_receipt_duplicate_target
+            reference_serialization_and_terminal_sets/nine_receipt_extra_artifact
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/orphan_pending_task
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/duplicate_identity_task
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/missing_portability_receipt
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/forged_portability_receipt
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/physical_proof_tamper
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/task_inventory
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/task_command
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/registered_task
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/source_snapshot
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/artifact_snapshot
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/sealed_link
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/target
+            reference_serialization_and_terminal_sets/nine_receipt_terminal_control/manifest
+        """.split(),
+        "TestPostgresMinIOIntegrationManagedWriteSourceBinding": ["artifact", "obligation"],
+        "TestPostgresMinIOIntegrationRecordDeletionV1Portability": """
+            historical_version_preserves_current
+            historical_version_preserves_current/artifact
+            historical_version_preserves_current/obligation_only
+            same_object_artifact_dedup
+            independent_same_version_owners
+            independent_same_version_owners/carry_and_delete
+            independent_same_version_owners/prepare_commit_unknown
+            independent_same_version_owners/guarded_negative_inputs
+            independent_same_version_owners/guarded_negative_inputs/forged_predecessor_evidence
+            independent_same_version_owners/guarded_negative_inputs/altered_binding_or_version
+            independent_same_version_owners/guarded_negative_inputs/assigned_elsewhere
+            independent_same_version_owners/guarded_negative_inputs/absent_carried_source
+            independent_same_version_owners/concurrent_successor_prepares
+            shared_archive_final_handoff
+            unresolved_sources_no_dispatch
+            unresolved_sources_no_dispatch/legacy_null_route_and_version
+            unresolved_sources_no_dispatch/remote_unknown
+            claim_readback_and_tamper
+            prepare_commit_unknown
+            prepare_commit_unknown/prepare
+            prepare_commit_unknown/claim
+            unconfirmed_candidate_no_io
+            unconfirmed_candidate_no_io/prepare
+            unconfirmed_candidate_no_io/claim
+            delete_ack_loss_process_restart
+            route_binding_mismatch
+            route_post_io_identity_mismatch
+        """.split(),
+    }
+    for package in (arg for arg in args if arg.startswith("./") and os.path.isdir(arg)):
+        for path in sorted(glob.glob(os.path.join(package, "*_test.go"))):
+            with open(path, encoding="utf-8") as source:
+                text = source.read()
+            matches = list(declarations.finditer(text))
+            for index, match in enumerate(matches):
+                name = match.group(1)
+                if not selector.search(name):
+                    continue
+                end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+                children = re.findall(r'\bt\.Run\(\s*"([^"]+)"', text[match.end():end])
+                children.extend(table_subtests.get(name, ()))
+                print("=== RUN   " + name)
+                for child in dict.fromkeys(children):
+                    child = name + "/" + re.sub(r"\s", "_", child)
+                    print("=== RUN   " + child)
+                    if child != omitted:
+                        print("    --- PASS: " + child + " (0.00s)")
+                if name != omitted:
+                    print("--- PASS: " + name + " (0.00s)")
+PY
 printf '%s' "${HOUFENG_RECORDS_FAKE_BODY_STDOUT-}"
 printf '%s' "${HOUFENG_RECORDS_FAKE_BODY_STDERR-}" >&2
 exit "${HOUFENG_RECORDS_FAKE_BODY_STATUS:-0}"
@@ -1317,6 +1391,21 @@ case "$command" in
           "$(label_value "$labels" com.houfeng.records.owner)"
         ;;
       ls)
+        if [ "${HOUFENG_RECORDS_FAKE_GATE_RESIDUE-}" = "1" ]
+        then
+          filter=${!#}
+          printf 'volume-ls\t%s\n' "$filter" >> "$log"
+          case "$filter" in
+            label=com.houfeng.records.run=*)
+              run_id=${filter#label=com.houfeng.records.run=}
+              if /usr/bin/awk -F '\t' -v run_id="$run_id" '$1 == "volume-create" && index("," $3 ",", ",com.houfeng.records.run=" run_id ",") { found=1 } END { exit !found }' "$log"
+              then
+                printf 'fake-residue-volume-%s\n' "$run_id"
+              fi
+              ;;
+            *) printf 'fake-foreign-volume\n' ;;
+          esac
+        fi
         ;;
       *)
         exit 2
@@ -1449,7 +1538,24 @@ case "$command" in
     fi
 	printf 'rm-complete\t%s\n' "$name" >> "$log"
     ;;
-  logs|ps)
+  ps)
+    if [ "${HOUFENG_RECORDS_FAKE_GATE_RESIDUE-}" = "1" ]
+    then
+      filter=${!#}
+      printf 'ps\t%s\n' "$filter" >> "$log"
+      case "$filter" in
+        label=com.houfeng.records.run=*)
+          run_id=${filter#label=com.houfeng.records.run=}
+          if /usr/bin/awk -F '\t' -v run_id="$run_id" '$1 == "run" && index("," $4 ",", ",com.houfeng.records.run=" run_id ",") { found=1 } END { exit !found }' "$log"
+          then
+            printf 'fake-residue-container-%s\n' "$run_id"
+          fi
+          ;;
+        *) printf 'fake-foreign-container\n' ;;
+      esac
+    fi
+    ;;
+  logs)
     ;;
   *)
     exit 2
@@ -1593,6 +1699,8 @@ func recordsRunnerEnvironment(fake *recordsRunnerFakeToolchain, options recordsR
 		"HOUFENG_RECORDS_FAKE_BODY_STATUS":              {},
 		"HOUFENG_RECORDS_FAKE_BODY_STDOUT":              {},
 		"HOUFENG_RECORDS_FAKE_BODY_STDERR":              {},
+		"HOUFENG_RECORDS_FAKE_OMIT_PASS":                {},
+		"HOUFENG_RECORDS_FAKE_GATE_RESIDUE":             {},
 		"HOUFENG_RECORDS_FAKE_FAIL_CONTAINER":           {},
 		"HOUFENG_RECORDS_FAKE_FAIL_VOLUME":              {},
 		"HOUFENG_RECORDS_FAKE_FAIL_WORKSPACE":           {},
@@ -1626,6 +1734,8 @@ func recordsRunnerEnvironment(fake *recordsRunnerFakeToolchain, options recordsR
 		fmt.Sprintf("HOUFENG_RECORDS_FAKE_BODY_STATUS=%d", options.bodyStatus),
 		"HOUFENG_RECORDS_FAKE_BODY_STDOUT="+options.bodyStdout,
 		"HOUFENG_RECORDS_FAKE_BODY_STDERR="+options.bodyStderr,
+		"HOUFENG_RECORDS_FAKE_OMIT_PASS="+options.omitPass,
+		fmt.Sprintf("HOUFENG_RECORDS_FAKE_GATE_RESIDUE=%d", boolInt(options.gateResidue)),
 		"HOUFENG_RECORDS_FAKE_FAIL_CONTAINER="+options.failContainer,
 		fmt.Sprintf("HOUFENG_RECORDS_FAKE_FAIL_VOLUME=%d", boolInt(options.failVolume)),
 		"HOUFENG_RECORDS_FAKE_FAIL_WORKSPACE="+options.failWorkspace,

@@ -16,6 +16,7 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/records"
 )
 
@@ -47,7 +48,7 @@ func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 ) error {
 	preparation := committed.EvidencePreparation
 	if ctx == nil || nilRecordEvidenceParticipantTx(tx) ||
-		!validEvidenceStoreID(committed.Result.RecordID, "rec_") ||
+		!recordidentity.IsValid(committed.Result.RecordID) ||
 		!validEvidenceStoreID(committed.Result.RevisionID, "rrv_") ||
 		preparation.ValidateForRecord(committed.Result.RecordID) != nil ||
 		!slices.Equal(preparation.SnapshotIDs(), committed.Input.EvidenceSnapshotIDs()) {
@@ -96,17 +97,30 @@ func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 		if err := insertEvidenceCopyLineage(ctx, tx, copy.SnapshotID(), copy.CopiedFromSnapshotID(), evidence.ComparisonCopyReason); err != nil {
 			return err
 		}
+		if _, err := tryIndexInheritedComparisonResult(ctx, tx, copy.RecordID(), copy.SnapshotID(), copy.Snapshot(), copy.CopiedFromSnapshotID()); err != nil {
+			return err
+		}
 	}
 	if !save.Result.Empty() {
 		if err := insertEvidenceSnapshotRow(ctx, tx, save.Result.RecordID(), save.Result.SnapshotID(), save.Result.Snapshot()); err != nil {
 			return err
 		}
+		if err := insertNativeComparisonDependencies(ctx, tx, save); err != nil {
+			return err
+		}
 	}
 	for _, item := range imported {
-		if _, err := persistEvidencePayloadOnTx(ctx, tx, item.Snapshot()); err != nil {
+		route := item.ImportRoute()
+		if _, err := persistEvidencePayloadOnTx(ctx, tx, evidencePayloadCommandRoute{
+			Route: "import", ActorID: committed.Input.AuthorID(), RecordID: item.RecordID(), SnapshotID: item.SnapshotID(),
+			ImportJobID: route.ImportJobID, ImportPlanID: route.ImportPlanID, RevisionID: committed.Result.RevisionID,
+		}, item.Snapshot()); err != nil {
 			return err
 		}
 		if err := insertEvidenceSnapshotRow(ctx, tx, item.RecordID(), item.SnapshotID(), item.Snapshot()); err != nil {
+			return err
+		}
+		if _, err := tryIndexInheritedComparisonResult(ctx, tx, item.RecordID(), item.SnapshotID(), item.Snapshot(), ""); err != nil {
 			return err
 		}
 	}

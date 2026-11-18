@@ -9,6 +9,8 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -29,6 +31,7 @@ type applicationRevisionService interface {
 
 type applicationLifecycleService interface {
 	ChangeLifecycle(context.Context, RecordLifecycleRequest) (RecordLifecycleResult, error)
+	ChangeTrashState(context.Context, RecordTrashStateRequest) (RecordLifecycleResult, error)
 }
 
 type applicationDraftService interface {
@@ -184,6 +187,7 @@ type RecordRestoreRequest struct {
 type RecordCreateRequest struct {
 	Actor               recordauth.ActorScope
 	RecordID            string
+	Allocation          *recordbirth.Allocation
 	DraftID             string
 	DraftETag           DraftETag
 	Values              CompleteRevisionValues
@@ -213,13 +217,27 @@ type RecordLifecycleChangeRequest struct {
 	IdempotencyKey  string
 }
 
+type RecordTrashStateChangeRequest struct {
+	Actor              recordauth.ActorScope
+	RecordID           string
+	CurrentRevisionID  string
+	LockVersion        uint64
+	AuthorizationEpoch uint64
+	TargetLifecycle    Lifecycle
+	IdempotencyKey     string
+}
+
 func (application *Application) CreateRecord(
 	ctx context.Context,
 	request RecordCreateRequest,
 ) (RevisionCommitResult, error) {
+	if request.Allocation != nil && request.Allocation.Request.Purpose == recordbirth.PurposeImport {
+		return RevisionCommitResult{}, fmt.Errorf("%w: import allocation on create", ErrInvalidApplicationRequest)
+	}
 	return application.saveRevision(ctx, RevisionSaveRequest{
 		Actor:               request.Actor,
 		RecordID:            request.RecordID,
+		Allocation:          request.Allocation,
 		DraftID:             request.DraftID,
 		DraftETag:           request.DraftETag,
 		Values:              request.Values,
@@ -285,13 +303,33 @@ func (application *Application) ChangeLifecycle(
 	})
 }
 
+// ChangeTrashState is an internal application operation. It does not enable a
+// trash HTTP endpoint or permanent deletion.
+func (application *Application) ChangeTrashState(
+	ctx context.Context,
+	request RecordTrashStateChangeRequest,
+) (RecordLifecycleResult, error) {
+	if ctx == nil || application == nil || nilRevisionServiceDependency(application.lifecycle) ||
+		application.options.validate() != nil {
+		return RecordLifecycleResult{}, ErrInvalidApplicationRequest
+	}
+	return application.lifecycle.ChangeTrashState(ctx, RecordTrashStateRequest{
+		Actor: request.Actor, RecordID: request.RecordID, CurrentRevisionID: request.CurrentRevisionID,
+		LockVersion: request.LockVersion, AuthorizationEpoch: request.AuthorizationEpoch,
+		TargetLifecycle: request.TargetLifecycle, IdempotencyKey: request.IdempotencyKey,
+		IdempotencyOwnerID: application.options.IdempotencyOwnerID,
+		OwnerLeaseDuration: application.options.OwnerLeaseDuration,
+		IdempotencyTTL:     application.options.IdempotencyTTL, OutboxTTL: application.options.OutboxTTL,
+	})
+}
+
 func (application *Application) RestoreRevision(
 	ctx context.Context,
 	request RecordRestoreRequest,
 ) (RevisionCommitResult, error) {
 	if ctx == nil || application == nil || nilRevisionServiceDependency(application.read) ||
 		nilRevisionServiceDependency(application.revisions) || application.options.validate() != nil ||
-		!validRecordRootID(request.RecordID) || !validRevisionID(request.RevisionID) {
+		!recordidentity.IsValid(request.RecordID) || !validRevisionID(request.RevisionID) {
 		return RevisionCommitResult{}, ErrInvalidApplicationRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)

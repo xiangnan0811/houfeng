@@ -11,6 +11,8 @@ import (
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -24,6 +26,7 @@ var ErrInvalidRevisionServiceRequest = errors.New("invalid revision service requ
 type RevisionSaveRequest struct {
 	Actor               recordauth.ActorScope
 	RecordID            string
+	Allocation          *recordbirth.Allocation
 	BaseRevisionID      string
 	LockVersion         uint64
 	AuthorizationEpoch  uint64
@@ -68,17 +71,19 @@ type RevisionService struct {
 	subjects SubjectAdapterRegistry
 	current  CurrentRecordAuthorizationSource
 	store    RevisionCommitStore
+	birth    *recordbirth.Coordinator
 }
 
 func NewRevisionService(
 	subjects SubjectAdapterRegistry,
 	current CurrentRecordAuthorizationSource,
 	store RevisionCommitStore,
+	birth *recordbirth.Coordinator,
 ) (*RevisionService, error) {
 	if nilRevisionServiceDependency(current) || nilRevisionServiceDependency(store) {
 		return nil, fmt.Errorf("%w: dependency", ErrInvalidRevisionServiceRequest)
 	}
-	return &RevisionService{subjects: subjects, current: current, store: store}, nil
+	return &RevisionService{subjects: subjects, current: current, store: store, birth: birth}, nil
 }
 
 func (service *RevisionService) SaveRevision(
@@ -113,14 +118,22 @@ func (service *RevisionService) SaveRevisions(
 		}
 		commands = append(commands, command)
 	}
+	var results []RevisionCommitResult
+	var err error
 	if len(commands) == 1 {
-		result, err := service.store.CommitRevision(ctx, commands[0])
-		if err != nil {
-			return nil, err
+		var result RevisionCommitResult
+		result, err = service.store.CommitRevision(ctx, commands[0])
+		if err == nil {
+			results = []RevisionCommitResult{result}
 		}
-		return []RevisionCommitResult{result}, nil
+	} else {
+		results, err = service.store.CommitRevisions(ctx, commands)
 	}
-	return service.store.CommitRevisions(ctx, commands)
+	if err != nil {
+		return nil, err
+	}
+	service.confirmCommittedBirths(ctx, commands, results)
+	return results, nil
 }
 
 func (service *RevisionService) SaveRevisionsFinishing(
@@ -134,6 +147,16 @@ func (service *RevisionService) SaveRevisionsFinishing(
 	if len(requests) == 0 || finish.Validate() != nil {
 		return nil, fmt.Errorf("%w: finish", ErrInvalidRevisionServiceRequest)
 	}
+	finishActorDigest := finish.Actor.CanonicalHash()
+	for _, request := range requests {
+		actor, err := recordauth.NormalizeActorScope(request.Actor)
+		if err != nil || actor.CanonicalHash() != finishActorDigest {
+			return nil, ErrInvalidRevisionCommand
+		}
+		if request.Allocation != nil && request.Allocation.Request.Purpose != recordbirth.PurposeImport {
+			return nil, fmt.Errorf("%w: import allocation purpose", ErrInvalidRevisionServiceRequest)
+		}
+	}
 	commands := make([]RevisionCommitCommand, 0, len(requests))
 	for _, request := range requests {
 		command, err := service.prepareRevisionCommit(ctx, request)
@@ -142,7 +165,29 @@ func (service *RevisionService) SaveRevisionsFinishing(
 		}
 		commands = append(commands, command)
 	}
-	return service.store.CommitRevisionsFinishing(ctx, commands, finish)
+	results, err := service.store.CommitRevisionsFinishing(ctx, commands, finish)
+	if err != nil {
+		return nil, err
+	}
+	service.confirmCommittedBirths(ctx, commands, results)
+	return results, nil
+}
+
+// Confirmation follows the APP commit. A failed or uncertain W2 call leaves
+// the committed result intact and can be retried with the same allocation.
+func (service *RevisionService) confirmCommittedBirths(ctx context.Context, commands []RevisionCommitCommand, results []RevisionCommitResult) {
+	for index := range results {
+		if index >= len(commands) {
+			break
+		}
+		command := commands[index]
+		if command.BirthPermit.AllocationID == "" || recordidentity.Classify(command.RecordID) != recordidentity.Certifiable {
+			continue
+		}
+		if results[index].RecordID != command.RecordID || service.birth == nil || service.birth.ConfirmCreate(ctx, command.RecordID) != nil {
+			results[index].CertificationPending = true
+		}
+	}
 }
 
 func (service *RevisionService) prepareRevisionCommit(
@@ -220,6 +265,7 @@ func (service *RevisionService) prepareRevisionCommit(
 		return RevisionCommitCommand{}, fmt.Errorf("%w: fingerprint", ErrInvalidRevisionServiceRequest)
 	}
 	command := RevisionCommitCommand{
+		Actor:               actor.Clone(),
 		RecordID:            request.RecordID,
 		BaseRevisionID:      request.BaseRevisionID,
 		LockVersion:         request.LockVersion,
@@ -246,6 +292,43 @@ func (service *RevisionService) prepareRevisionCommit(
 	if err := command.Validate(); err != nil {
 		return RevisionCommitCommand{}, err
 	}
+	if operation == recordplatform.OperationKindRecordCreate && request.Allocation != nil {
+		allocation := *request.Allocation
+		if service.birth == nil || allocation.Validate() != nil || allocation.RecordID != request.RecordID ||
+			allocation.Request.ProjectID != string(actor.ProjectID) || allocation.Request.ActorID != actor.UserID ||
+			allocation.Request.ActorScopeDigest != actor.CanonicalHash() {
+			return RevisionCommitCommand{}, fmt.Errorf("%w: birth allocation", ErrInvalidRevisionServiceRequest)
+		}
+		revisionID, revisionErr := command.RevisionID()
+		requestFingerprint, fingerprintErr := fingerprint.PersistedBytes()
+		if revisionErr != nil || fingerprintErr != nil {
+			return RevisionCommitCommand{}, fmt.Errorf("%w: birth commitment", ErrInvalidRevisionServiceRequest)
+		}
+		creation := recordbirth.InitialCreation{
+			ReservationID:      allocation.ReservationID,
+			RecordID:           request.RecordID,
+			RevisionID:         revisionID,
+			AuthorID:           actor.UserID,
+			CanonicalHash:      input.CanonicalHash(),
+			RequestFingerprint: requestFingerprint,
+		}
+		permit, err := service.birth.PrepareCreate(ctx, allocation.Request, creation)
+		if err != nil {
+			return RevisionCommitCommand{}, fmt.Errorf("prepare record birth: %w", err)
+		}
+		if permit.AllocationID != allocation.AllocationID || permit.ReservationID != allocation.ReservationID ||
+			permit.RecordID != allocation.RecordID || permit.Creation != creation {
+			return RevisionCommitCommand{}, fmt.Errorf("%w: birth permit", ErrInvalidRevisionServiceRequest)
+		}
+		command.BirthRequest, command.BirthPermit = allocation.Request, permit
+	} else if operation == recordplatform.OperationKindRecordCreate && recordidentity.Classify(request.RecordID) != recordidentity.Legacy {
+		return RevisionCommitCommand{}, fmt.Errorf("%w: birth allocation required", ErrInvalidRevisionServiceRequest)
+	} else if operation != recordplatform.OperationKindRecordCreate && request.Allocation != nil {
+		return RevisionCommitCommand{}, fmt.Errorf("%w: allocation on update", ErrInvalidRevisionServiceRequest)
+	}
+	if err := command.Validate(); err != nil {
+		return RevisionCommitCommand{}, err
+	}
 	return command, nil
 }
 
@@ -256,7 +339,7 @@ func validateRevisionSaveRequest(
 	if err != nil {
 		return recordauth.ActorScope{}, nil, "", "", fmt.Errorf("%w: actor", ErrInvalidRevisionServiceRequest)
 	}
-	if !validRecordRootID(request.RecordID) || len(request.Values.Subjects) != 0 || len(request.Values.EvidenceSnapshotIDs) != 0 {
+	if !recordidentity.IsValid(request.RecordID) || len(request.Values.Subjects) != 0 || len(request.Values.EvidenceSnapshotIDs) != 0 {
 		return recordauth.ActorScope{}, nil, "", "", fmt.Errorf("%w: record or client subject evidence", ErrInvalidRevisionServiceRequest)
 	}
 	_, draftETagErr := request.DraftETag.Digest()

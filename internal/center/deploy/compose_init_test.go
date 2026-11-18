@@ -14,6 +14,7 @@ import (
 
 	"houfeng/internal/center/platformmigrate"
 	"houfeng/internal/center/recordauthority"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -31,6 +32,8 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 	runtimePool := &pgxpool.Pool{}
 	var events []string
 	err = initializeComposeWithDependencies(t.Context(), config, composeInitDependencies{
+		withMaintenance:   testComposeMaintenance,
+		verifyCredentials: testComposeCredentials,
 		openPostgres: func(_ context.Context, endpoint composePostgresEndpoint) (*pgxpool.Pool, error) {
 			events = append(events, "open:"+endpoint.Role)
 			switch endpoint.Role {
@@ -53,6 +56,9 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 				if endpoint.Password != config.Passwords.Runtime {
 					t.Fatal("runtime opener received wrong password")
 				}
+				if endpoint.LaunchDigest != ([32]byte{1}) {
+					t.Fatal("runtime opener did not receive the verified launch digest")
+				}
 				return runtimePool, nil
 			default:
 				t.Fatalf("unexpected PostgreSQL login role %q", endpoint.Role)
@@ -73,7 +79,7 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 				t.Fatal("closed unknown PostgreSQL pool")
 			}
 		},
-		prepareAuthority: func(_ context.Context, pool *pgxpool.Pool, root string) (recordauthority.VerifiedComposeState, error) {
+		prepareAuthority: func(_ context.Context, pool *pgxpool.Pool, root string, _ *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 			events = append(events, "prepare-authority")
 			if pool != bootstrapPool || root != config.AuthorityStateRoot {
 				t.Fatal("authority preparation did not use bootstrap pool and fixed state root")
@@ -83,16 +89,17 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 		provisionBootstrap: func(_ context.Context, pool *pgxpool.Pool, got platformmigrate.ComposeBootstrapConfig) error {
 			events = append(events, "provision")
 			if pool != bootstrapPool || got.DatabaseName != config.DatabaseName || got.BootstrapRole != config.BootstrapRole || got.AuthorityRole != config.AuthorityRole || got.Roles != config.Roles || got.Passwords != (platformmigrate.ComposeRolePasswords{
-				Runtime:       config.Passwords.Runtime,
-				PlatformAdmin: config.Passwords.PlatformAdmin,
-				Migrator:      config.Passwords.Migrator,
-				Authority:     authorityState.DatabasePassword(),
+				Runtime:        config.Passwords.Runtime,
+				PlatformAdmin:  config.Passwords.PlatformAdmin,
+				DeletionWorker: config.Passwords.DeletionWorker,
+				Migrator:       config.Passwords.Migrator,
+				Authority:      authorityState.DatabasePassword(),
 			}) {
 				t.Fatal("bootstrap provisioner did not receive the fixed role contract")
 			}
 			return nil
 		},
-		activateAuthority: func(_ context.Context, pool *pgxpool.Pool, root string, state recordauthority.VerifiedComposeState) error {
+		activateAuthority: func(_ context.Context, pool *pgxpool.Pool, root string, state recordauthority.VerifiedComposeState, _ platformmigrate.AppRoleSetV2) error {
 			events = append(events, "activate-authority")
 			if pool != migratorPool || root != config.AuthorityStateRoot || state.DeploymentID != authorityState.DeploymentID {
 				t.Fatal("authority activation did not use migrator pool and verified state")
@@ -106,6 +113,20 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 			}
 			return nil
 		},
+		prepareBirthLaunch: func(_ context.Context, pool *pgxpool.Pool, _ recordauthority.VerifiedComposeState, _ *SourceMaintenanceConfig, directory, runtimeRole, workerRole string) (composeBirthLaunchPair, error) {
+			events = append(events, "prepare-launch")
+			if pool != migratorPool || directory != filepath.Dir(config.CenterDeploymentIDPath) || runtimeRole != config.Roles.CenterRuntime || workerRole != config.Roles.DeletionWorker {
+				t.Fatal("launch preparation did not receive owner pool and exact roles")
+			}
+			return testComposeBirthLaunchPair(), nil
+		},
+		inspectBirthLaunch: func(_ context.Context, pool *pgxpool.Pool, _ recordauthority.VerifiedComposeState, _ *SourceMaintenanceConfig, _ string, opened bool) (composeBirthLaunchPair, error) {
+			events = append(events, "inspect-launch")
+			if pool != authorityPool || !opened {
+				t.Fatal("launch inspection did not use the constrained authority pool")
+			}
+			return testComposeBirthLaunchPair(), nil
+		},
 		heartbeatAuthority: func(_ context.Context, pool *pgxpool.Pool, state recordauthority.VerifiedComposeState) error {
 			events = append(events, "heartbeat-authority")
 			if pool != authorityPool || state.DeploymentID != authorityState.DeploymentID {
@@ -113,9 +134,9 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 			}
 			return nil
 		},
-		convergeCurrent: func(_ context.Context, pool *pgxpool.Pool, runtimeRole, adminRole string) error {
+		convergeCurrent: func(_ context.Context, pool *pgxpool.Pool, runtimeRole, adminRole, deletionWorkerRole string) error {
 			events = append(events, "converge-current")
-			if pool != migratorPool || runtimeRole != config.Roles.CenterRuntime || adminRole != config.Roles.PlatformAdmin {
+			if pool != migratorPool || runtimeRole != config.Roles.CenterRuntime || adminRole != config.Roles.PlatformAdmin || deletionWorkerRole != config.Roles.DeletionWorker {
 				t.Fatal("current APP writer received wrong direct-role contract")
 			}
 			return nil
@@ -127,6 +148,13 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 			}
 			return nil
 		},
+		probeRuntime: func(_ context.Context, pool *pgxpool.Pool, _ recordbirth.LaunchBinding, _ *SourceMaintenanceConfig) error {
+			events = append(events, "probe-runtime")
+			if pool != runtimePool {
+				t.Fatal("launch probe did not use the direct runtime pool")
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("initializeComposeWithDependencies() error = %v", err)
@@ -135,18 +163,21 @@ func TestInitializeComposeUsesBootstrapThenCurrentWriterAndRuntimeAdmission(t *t
 		"open:postgres",
 		"prepare-authority",
 		"provision",
-		"close:bootstrap",
 		"open:houfeng_migrator",
 		"converge-current",
 		"activate-authority",
+		"prepare-launch",
 		"publish-authority",
 		"close:migrator",
 		"open:houfeng_records_authority",
+		"inspect-launch",
 		"heartbeat-authority",
-		"close:authority",
 		"open:houfeng_runtime",
 		"admit-runtime",
+		"probe-runtime",
 		"close:runtime",
+		"close:authority",
+		"close:bootstrap",
 	}
 	if !reflect.DeepEqual(events, wantEvents) {
 		t.Fatalf("Compose initializer events = %q, want %q", events, wantEvents)
@@ -178,10 +209,11 @@ func TestNewComposeInitConfigRejectsReusedOperatorPasswords(t *testing.T) {
 	t.Parallel()
 
 	passwords := ComposeInitPasswords{
-		Bootstrap:     "bootstrap-secret",
-		Runtime:       "runtime-secret",
-		PlatformAdmin: "admin-secret",
-		Migrator:      "migrator-secret",
+		Bootstrap:      "bootstrap-secret",
+		Runtime:        "runtime-secret",
+		PlatformAdmin:  "admin-secret",
+		DeletionWorker: "deletion-worker-secret",
+		Migrator:       "migrator-secret",
 	}
 	placeholderCollision := passwords
 	placeholderCollision.Runtime = "state-derived-placeholder"
@@ -192,6 +224,8 @@ func TestNewComposeInitConfigRejectsReusedOperatorPasswords(t *testing.T) {
 		"bootstrap and runtime": func(values *ComposeInitPasswords) { values.Runtime = values.Bootstrap },
 		"runtime and admin":     func(values *ComposeInitPasswords) { values.PlatformAdmin = values.Runtime },
 		"admin and migrator":    func(values *ComposeInitPasswords) { values.Migrator = values.PlatformAdmin },
+		"worker and runtime":    func(values *ComposeInitPasswords) { values.DeletionWorker = values.Runtime },
+		"worker and bootstrap":  func(values *ComposeInitPasswords) { values.DeletionWorker = values.Bootstrap },
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := passwords
@@ -215,20 +249,27 @@ func TestInitializeComposeRejectsAuthorityCredentialReuseBeforeBootstrapMutation
 	bootstrapPool := &pgxpool.Pool{}
 	provisioned := false
 	err = initializeComposeWithDependencies(t.Context(), config, composeInitDependencies{
+		withMaintenance:   testComposeMaintenance,
+		verifyCredentials: testComposeCredentials,
 		openPostgres: func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error) {
 			return bootstrapPool, nil
 		},
 		closePostgres: func(*pgxpool.Pool) {},
-		prepareAuthority: func(context.Context, *pgxpool.Pool, string) (recordauthority.VerifiedComposeState, error) {
+		prepareAuthority: func(context.Context, *pgxpool.Pool, string, *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 			return authorityState, nil
 		},
 		provisionBootstrap: func(context.Context, *pgxpool.Pool, platformmigrate.ComposeBootstrapConfig) error {
 			provisioned = true
 			return nil
 		},
-		convergeCurrent:   func(context.Context, *pgxpool.Pool, string, string) error { return nil },
-		activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState) error { return nil },
-		publishAuthority:  func(string, recordauthority.VerifiedComposeState, string) error { return nil },
+		convergeCurrent: func(context.Context, *pgxpool.Pool, string, string, string) error { return nil },
+		activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState, platformmigrate.AppRoleSetV2) error {
+			return nil
+		},
+		publishAuthority:   func(string, recordauthority.VerifiedComposeState, string) error { return nil },
+		prepareBirthLaunch: testComposePrepareBirthLaunch,
+		inspectBirthLaunch: testComposeInspectBirthLaunch,
+		probeRuntime:       testComposeProbeBirthLaunch,
 		heartbeatAuthority: func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState) error {
 			return nil
 		},
@@ -253,22 +294,33 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 	wantFailure := errors.New("sensitive operational failure")
 	wantStageError := map[string]error{
 		"open-bootstrap": ErrComposeInitOpenBootstrap,
+		"guard":          ErrComposeInitMaintenance,
 		"prepare":        ErrComposeInitPrepareAuthority,
 		"provision":      ErrComposeInitProvisionBootstrap,
 		"open-migrator":  ErrComposeInitOpenMigrator,
 		"converge":       ErrComposeInitConvergeCurrent,
 		"activate":       ErrComposeInitActivateAuthority,
 		"publish":        ErrComposeInitPublishAuthority,
+		"launch-prepare": ErrComposeInitBirthLaunch,
+		"launch-inspect": ErrComposeInitBirthLaunch,
+		"probe":          ErrComposeInitAdmitRuntime,
 		"open-authority": ErrComposeInitOpenAuthority,
 		"heartbeat":      ErrComposeInitHeartbeatAuthority,
 		"open-runtime":   ErrComposeInitOpenRuntime,
 		"admit":          ErrComposeInitAdmitRuntime,
 	}
-	for _, failedStage := range []string{"open-bootstrap", "prepare", "provision", "open-migrator", "converge", "activate", "publish", "open-authority", "heartbeat", "open-runtime", "admit"} {
+	for _, failedStage := range []string{"open-bootstrap", "guard", "prepare", "provision", "open-migrator", "converge", "activate", "publish", "launch-prepare", "open-authority", "open-runtime", "admit", "probe", "launch-inspect", "heartbeat"} {
 		failedStage := failedStage
 		t.Run(failedStage, func(t *testing.T) {
 			var opened, closed, prepared, provisioned, converged, activated, published, heartbeated, admitted int
 			err := initializeComposeWithDependencies(t.Context(), config, composeInitDependencies{
+				withMaintenance: func(_ context.Context, _ *pgxpool.Pool, fn func(*SourceMaintenanceConfig) error) error {
+					if failedStage == "guard" {
+						return wantFailure
+					}
+					return fn(nil)
+				},
+				verifyCredentials: testComposeCredentials,
 				openPostgres: func(_ context.Context, endpoint composePostgresEndpoint) (*pgxpool.Pool, error) {
 					if (failedStage == "open-bootstrap" && endpoint.Role == config.BootstrapRole) ||
 						(failedStage == "open-migrator" && endpoint.Role == config.Roles.Migrator) ||
@@ -280,7 +332,7 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 					return &pgxpool.Pool{}, nil
 				},
 				closePostgres: func(*pgxpool.Pool) { closed++ },
-				prepareAuthority: func(context.Context, *pgxpool.Pool, string) (recordauthority.VerifiedComposeState, error) {
+				prepareAuthority: func(context.Context, *pgxpool.Pool, string, *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
 					prepared++
 					if failedStage == "prepare" {
 						return recordauthority.VerifiedComposeState{}, wantFailure
@@ -294,7 +346,7 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 					}
 					return nil
 				},
-				activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState) error {
+				activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState, platformmigrate.AppRoleSetV2) error {
 					activated++
 					if failedStage == "activate" {
 						return wantFailure
@@ -308,6 +360,24 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 					}
 					return nil
 				},
+				prepareBirthLaunch: func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState, *SourceMaintenanceConfig, string, string, string) (composeBirthLaunchPair, error) {
+					if failedStage == "launch-prepare" {
+						return composeBirthLaunchPair{}, wantFailure
+					}
+					return testComposeBirthLaunchPair(), nil
+				},
+				inspectBirthLaunch: func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState, *SourceMaintenanceConfig, string, bool) (composeBirthLaunchPair, error) {
+					if failedStage == "launch-inspect" {
+						return composeBirthLaunchPair{}, wantFailure
+					}
+					return testComposeBirthLaunchPair(), nil
+				},
+				probeRuntime: func(context.Context, *pgxpool.Pool, recordbirth.LaunchBinding, *SourceMaintenanceConfig) error {
+					if failedStage == "probe" {
+						return wantFailure
+					}
+					return nil
+				},
 				heartbeatAuthority: func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState) error {
 					heartbeated++
 					if failedStage == "heartbeat" {
@@ -315,7 +385,7 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 					}
 					return nil
 				},
-				convergeCurrent: func(context.Context, *pgxpool.Pool, string, string) error {
+				convergeCurrent: func(context.Context, *pgxpool.Pool, string, string, string) error {
 					converged++
 					if failedStage == "converge" {
 						return wantFailure
@@ -342,16 +412,123 @@ func TestInitializeComposeStopsAndClosesAtEveryFailedStage(t *testing.T) {
 			if opened-closed != 0 {
 				t.Fatalf("initializer leaked pools: opened=%d closed=%d", opened, closed)
 			}
+			if failedStage == "guard" && (prepared != 0 || provisioned != 0) {
+				t.Fatal("guard rejection reached authority or credential mutation")
+			}
 			if failedStage == "provision" && (converged != 0 || admitted != 0) {
 				t.Fatalf("provision failure continued to converge/admit: %d/%d", converged, admitted)
 			}
 			if failedStage == "converge" && admitted != 0 {
 				t.Fatal("convergence failure continued to runtime admission")
 			}
+			if (failedStage == "launch-prepare" || failedStage == "launch-inspect") && heartbeated != 0 {
+				t.Fatal("failed launch verification reached membership heartbeat")
+			}
 			if prepared > 1 || provisioned > 1 || converged > 1 || activated > 1 || published > 1 || heartbeated > 1 || admitted > 1 {
 				t.Fatal("initializer repeated a failed stage")
 			}
 		})
+	}
+}
+
+func testComposeMaintenance(_ context.Context, _ *pgxpool.Pool, fn func(*SourceMaintenanceConfig) error) error {
+	return fn(nil)
+}
+
+func testComposeCredentials(context.Context, *pgxpool.Pool, *SourceMaintenanceConfig, platformmigrate.AppRoleSetV2, string, platformmigrate.ComposeRolePasswords) error {
+	return nil
+}
+
+// These seams isolate pre-existing initializer tests from protected UID and
+// image requirements; they are not launch publication or runtime acceptance.
+func testComposeBirthLaunchPair() composeBirthLaunchPair {
+	return composeBirthLaunchPair{centerDigest: [32]byte{1}, processorDigest: [32]byte{2}}
+}
+
+func testComposePrepareBirthLaunch(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState, *SourceMaintenanceConfig, string, string, string) (composeBirthLaunchPair, error) {
+	return testComposeBirthLaunchPair(), nil
+}
+
+func testComposeInspectBirthLaunch(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState, *SourceMaintenanceConfig, string, bool) (composeBirthLaunchPair, error) {
+	return testComposeBirthLaunchPair(), nil
+}
+
+func testComposeProbeBirthLaunch(context.Context, *pgxpool.Pool, recordbirth.LaunchBinding, *SourceMaintenanceConfig) error {
+	return nil
+}
+
+func TestInitializeComposeChecksCredentialsInsideMaintenanceBeforeProvision(t *testing.T) {
+	config := composeInitConfigFixture(t)
+	state, err := recordauthority.CreateComposeState(config.AuthorityStateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := &pgxpool.Pool{}
+	guarded := false
+	provisioned := false
+	deps := composeInitDependencies{
+		openPostgres:  func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error) { return pool, nil },
+		closePostgres: func(*pgxpool.Pool) {},
+		withMaintenance: func(_ context.Context, got *pgxpool.Pool, fn func(*SourceMaintenanceConfig) error) error {
+			if got != pool {
+				t.Fatal("guard did not receive bootstrap pool")
+			}
+			guarded = true
+			defer func() { guarded = false }()
+			return fn(nil)
+		},
+		verifyCredentials: func(_ context.Context, _ *pgxpool.Pool, _ *SourceMaintenanceConfig, _ platformmigrate.AppRoleSetV2, _ string, passwords platformmigrate.ComposeRolePasswords) error {
+			if !guarded || passwords.Authority != state.DatabasePassword() {
+				t.Fatal("credential verification did not use guarded signed state")
+			}
+			return errors.New("private stale credential")
+		},
+		prepareAuthority: func(context.Context, *pgxpool.Pool, string, *SourceMaintenanceConfig) (recordauthority.VerifiedComposeState, error) {
+			if !guarded {
+				t.Fatal("authority preparation occurred outside guard")
+			}
+			return state, nil
+		},
+		provisionBootstrap: func(context.Context, *pgxpool.Pool, platformmigrate.ComposeBootstrapConfig) error {
+			provisioned = true
+			return nil
+		},
+		convergeCurrent: func(context.Context, *pgxpool.Pool, string, string, string) error { return nil },
+		activateAuthority: func(context.Context, *pgxpool.Pool, string, recordauthority.VerifiedComposeState, platformmigrate.AppRoleSetV2) error {
+			return nil
+		},
+		publishAuthority:   func(string, recordauthority.VerifiedComposeState, string) error { return nil },
+		prepareBirthLaunch: testComposePrepareBirthLaunch,
+		inspectBirthLaunch: testComposeInspectBirthLaunch,
+		probeRuntime:       testComposeProbeBirthLaunch,
+		heartbeatAuthority: func(context.Context, *pgxpool.Pool, recordauthority.VerifiedComposeState) error { return nil },
+		admitRuntime:       func(context.Context, *pgxpool.Pool) error { return nil },
+	}
+	err = initializeComposeWithDependencies(t.Context(), config, deps)
+	if !errors.Is(err, ErrComposeInitMaintenance) || provisioned || strings.Contains(err.Error(), "private stale credential") {
+		t.Fatalf("stale credentials were not safely rejected before provisioning: %v", err)
+	}
+}
+
+func TestPublishComposeSecretAtomicallyReplacesPrivateFile(t *testing.T) {
+	for _, mode := range []os.FileMode{0400, 0040} {
+		path := filepath.Join(t.TempDir(), "secret")
+		if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := publishComposeSecret(path, "new", mode, os.Getegid()); err != nil {
+			t.Fatal(err)
+		}
+		if mode == 0400 {
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != "new" {
+				t.Fatalf("secret publication failed: %v", err)
+			}
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != mode {
+			t.Fatalf("secret permissions invalid: %v", err)
+		}
 	}
 }
 
@@ -366,6 +543,13 @@ func TestPublishComposeAuthorityDeploymentIDCreatesOnlyPublicDerivedCopy(t *test
 	publicDirectory := filepath.Join(t.TempDir(), "center-config")
 	if err := os.Mkdir(publicDirectory, 0o755); err != nil {
 		t.Fatalf("create Center public directory: %v", err)
+	}
+	if err := os.Chmod(publicDirectory, 0o755); err != nil {
+		t.Fatalf("set Center public directory mode: %v", err)
+	}
+	publicInfo, err := os.Lstat(publicDirectory)
+	if err != nil || !publicInfo.IsDir() || publicInfo.Mode().Perm() != 0o755 {
+		t.Fatalf("Center public directory fixture = %v, error = %v; want directory 0755", publicInfo, err)
 	}
 	destination := filepath.Join(publicDirectory, "deployment-id")
 	for attempt := 0; attempt < 2; attempt++ {
@@ -490,10 +674,11 @@ func TestReconcileComposeAuthorityStateClosesRecoveryMatrix(t *testing.T) {
 func composeInitConfigFixture(t *testing.T) ComposeInitConfig {
 	t.Helper()
 	config, err := NewComposeInitConfig(ComposeInitPasswords{
-		Bootstrap:     "bootstrap-secret",
-		Runtime:       "runtime-secret",
-		PlatformAdmin: "admin-secret",
-		Migrator:      "migrator-secret",
+		Bootstrap:      "bootstrap-secret",
+		Runtime:        "runtime-secret",
+		PlatformAdmin:  "admin-secret",
+		DeletionWorker: "deletion-worker-secret",
+		Migrator:       "migrator-secret",
 	})
 	if err != nil {
 		t.Fatalf("NewComposeInitConfig() error = %v", err)

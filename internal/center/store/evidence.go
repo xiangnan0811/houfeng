@@ -19,6 +19,10 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
+	"houfeng/internal/center/recordidentity"
+	"houfeng/internal/center/records"
+	"houfeng/internal/center/sourceretirement"
 )
 
 const (
@@ -54,6 +58,7 @@ type PostgresEvidenceRepository struct {
 	registry             evidence.Registry
 	current              evidenceCurrentRecordAuthorizationSource
 	subjects             currentRecordSubjectResolver
+	continuity           recordbirth.ContinuitySource
 	loadEvidenceSnapshot func(context.Context, string, bool) (persistedEvidenceSnapshot, error)
 }
 
@@ -64,8 +69,8 @@ var (
 	_ evidence.MaintenanceRepository      = (*PostgresEvidenceRepository)(nil)
 )
 
-func NewPostgresEvidenceRepository(pool *pgxpool.Pool, gate AdmissionGate) *PostgresEvidenceRepository {
-	return &PostgresEvidenceRepository{platform: NewPostgresRecordPlatformRepository(pool, gate)}
+func NewPostgresEvidenceRepository(pool *pgxpool.Pool, gate AdmissionGate, continuity recordbirth.ContinuitySource) *PostgresEvidenceRepository {
+	return &PostgresEvidenceRepository{platform: NewPostgresRecordPlatformRepository(pool, gate), continuity: continuity}
 }
 
 func (repository *PostgresEvidenceRepository) LoadCaptureIntentBinding(
@@ -73,7 +78,7 @@ func (repository *PostgresEvidenceRepository) LoadCaptureIntentBinding(
 	recordID string,
 	intentID string,
 ) (evidence.CaptureIntentBinding, error) {
-	if ctx == nil || !validEvidenceStoreID(recordID, "rec_") || !evidence.ValidCaptureIntentID(intentID) {
+	if ctx == nil || !recordidentity.IsValid(recordID) || !evidence.ValidCaptureIntentID(intentID) {
 		return evidence.CaptureIntentBinding{}, ErrInvalidEvidencePersistence
 	}
 	tx, err := repository.startAdmittedTransaction(ctx)
@@ -83,17 +88,17 @@ func (repository *PostgresEvidenceRepository) LoadCaptureIntentBinding(
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var (
-		persistedRecordID, kind, snapshotID, persistedIntentID string
-		schemaVersion, estimatedSize                           int64
-		previewDigest, sourceDigest                            []byte
-		selectionJSON, previewJSON                             []byte
-		createdAt, validUntil                                  time.Time
+		persistedRecordID, kind, snapshotID, persistedIntentID, allocationID string
+		schemaVersion, estimatedSize                                         int64
+		previewDigest, sourceDigest                                          []byte
+		selectionJSON, previewJSON                                           []byte
+		createdAt, validUntil                                                time.Time
 	)
 	err = tx.QueryRow(ctx, `
 		select record_id, kind, schema_version, preview_digest,
 		       source_digest, selection, preview,
 		       coalesce(snapshot_id, ''), estimated_size_bytes,
-		       created_at, valid_until, intent_id
+		       created_at, valid_until, intent_id, coalesce(birth_allocation_id, '')
 		from public.evidence_capture_intents
 		where record_id = $1
 		  and intent_id = $2
@@ -113,6 +118,7 @@ func (repository *PostgresEvidenceRepository) LoadCaptureIntentBinding(
 		&createdAt,
 		&validUntil,
 		&persistedIntentID,
+		&allocationID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return evidence.CaptureIntentBinding{}, evidence.ErrCaptureIntentUnavailable
@@ -155,7 +161,7 @@ func (repository *PostgresEvidenceRepository) LoadCaptureIntentBinding(
 		return evidence.CaptureIntentBinding{}, ErrEvidencePersistenceConflict
 	}
 	binding := evidence.CaptureIntentBinding{
-		RecordID: persistedRecordID, SnapshotID: snapshotID, Intent: intent, Preview: preview,
+		AllocationID: allocationID, RecordID: persistedRecordID, SnapshotID: snapshotID, Intent: intent, Preview: preview,
 	}
 	if binding.Validate() != nil || !bytes.Equal(sourceDigest, preview.SourceDigest[:]) ||
 		estimatedSize != int64(preview.EstimatedCanonicalBytes) ||
@@ -170,63 +176,115 @@ func (repository *PostgresEvidenceRepository) LoadCaptureIntentBinding(
 
 func (repository *PostgresEvidenceRepository) PersistCaptureIntent(
 	ctx context.Context,
-	recordID string,
-	snapshotID string,
-	intent evidence.Intent,
-	preview evidence.Preview,
+	request evidence.CaptureIntentPersistence,
 ) error {
+	recordID, snapshotID := request.RecordID, request.SnapshotID
+	intent, preview, selectionJSON, previewJSON, err := prepareEvidenceCaptureIntent(recordID, snapshotID, request.Intent, request.Preview)
+	if err != nil {
+		return err
+	}
+	actor, actorErr := recordauth.NormalizeActorScope(request.Actor)
+	authorization, authorizationErr := recordauth.NormalizeSourceAuthorization(request.Authorization)
+	if ctx == nil || actorErr != nil || !reflect.DeepEqual(actor, request.Actor) || authorizationErr != nil ||
+		!reflect.DeepEqual(authorization, request.Authorization) || authorization.CaptureScope.ProjectID != actor.ProjectID ||
+		string(authorization.Kind) != intent.Selection.SourceType || authorization.SourceID != intent.Selection.SourceID {
+		return ErrInvalidEvidencePersistence
+	}
+	allocation, err := repository.prepareEvidenceAllocation(ctx, actor, request.AllocationID, recordID, false)
+	if err != nil {
+		return err
+	}
+	prepared, err := repository.prepareEvidenceIntentAuthorization(ctx, request)
+	if err != nil {
+		return err
+	}
+	return repository.runCaptureMutation(ctx, allocation != nil, func(ctx context.Context, tx pgx.Tx, proof []byte) error {
+		resources, err := discoverEvidenceIntentResources(ctx, tx, request, allocation)
+		if err != nil {
+			return err
+		}
+		if evidenceCaptureTargetExists(resources, string(actor.ProjectID), recordID) != (allocation == nil) {
+			return evidence.ErrEvidenceServiceUnavailable
+		}
+		resources.continuityProof = proof
+		if err := acquireRecordMutationResources(ctx, tx, resources); err != nil {
+			return err
+		}
+		current, err := discoverEvidenceIntentResources(ctx, tx, request, allocation)
+		if err != nil || !reflect.DeepEqual(resources.resources, current.resources) {
+			return &pgconn.PgError{Code: "40001", Message: "evidence intent route changed; restart transaction"}
+		}
+		member, err := NewPostgresCollaborationMembershipReader().ReadMemberActor(ctx, tx, actor.ProjectID, actor.UserID)
+		if err != nil || member.CanonicalHash() != actor.CanonicalHash() {
+			return recordauth.ErrDenied
+		}
+		if err := prepared.authorize(ctx, tx, member, evidence.CapturePayloadRoute{
+			Actor: actor, AllocationID: request.AllocationID, RecordID: recordID, SnapshotID: snapshotID, CaptureIntentID: intent.ID,
+		}); err != nil {
+			return err
+		}
+		return insertEvidenceCaptureIntentCommandOnTx(ctx, tx, actor, request.AllocationID, recordID, snapshotID, intent, preview, selectionJSON, previewJSON)
+	})
+}
+
+func prepareEvidenceCaptureIntent(recordID, snapshotID string, intent evidence.Intent, preview evidence.Preview) (evidence.Intent, evidence.Preview, []byte, []byte, error) {
 	intent, preview = normalizeEvidenceCaptureIntentTimestamps(intent, preview)
-	if ctx == nil || !validEvidenceStoreID(recordID, "rec_") || !evidence.ValidSnapshotID(snapshotID) ||
-		!evidence.ValidCaptureIntentID(intent.ID) ||
-		intent.ID != preview.IntentID || intent.Key != preview.Key || intent.Key.SchemaVersion == 0 ||
+	if !recordidentity.IsValid(recordID) || !evidence.ValidSnapshotID(snapshotID) ||
+		!evidence.ValidCaptureIntentID(intent.ID) || intent.ID != preview.IntentID || intent.Key != preview.Key || intent.Key.SchemaVersion == 0 ||
 		intent.Selection.Key != intent.Key || preview.Selection.Key != intent.Key ||
 		!reflect.DeepEqual(intent.Selection, preview.Selection) || intent.PreviewDigest == [sha256.Size]byte{} ||
 		preview.SourceDigest == [sha256.Size]byte{} || preview.EstimatedCanonicalBytes == 0 ||
 		preview.EstimatedCanonicalBytes > evidence.MaxCanonicalPayloadBytes || preview.PreviewedAt.IsZero() ||
 		!evidenceCaptureIntentTimestampsExact(intent, preview) ||
-		!preview.ValidUntil.Equal(preview.PreviewedAt.Add(evidence.CaptureIntentTTL)) ||
-		!intent.ValidUntil.Equal(preview.ValidUntil) {
-		return ErrInvalidEvidencePersistence
+		!preview.ValidUntil.Equal(preview.PreviewedAt.Add(evidence.CaptureIntentTTL)) || !intent.ValidUntil.Equal(preview.ValidUntil) {
+		return intent, preview, nil, nil, ErrInvalidEvidencePersistence
 	}
 	selectionJSON, err := json.Marshal(intent.Selection)
 	if err != nil {
-		return fmt.Errorf("marshal evidence intent selection: %w", err)
+		return intent, preview, nil, nil, fmt.Errorf("marshal evidence intent selection: %w", err)
 	}
 	if len(selectionJSON) == 0 || uint64(len(selectionJSON)) > evidence.MaxCanonicalPayloadBytes {
-		return ErrInvalidEvidencePersistence
+		return intent, preview, nil, nil, ErrInvalidEvidencePersistence
 	}
 	previewJSON, err := json.Marshal(preview)
 	if err != nil {
-		return fmt.Errorf("marshal evidence intent preview: %w", err)
+		return intent, preview, nil, nil, fmt.Errorf("marshal evidence intent preview: %w", err)
 	}
 	if len(previewJSON) == 0 || uint64(len(previewJSON)) > evidence.MaxCanonicalPayloadBytes {
-		return ErrInvalidEvidencePersistence
+		return intent, preview, nil, nil, ErrInvalidEvidencePersistence
 	}
-	tx, err := repository.startAdmittedTransaction(ctx)
+	return intent, preview, selectionJSON, previewJSON, nil
+}
+
+func insertEvidenceCaptureIntentCommandOnTx(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, allocationID, recordID, snapshotID string, intent evidence.Intent, preview evidence.Preview, selectionJSON, previewJSON []byte) error {
+	actorHash := actor.CanonicalHash()
+	metadata, err := json.Marshal(struct {
+		ActorID          string    `json:"actor_id"`
+		ActorScopeDigest string    `json:"actor_scope_digest"`
+		AllocationID     string    `json:"allocation_id"`
+		RecordID         string    `json:"record_id"`
+		SnapshotID       string    `json:"snapshot_id"`
+		IntentID         string    `json:"intent_id"`
+		Kind             string    `json:"kind"`
+		SchemaVersion    string    `json:"schema_version"`
+		PreviewDigest    string    `json:"preview_digest"`
+		SourceDigest     string    `json:"source_digest"`
+		EstimatedSize    string    `json:"estimated_size_bytes"`
+		CreatedAt        time.Time `json:"created_at"`
+		ValidUntil       time.Time `json:"valid_until"`
+	}{actor.UserID, fmt.Sprintf("%x", actorHash), allocationID, recordID, snapshotID, intent.ID,
+		string(intent.Key.Kind), fmt.Sprintf("%d", intent.Key.SchemaVersion), fmt.Sprintf("%x", intent.PreviewDigest),
+		fmt.Sprintf("%x", preview.SourceDigest), fmt.Sprintf("%d", preview.EstimatedCanonicalBytes), preview.PreviewedAt.UTC(), preview.ValidUntil.UTC()})
 	if err != nil {
-		return err
+		return fmt.Errorf("encode evidence intent command: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	inserted, err := tx.Exec(ctx, `
-		insert into public.evidence_capture_intents (
-			intent_id, record_id, kind, schema_version, preview_digest,
-			source_digest, selection, preview, snapshot_id,
-			estimated_size_bytes, created_at, valid_until
-		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		on conflict (intent_id) do nothing`,
-		intent.ID,
-		recordID,
-		string(intent.Key.Kind),
-		int64(intent.Key.SchemaVersion),
-		intent.PreviewDigest[:],
-		preview.SourceDigest[:],
-		selectionJSON,
-		previewJSON,
-		snapshotID,
-		int64(preview.EstimatedCanonicalBytes),
-		preview.PreviewedAt.UTC(),
-		preview.ValidUntil.UTC(),
-	)
+	command := make([]byte, 0, 8+len(metadata)+len(selectionJSON)+len(previewJSON))
+	command = binary.BigEndian.AppendUint32(command, uint32(len(metadata)))
+	command = append(command, metadata...)
+	command = binary.BigEndian.AppendUint32(command, uint32(len(selectionJSON)))
+	command = append(command, selectionJSON...)
+	command = append(command, previewJSON...)
+	_, err = tx.Exec(ctx, `select public.record_evidence_intent_insert($1)`, command)
 	if err != nil {
 		var postgresError *pgconn.PgError
 		if errors.As(err, &postgresError) && postgresError.Code == "23505" {
@@ -234,39 +292,92 @@ func (repository *PostgresEvidenceRepository) PersistCaptureIntent(
 		}
 		return fmt.Errorf("insert evidence capture intent: %w", err)
 	}
-	if inserted.RowsAffected() != 1 {
-		return ErrEvidencePersistenceConflict
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit evidence capture intent: %w", err)
-	}
 	return nil
 }
 
-func (repository *PostgresEvidenceRepository) PersistPayload(
-	ctx context.Context,
-	snapshot evidence.CanonicalSnapshot,
-) (EvidencePayloadMetadata, error) {
-	tx, err := repository.startAdmittedTransaction(ctx)
+func (repository *PostgresEvidenceRepository) prepareEvidenceIntentAuthorization(ctx context.Context, request evidence.CaptureIntentPersistence) (*preparedEvidencePayloadAuthorization, error) {
+	if repository == nil {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	prefetcher, ok := repository.current.(currentRecordAuthorizationPrefetcher)
+	if !ok || nilRecordSubjectDependency(prefetcher) {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	resolver, ok := repository.subjects.(*RecordSubjectReadResolver)
+	if !ok || resolver == nil {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	reader, ok := resolver.tombstones.(*WitnessedRecordSubjectTombstoneReader)
+	if !ok || reader == nil {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	var recordIDs []string
+	if request.AllocationID == "" {
+		recordIDs = append(recordIDs, request.RecordID)
+	}
+	recordsAuthorization, err := prefetcher.prepareCurrentAuthorization(ctx, recordIDs)
 	if err != nil {
-		return EvidencePayloadMetadata{}, err
+		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	metadata, err := persistEvidencePayloadOnTx(ctx, tx, snapshot)
+	sources, err := reader.Prefetch(ctx, []sourceretirement.SourceKey{
+		reader.sourceKey(request.Actor.ProjectID, request.Authorization.Kind, request.Authorization.SourceID),
+	})
 	if err != nil {
-		return EvidencePayloadMetadata{}, err
+		return nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return EvidencePayloadMetadata{}, fmt.Errorf("commit evidence payload: %w", err)
-	}
-	return metadata, nil
+	return &preparedEvidencePayloadAuthorization{
+		records: recordsAuthorization, sources: sources,
+		envelopes: []evidence.SnapshotEnvelope{{Source: request.Preview.Source, Authorization: request.Authorization}},
+	}, nil
 }
 
-func persistEvidencePayloadOnTx(
-	ctx context.Context,
-	tx pgx.Tx,
-	snapshot evidence.CanonicalSnapshot,
-) (EvidencePayloadMetadata, error) {
+func discoverEvidenceIntentResources(ctx context.Context, tx pgx.Tx, request evidence.CaptureIntentPersistence, allocation *recordbirth.Allocation) (recordMutationResources, error) {
+	projectID := string(request.Actor.ProjectID)
+	resources := records.RevisionMutationResources{Records: []records.RevisionMutationRecord{{ProjectID: projectID, RecordID: request.RecordID}}}
+	appendEvidenceAllocationResource(&resources, allocation)
+	var user records.RevisionMutationUser
+	if err := tx.QueryRow(ctx, `select user_id,role,disabled_at is not null from public.users where user_id=$1`, request.Actor.UserID).Scan(&user.UserID, &user.Role, &user.Disabled); err != nil {
+		return recordMutationResources{}, err
+	}
+	resources.Users = append(resources.Users, user)
+	groups, err := newPostgresRecordAuthorizationRepository(tx).ListActorGroupIDs(ctx, request.Actor.ProjectID, request.Actor.UserID)
+	if err != nil {
+		return recordMutationResources{}, err
+	}
+	for _, groupID := range groups {
+		resources.Groups = append(resources.Groups, records.RevisionMutationGroup{ProjectID: projectID, GroupID: groupID})
+		resources.Memberships = append(resources.Memberships, records.RevisionMutationMembership{GroupID: groupID, UserID: request.Actor.UserID})
+	}
+	appendRevisionMutationSource(&resources, request.Authorization)
+	if err := appendEvidenceCurrentRecordResources(ctx, tx, &resources, resources.Records[0]); err != nil {
+		return recordMutationResources{}, err
+	}
+	return normalizeRecordMutationDeclarations(resources)
+}
+
+type evidencePayloadCommandRoute struct {
+	Route            string `json:"route"`
+	ActorID          string `json:"actor_id"`
+	ActorScopeDigest string `json:"actor_scope_digest"`
+	AllocationID     string `json:"allocation_id"`
+	RecordID         string `json:"record_id"`
+	SnapshotID       string `json:"snapshot_id"`
+	IntentID         string `json:"intent_id"`
+	SourceKind       string `json:"source_kind"`
+	SourceID         string `json:"source_id"`
+	SourceDigest     string `json:"source_digest"`
+	Kind             string `json:"kind"`
+	SchemaVersion    string `json:"schema_version"`
+	PayloadDigest    string `json:"payload_digest"`
+	ImportJobID      string `json:"import_job_id"`
+	ImportPlanID     string `json:"import_plan_id"`
+	RevisionID       string `json:"revision_id"`
+}
+
+// Callers pass a snapshot validated by the capture/comparison preparer or by
+// the official import decoder. The restricted command hashes these canonical
+// bytes independently and checks the persisted route before writing gzip.
+func persistEvidencePayloadOnTx(ctx context.Context, tx pgx.Tx, route evidencePayloadCommandRoute, snapshot evidence.CanonicalSnapshot) (EvidencePayloadMetadata, error) {
 	canonical := snapshot.Bytes()
 	digest := snapshot.Hash()
 	if ctx == nil || nilRecordEvidenceParticipantTx(tx) ||
@@ -280,45 +391,507 @@ func persistEvidencePayloadOnTx(
 	if len(compressed) == 0 || uint64(len(compressed)) > maxEvidenceCompressedBytes {
 		return EvidencePayloadMetadata{}, ErrInvalidEvidencePersistence
 	}
-	metadata := EvidencePayloadMetadata{
-		Digest: digest, Encoding: EvidencePayloadEncodingCanonicalJSONGzipV1,
-		CanonicalSizeBytes: uint64(len(canonical)), CompressedSizeBytes: uint64(len(compressed)),
+	envelope := snapshot.Envelope()
+	route.SourceKind, route.SourceID = envelope.Source.Type, envelope.Source.ID
+	route.SourceDigest = fmt.Sprintf("%x", envelope.SourceDigest)
+	route.Kind, route.SchemaVersion = string(envelope.Key.Kind), fmt.Sprintf("%d", envelope.Key.SchemaVersion)
+	route.PayloadDigest = fmt.Sprintf("%x", digest)
+	metadata, err := json.Marshal(route)
+	if err != nil || len(metadata) == 0 || len(metadata) > 32768 {
+		return EvidencePayloadMetadata{}, ErrInvalidEvidencePersistence
 	}
-	inserted, err := tx.Exec(ctx, `
-		insert into public.evidence_payloads (
-			payload_digest, canonical_size_bytes, compressed_size_bytes, compressed_payload
-		) values ($1, $2, $3, $4)
-		on conflict (payload_digest) do nothing`,
-		digest[:], int64(metadata.CanonicalSizeBytes), int64(metadata.CompressedSizeBytes), compressed,
-	)
-	if err != nil {
+	command := make([]byte, 0, 8+len(metadata)+len(canonical)+len(compressed))
+	command = binary.BigEndian.AppendUint32(command, uint32(len(metadata)))
+	command = append(command, metadata...)
+	command = binary.BigEndian.AppendUint32(command, uint32(len(canonical)))
+	command = append(command, canonical...)
+	command = append(command, compressed...)
+	if _, err := tx.Exec(ctx, `select public.record_evidence_payload_insert($1)`, command); err != nil {
+		var postgresError *pgconn.PgError
+		if errors.As(err, &postgresError) && postgresError.Code == "23505" {
+			return EvidencePayloadMetadata{}, fmt.Errorf("%w: insert evidence payload: %w", ErrEvidencePersistenceConflict, err)
+		}
 		return EvidencePayloadMetadata{}, fmt.Errorf("insert evidence payload: %w", err)
 	}
-	if inserted.RowsAffected() == 0 {
-		var storedEncoding string
-		var storedCanonicalSize, storedCompressedSize int64
-		var storedCompressed []byte
-		if err := tx.QueryRow(ctx, `
-			select payload_encoding, canonical_size_bytes, compressed_size_bytes, compressed_payload
-			from public.evidence_payloads
-			where payload_digest = $1`, digest[:],
-		).Scan(&storedEncoding, &storedCanonicalSize, &storedCompressedSize, &storedCompressed); err != nil {
-			return EvidencePayloadMetadata{}, fmt.Errorf("read existing evidence payload: %w", err)
-		}
-		if storedEncoding != metadata.Encoding || storedCanonicalSize != int64(metadata.CanonicalSizeBytes) ||
-			storedCompressedSize != int64(metadata.CompressedSizeBytes) || !bytes.Equal(storedCompressed, compressed) {
-			return EvidencePayloadMetadata{}, ErrEvidencePersistenceConflict
-		}
-	}
-	return metadata, nil
+	return EvidencePayloadMetadata{Digest: digest, Encoding: EvidencePayloadEncodingCanonicalJSONGzipV1,
+		CanonicalSizeBytes: uint64(len(canonical)), CompressedSizeBytes: uint64(len(compressed))}, nil
 }
 
 func (repository *PostgresEvidenceRepository) PersistCapturePayload(
 	ctx context.Context,
+	route evidence.CapturePayloadRoute,
 	snapshot evidence.CanonicalSnapshot,
 ) error {
-	_, err := repository.PersistPayload(ctx, snapshot)
-	return err
+	actor, err := recordauth.NormalizeActorScope(route.Actor)
+	if ctx == nil || err != nil || !reflect.DeepEqual(actor, route.Actor) ||
+		!recordidentity.IsValid(route.RecordID) || !evidence.ValidSnapshotID(route.SnapshotID) ||
+		(route.CaptureIntentID == "") == (route.ComparisonClaims == nil) {
+		return ErrInvalidEvidencePersistence
+	}
+	if repository == nil {
+		return evidence.ErrEvidenceServiceUnavailable
+	}
+	envelope := snapshot.Envelope()
+	kind, err := repository.registry.LookupKey(envelope.Key)
+	if err != nil {
+		return evidence.ErrEvidenceServiceUnavailable
+	}
+	validated, err := evidence.RestoreCanonicalSnapshot(kind.Descriptor(), envelope, snapshot.Bytes())
+	if err != nil || validated.Hash() != snapshot.Hash() {
+		return ErrInvalidEvidencePersistence
+	}
+	snapshot = validated
+	if route.ComparisonClaims != nil {
+		claims := route.ComparisonClaims
+		actorDigest := actor.CanonicalHash()
+		if claims.Purpose != evidence.ComparisonIntentPurpose || claims.ProjectID != string(actor.ProjectID) ||
+			claims.ActorHash != fmt.Sprintf("%x", actorDigest) ||
+			route.SnapshotID != evidence.DeriveComparisonResultSnapshotID(route.RecordID, claims.Digest) ||
+			snapshot.Envelope().Key != evidence.ComparisonResultV1Key() {
+			return ErrInvalidEvidencePersistence
+		}
+		result, err := evidence.NewPreparedComparisonResult(route.RecordID, route.SnapshotID, snapshot)
+		if err != nil {
+			return evidence.ErrComparisonIntentStale
+		}
+		if _, err := evidence.ComparisonDependenciesFromNativeClaims(result, *claims); err != nil {
+			return evidence.ErrComparisonIntentStale
+		}
+	} else if !evidence.ValidCaptureIntentID(route.CaptureIntentID) {
+		return ErrInvalidEvidencePersistence
+	}
+	allocation, err := repository.prepareEvidenceAllocation(ctx, actor, route.AllocationID, route.RecordID, route.ComparisonClaims != nil)
+	if err != nil {
+		return err
+	}
+	prepared, err := repository.prepareEvidencePayloadAuthorization(ctx, route, snapshot)
+	if err != nil {
+		return err
+	}
+	return repository.runCaptureMutation(ctx, allocation != nil, func(ctx context.Context, tx pgx.Tx, proof []byte) error {
+		resources, err := discoverEvidencePayloadResources(ctx, tx, route, snapshot, prepared, allocation)
+		if err != nil {
+			return err
+		}
+		if evidenceCaptureTargetExists(resources, string(actor.ProjectID), route.RecordID) != (allocation == nil) {
+			return evidence.ErrEvidenceServiceUnavailable
+		}
+		resources.continuityProof = proof
+		if err := acquireRecordMutationResources(ctx, tx, resources); err != nil {
+			return err
+		}
+		current, err := discoverEvidencePayloadResources(ctx, tx, route, snapshot, prepared, allocation)
+		if err != nil {
+			return &pgconn.PgError{Code: "40001", Message: "evidence payload route changed; restart transaction"}
+		}
+		if !reflect.DeepEqual(resources.resources, current.resources) {
+			return &pgconn.PgError{Code: "40001", Message: "evidence payload resources changed; restart transaction"}
+		}
+		member, err := NewPostgresCollaborationMembershipReader().ReadMemberActor(ctx, tx, actor.ProjectID, actor.UserID)
+		if err != nil || member.CanonicalHash() != actor.CanonicalHash() {
+			return recordauth.ErrDenied
+		}
+		if err := prepared.authorize(ctx, tx, member, route); err != nil {
+			return err
+		}
+		commandRoute := evidencePayloadCommandRoute{
+			Route: "capture", ActorID: actor.UserID, ActorScopeDigest: fmt.Sprintf("%x", actor.CanonicalHash()),
+			AllocationID: route.AllocationID, RecordID: route.RecordID, SnapshotID: route.SnapshotID,
+			IntentID: route.CaptureIntentID,
+		}
+		if route.ComparisonClaims != nil {
+			commandRoute.Route = "comparison"
+		}
+		_, err = persistEvidencePayloadOnTx(ctx, tx, commandRoute, snapshot)
+		return err
+	})
+}
+
+type preparedEvidencePayloadAuthorization struct {
+	records           currentRecordAuthorizationTransactionResolver
+	sources           *PreparedSourceAuthority
+	envelopes         []evidence.SnapshotEnvelope
+	parents           map[string]persistedEvidenceSnapshot
+	comparisonParents map[string]evidence.CanonicalSnapshot
+}
+
+// W2 observations are obtained before opening the writer transaction. The
+// resolver still rereads membership, current records and source facts in it.
+func (repository *PostgresEvidenceRepository) prepareEvidencePayloadAuthorization(
+	ctx context.Context, route evidence.CapturePayloadRoute, snapshot evidence.CanonicalSnapshot,
+) (*preparedEvidencePayloadAuthorization, error) {
+	if repository == nil {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	prefetcher, ok := repository.current.(currentRecordAuthorizationPrefetcher)
+	if !ok || nilRecordSubjectDependency(prefetcher) {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	resolver, ok := repository.subjects.(*RecordSubjectReadResolver)
+	if !ok || resolver == nil {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	reader, ok := resolver.tombstones.(*WitnessedRecordSubjectTombstoneReader)
+	if !ok || reader == nil {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	prepared := &preparedEvidencePayloadAuthorization{
+		envelopes:         []evidence.SnapshotEnvelope{snapshot.Envelope()},
+		parents:           make(map[string]persistedEvidenceSnapshot),
+		comparisonParents: make(map[string]evidence.CanonicalSnapshot),
+	}
+	var recordIDs []string
+	if route.AllocationID == "" {
+		recordIDs = append(recordIDs, route.RecordID)
+	}
+	if route.ComparisonClaims != nil {
+		if repository.loadEvidenceSnapshot == nil {
+			return nil, evidence.ErrEvidenceServiceUnavailable
+		}
+		for _, item := range route.ComparisonClaims.Items {
+			recordIDs = append(recordIDs, item.SourceRecordID)
+			ids := append([]string(nil), item.ChosenSnapshotIDs...)
+			if item.SnapshotID != "" {
+				ids = append(ids, item.SnapshotID)
+			}
+			for _, id := range ids {
+				if _, exists := prepared.parents[id]; exists {
+					continue
+				}
+				parent, err := repository.loadEvidenceSnapshot(ctx, id, true)
+				if err != nil || parent.recordID != item.SourceRecordID {
+					return nil, evidence.ErrComparisonIntentStale
+				}
+				prepared.parents[id] = parent
+				prepared.envelopes = append(prepared.envelopes, parent.envelope)
+				if parent.envelope.Key == evidence.ComparisonResultV1Key() {
+					kind, err := evidence.NewComparisonResultKind()
+					if err != nil {
+						return nil, err
+					}
+					canonical, err := evidence.RestoreCanonicalSnapshot(kind.Descriptor(), parent.envelope, parent.canonicalPayload)
+					if err != nil {
+						return nil, evidence.ErrComparisonIntentStale
+					}
+					prepared.comparisonParents[id] = canonical
+				}
+			}
+		}
+	}
+	var err error
+	prepared.records, err = prefetcher.prepareCurrentAuthorization(ctx, recordIDs)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]sourceretirement.SourceKey, 0, len(prepared.envelopes))
+	for _, envelope := range prepared.envelopes {
+		keys = append(keys, reader.sourceKey(route.Actor.ProjectID, envelope.Authorization.Kind, envelope.Authorization.SourceID))
+	}
+	prepared.sources, err = reader.Prefetch(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	return prepared, nil
+}
+
+func (prepared *preparedEvidencePayloadAuthorization) authorize(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, route evidence.CapturePayloadRoute) error {
+	if prepared == nil || nilRecordSubjectDependency(prepared.records) || prepared.sources == nil {
+		return evidence.ErrEvidenceServiceUnavailable
+	}
+	var targetExists bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from public.records where project_id=$1 and record_id=$2)`, actor.ProjectID, route.RecordID).Scan(&targetExists); err != nil {
+		return err
+	}
+	if route.AllocationID != "" {
+		if targetExists {
+			return evidence.ErrEvidenceServiceUnavailable
+		}
+		if err := recordauth.AllowsCapability(actor, recordauth.CapabilityRecordCreate); err != nil {
+			return err
+		}
+	} else {
+		if !targetExists {
+			return evidence.ErrEvidenceServiceUnavailable
+		}
+		current, err := prepared.records.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, route.RecordID)
+		if err != nil {
+			return err
+		}
+		if err := records.AuthorizeRecordResource(actor, recordauth.CapabilityEvidenceCreate, current.Evidence); err != nil {
+			return err
+		}
+	}
+	if route.ComparisonClaims != nil {
+		seen := make(map[string]struct{})
+		for _, item := range route.ComparisonClaims.Items {
+			if _, exists := seen[item.SourceRecordID]; exists {
+				continue
+			}
+			seen[item.SourceRecordID] = struct{}{}
+			current, err := prepared.records.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, item.SourceRecordID)
+			if err != nil {
+				return err
+			}
+			if err := records.AuthorizeRecordResource(actor, recordauth.CapabilityEvidenceRead, current.Evidence); err != nil {
+				return err
+			}
+		}
+	}
+	for id, parent := range prepared.parents {
+		current, err := readRevisionMutationSnapshot(ctx, tx, id)
+		if err != nil || current.RecordID != parent.recordID || current.PayloadDigest != parent.payloadDigest ||
+			current.SourceKind != records.SubjectKind(parent.envelope.Source.Type) || current.SourceID != parent.envelope.Source.ID ||
+			current.AuthorizationDigest != parent.envelope.Authorization.Digest {
+			return &pgconn.PgError{Code: "40001", Message: "comparison evidence source changed; restart transaction"}
+		}
+	}
+	live := transactionRecordSubjectSource{db: tx}
+	registry, err := records.NewSubjectAdapterRegistry([]records.SubjectSourceAdapter{
+		newVPSRecordSubjectAdapter(live), newMonitoringInstanceRecordSubjectAdapter(live), newTargetRecordSubjectAdapter(live),
+	})
+	if err != nil {
+		return err
+	}
+	resolver := NewRecordSubjectReadResolver(registry, prepared.sources.ForTransaction(tx))
+	for index, envelope := range prepared.envelopes {
+		kind, ok := evidenceReadSubjectKind(envelope.Source.Type)
+		if !ok || envelope.Source.ID != envelope.Authorization.SourceID {
+			return evidence.ErrEvidenceServiceUnavailable
+		}
+		identity, err := records.NewSubjectIdentitySnapshot(kind, envelope.Source.Fields)
+		if err != nil {
+			return err
+		}
+		resolved, err := resolver.Resolve(ctx, actor, RecordSubjectReadInput{
+			Reference:        records.SubjectReference{RegistryVersion: records.SubjectRegistryVersionV1, Kind: kind, Role: records.RelationRoleEvidenceSource, SourceID: envelope.Source.ID},
+			IdentitySnapshot: identity, CaptureAuthorization: envelope.Authorization,
+		})
+		if err != nil {
+			return err
+		}
+		if index == 0 && route.CaptureIntentID != "" && resolved.CaptureAuthorization.State != recordauth.SourceStateLive {
+			return evidence.ErrPreviewStale
+		}
+		capability := recordauth.CapabilityEvidenceRead
+		if index == 0 {
+			capability = recordauth.CapabilityEvidenceCreate
+		}
+		if err := recordauth.Authorize(actor, capability, recordauth.ResourceScope{
+			Version: recordauth.ResourceScopeVersionV1, ProjectID: actor.ProjectID,
+			Visibility: envelope.Authorization.CaptureScope, Sources: []recordauth.SourceAuthorization{resolved.CaptureAuthorization},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// prepareEvidenceAllocation resolves the server-owned request before opening a
+// writer transaction. The ranked allocation command rechecks its immutable
+// request, monotonic state and current certified binding after acquisition.
+func (repository *PostgresEvidenceRepository) prepareEvidenceAllocation(ctx context.Context, actor recordauth.ActorScope, allocationID, recordID string, comparison bool) (*recordbirth.Allocation, error) {
+	if allocationID == "" {
+		return nil, nil
+	}
+	if repository == nil || repository.platform == nil {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	allocation, err := (&PostgresRecordBirthRepository{platform: repository.platform}).GetAllocation(ctx, actor, allocationID)
+	if err != nil || allocation.Validate() != nil || allocation.AllocationID != allocationID ||
+		allocation.RecordID != recordID || allocation.Request.ProjectID != string(actor.ProjectID) ||
+		allocation.Request.ActorID != actor.UserID || allocation.Request.ActorScopeDigest != actor.CanonicalHash() {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	if comparison {
+		if allocation.Request.Purpose != recordbirth.PurposeComparison {
+			return nil, evidence.ErrEvidenceServiceUnavailable
+		}
+	} else if allocation.Request.Purpose != recordbirth.PurposeCreate && allocation.Request.Purpose != recordbirth.PurposeEvidence {
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+	switch allocation.State {
+	case recordbirth.StateAllocated, recordbirth.StatePreparing, recordbirth.StatePrepared:
+		return &allocation, nil
+	default:
+		return nil, evidence.ErrEvidenceServiceUnavailable
+	}
+}
+
+func appendEvidenceAllocationResource(resources *records.RevisionMutationResources, allocation *recordbirth.Allocation) {
+	if allocation != nil {
+		resources.Allocations = append(resources.Allocations, records.RevisionMutationAllocation{
+			AllocationID: allocation.AllocationID, Request: allocation.Request, RecordID: allocation.RecordID,
+		})
+	}
+}
+
+// A missing root is only a candidate; an acquired, exact birth allocation is
+// required before its route can authorize a pre-root mutation.
+func evidenceCaptureTargetExists(resources recordMutationResources, projectID, recordID string) bool {
+	for _, root := range resources.resources.RootObservations {
+		if root.ProjectID == projectID && root.RecordID == recordID {
+			return root.Exists
+		}
+	}
+	return false
+}
+
+// Discovery supplies candidates only. The caller compares the complete result
+// after acquisition; observing no reservation or root is not a birth permit.
+func discoverEvidencePayloadResources(ctx context.Context, tx pgx.Tx, route evidence.CapturePayloadRoute, snapshot evidence.CanonicalSnapshot, prepared *preparedEvidencePayloadAuthorization, allocation *recordbirth.Allocation) (recordMutationResources, error) {
+	projectID := string(route.Actor.ProjectID)
+	resources := records.RevisionMutationResources{
+		Records:  []records.RevisionMutationRecord{{ProjectID: projectID, RecordID: route.RecordID}},
+		Payloads: []records.RevisionMutationPayload{{PayloadDigest: snapshot.Hash()}},
+	}
+	appendEvidenceAllocationResource(&resources, allocation)
+	var user records.RevisionMutationUser
+	if err := tx.QueryRow(ctx, `select user_id,role,disabled_at is not null from public.users where user_id=$1`, route.Actor.UserID).Scan(&user.UserID, &user.Role, &user.Disabled); err != nil {
+		return recordMutationResources{}, err
+	}
+	resources.Users = append(resources.Users, user)
+	groups, err := newPostgresRecordAuthorizationRepository(tx).ListActorGroupIDs(ctx, route.Actor.ProjectID, route.Actor.UserID)
+	if err != nil {
+		return recordMutationResources{}, err
+	}
+	for _, groupID := range groups {
+		resources.Groups = append(resources.Groups, records.RevisionMutationGroup{ProjectID: projectID, GroupID: groupID})
+		resources.Memberships = append(resources.Memberships, records.RevisionMutationMembership{GroupID: groupID, UserID: route.Actor.UserID})
+	}
+	for _, envelope := range prepared.envelopes {
+		appendRevisionMutationSource(&resources, envelope.Authorization)
+	}
+	if route.CaptureIntentID != "" {
+		var intent records.RevisionMutationCaptureIntent
+		var kind string
+		var version int64
+		var previewDigest, sourceDigest []byte
+		var allocationID string
+		err := tx.QueryRow(ctx, `select intent_id,record_id,coalesce(snapshot_id,''),kind,schema_version,preview_digest,source_digest,selection::text,preview::text,estimated_size_bytes,created_at,valid_until,coalesce(birth_allocation_id,'')
+			from public.evidence_capture_intents where intent_id=$1 and valid_until>clock_timestamp()`, route.CaptureIntentID).Scan(
+			&intent.IntentID, &intent.RecordID, &intent.SnapshotID, &kind, &version, &previewDigest, &sourceDigest,
+			&intent.SelectionJSON, &intent.PreviewJSON, &intent.EstimatedSizeBytes, &intent.CreatedAt, &intent.ValidUntil, &allocationID)
+		if err != nil {
+			return recordMutationResources{}, evidence.ErrCaptureIntentUnavailable
+		}
+		if len(previewDigest) != sha256.Size || len(sourceDigest) != sha256.Size || version < 1 || version > 65535 {
+			return recordMutationResources{}, ErrEvidencePersistenceConflict
+		}
+		intent.Kind = evidence.KindKey{Kind: evidence.KindName(kind), SchemaVersion: evidence.SchemaVersion(version)}
+		copy(intent.PreviewDigest[:], previewDigest)
+		copy(intent.SourceDigest[:], sourceDigest)
+		envelope := snapshot.Envelope()
+		if allocationID != route.AllocationID || intent.RecordID != route.RecordID || intent.SnapshotID != route.SnapshotID ||
+			intent.Kind != envelope.Key || intent.SourceDigest != envelope.SourceDigest {
+			return recordMutationResources{}, ErrEvidencePersistenceConflict
+		}
+		resources.CaptureIntents = append(resources.CaptureIntents, intent)
+	} else {
+		for _, item := range route.ComparisonClaims.Items {
+			resources.Records = append(resources.Records, records.RevisionMutationRecord{ProjectID: projectID, RecordID: item.SourceRecordID})
+			if item.RevisionID != "" {
+				var owner string
+				if err := tx.QueryRow(ctx, `select record_id from public.record_revisions where revision_id=$1`, item.RevisionID).Scan(&owner); err != nil || owner != item.RecordID {
+					return recordMutationResources{}, evidence.ErrComparisonIntentStale
+				}
+				resources.Revisions = append(resources.Revisions, records.RevisionMutationRevision{RecordID: owner, RevisionID: item.RevisionID})
+			}
+			snapshotIDs := append([]string(nil), item.ChosenSnapshotIDs...)
+			if item.SnapshotID != "" {
+				snapshotIDs = append(snapshotIDs, item.SnapshotID)
+			}
+			for _, snapshotID := range snapshotIDs {
+				parent, err := readRevisionMutationSnapshot(ctx, tx, snapshotID)
+				if err != nil || parent.RecordID != item.SourceRecordID {
+					return recordMutationResources{}, evidence.ErrComparisonIntentStale
+				}
+				resources.Snapshots = append(resources.Snapshots, parent)
+				resources.Payloads = append(resources.Payloads, records.RevisionMutationPayload{PayloadDigest: parent.PayloadDigest})
+				resources.Sources = append(resources.Sources, records.RevisionMutationSource{ProjectID: projectID, SourceKind: parent.SourceKind, SourceID: parent.SourceID})
+				if comparison, ok := prepared.comparisonParents[snapshotID]; ok {
+					items, err := evidence.ExtractComparisonDependencyItems(comparison)
+					if err != nil {
+						return recordMutationResources{}, evidence.ErrComparisonIntentStale
+					}
+					dependencies, complete, err := readCertifiedComparisonDependencies(ctx, tx, snapshotID, comparison.Hash(), items)
+					if err != nil {
+						return recordMutationResources{}, err
+					}
+					if !complete {
+						return recordMutationResources{}, evidence.ErrComparisonIntentStale
+					}
+					appendRevisionMutationDependencies(&resources, snapshotID, comparison.Hash(), dependencies)
+				}
+			}
+		}
+	}
+	normalized, err := records.CombineRevisionMutationResources(resources)
+	if err != nil {
+		return recordMutationResources{}, err
+	}
+	for _, record := range normalized.Records {
+		if err := appendEvidenceCurrentRecordResources(ctx, tx, &normalized, record); err != nil {
+			return recordMutationResources{}, err
+		}
+	}
+	return normalizeRecordMutationDeclarations(normalized)
+}
+
+func appendEvidenceCurrentRecordResources(ctx context.Context, tx pgx.Tx, resources *records.RevisionMutationResources, record records.RevisionMutationRecord) error {
+	var root records.RevisionMutationRootObservation
+	root.ProjectID, root.RecordID = record.ProjectID, record.RecordID
+	var visibility, visibilityDigest []byte
+	err := tx.QueryRow(ctx, `select coalesce(current_revision_id,''),lifecycle,lock_version,authorization_epoch,current_visibility_scope,current_visibility_digest from public.records where project_id=$1 and record_id=$2`, record.ProjectID, record.RecordID).Scan(&root.CurrentRevisionID, &root.Lifecycle, &root.LockVersion, &root.AuthorizationEpoch, &visibility, &visibilityDigest)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	root.Exists = err == nil
+	resources.RootObservations = append(resources.RootObservations, root)
+	revisionID := root.CurrentRevisionID
+	if err == nil && len(visibility) != 0 {
+		scope, err := decodeStoredRecordVisibility(visibility, visibilityDigest)
+		if err != nil {
+			return err
+		}
+		appendRevisionMutationVisibility(resources, scope)
+	}
+	if revisionID != "" {
+		resources.Revisions = append(resources.Revisions, records.RevisionMutationRevision{RecordID: record.RecordID, RevisionID: revisionID})
+		rows, err := tx.Query(ctx, `select capture_authorization,capture_authorization_digest from public.record_revision_subjects where revision_id=$1 order by ordinal`, revisionID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var raw, digest []byte
+			var authorization recordauth.SourceAuthorization
+			if err := rows.Scan(&raw, &digest); err != nil {
+				rows.Close()
+				return err
+			}
+			if err := decodeStoredRecordJSON(raw, &authorization); err != nil {
+				rows.Close()
+				return err
+			}
+			authorization, err = normalizeCanonicalRecordSubjectAuthorization(authorization)
+			if err != nil || !sameStoredRecordDigest(authorization.Digest, digest) {
+				rows.Close()
+				return records.ErrInvalidRevisionMutationResources
+			}
+			appendRevisionMutationSource(resources, authorization)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	reservations, err := readRevisionMutationRows[records.RevisionMutationReservation](ctx, tx, `select project_id,object_id,reservation_id,state,fence_epoch,owner_id,owner_generation,
+		coalesce(owner_expires_at,'0001-01-01 00:00:00+00'::timestamptz) from public.deletion_reservations
+		where project_id=$1 and object_kind='record' and object_id=$2 and state in ('previewed','fenced','committed') order by reservation_id`, record.ProjectID, record.RecordID)
+	if err != nil {
+		return err
+	}
+	resources.Reservations = append(resources.Reservations, reservations...)
+	return nil
 }
 
 func (repository *PostgresEvidenceRepository) ReadProjectEvidenceCapacity(
@@ -530,7 +1103,7 @@ func (repository *PostgresEvidenceRepository) DeleteExpiredCaptureIntents(
 	if ctx == nil || limit == 0 || limit > maxEvidenceLifecycleBatchSize {
 		return nil, ErrInvalidEvidencePersistence
 	}
-	tx, err := repository.startAdmittedTransaction(ctx)
+	tx, err := repository.startEvidenceMutationTransaction(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -580,40 +1153,33 @@ func (repository *PostgresEvidenceRepository) CollectUnreferencedPayloads(
 	if ctx == nil || limit == 0 || limit > maxEvidenceLifecycleBatchSize {
 		return nil, ErrInvalidEvidencePersistence
 	}
-	tx, err := repository.startAdmittedTransaction(ctx)
+	tx, err := repository.startEvidenceMutationTransaction(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	digests, err := acquireUnreferencedEvidencePayloads(ctx, tx, limit, EvidencePayloadOrphanGracePeriod)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `
-		with candidates as materialized (
-			select payload.payload_digest
-			from public.evidence_payloads as payload
-			where payload.created_at <= transaction_timestamp() - ($2 * interval '1 microsecond')
-			  and not exists (
-				select 1
-				from public.evidence_snapshots as snapshot
-				where snapshot.payload_digest = payload.payload_digest
-			  )
-				order by payload.created_at, payload.payload_digest
-				limit $1
-			), deleted as (
+		with deleted as (
 			delete from public.evidence_payloads as payload
-			using candidates
-			where payload.payload_digest = candidates.payload_digest
+			where payload.payload_digest=any($1::bytea[])
+			  and payload.created_at<=clock_timestamp()-($2::bigint * interval '1 microsecond')
 			  and not exists (
 				select 1
 				from public.evidence_snapshots as snapshot
 				where snapshot.payload_digest = payload.payload_digest
 			  )
 			returning payload.payload_digest, payload.payload_encoding,
-			          payload.canonical_size_bytes, payload.compressed_size_bytes,
+			          payload.canonical_size_bytes, payload.compressed_size_bytes, payload.compressed_payload,
 			          payload.created_at, transaction_timestamp() as deleted_at
 		)
 		select payload_digest, payload_encoding, canonical_size_bytes,
-		       compressed_size_bytes, created_at, deleted_at
+		       compressed_size_bytes, compressed_payload, created_at, deleted_at
 		from deleted
-		order by created_at, payload_digest`, int64(limit), EvidencePayloadOrphanGracePeriod.Microseconds())
+		order by created_at, payload_digest`, digests, EvidencePayloadOrphanGracePeriod.Microseconds())
 	if err != nil {
 		return nil, fmt.Errorf("delete unreferenced evidence payloads: %w", err)
 	}
@@ -625,10 +1191,10 @@ func (repository *PostgresEvidenceRepository) CollectUnreferencedPayloads(
 	}
 	deleted := make([]deletedPayload, 0)
 	for rows.Next() {
-		var rawDigest []byte
+		var rawDigest, compressed []byte
 		var canonicalSize, compressedSize int64
 		var item deletedPayload
-		if err := rows.Scan(&rawDigest, &item.encoding, &canonicalSize, &compressedSize, &item.createdAt, &item.deletedAt); err != nil {
+		if err := rows.Scan(&rawDigest, &item.encoding, &canonicalSize, &compressedSize, &compressed, &item.createdAt, &item.deletedAt); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan unreferenced evidence payload: %w", err)
 		}
@@ -640,6 +1206,10 @@ func (repository *PostgresEvidenceRepository) CollectUnreferencedPayloads(
 			return nil, ErrEvidencePersistenceConflict
 		}
 		copy(item.digest[:], rawDigest)
+		if _, err := decodeEvidencePayloadBytes(compressed, canonicalSize, compressedSize, item.digest); err != nil {
+			rows.Close()
+			return nil, ErrEvidencePersistenceConflict
+		}
 		item.canonicalSize = uint64(canonicalSize)
 		item.compressedSize = uint64(compressedSize)
 		item.createdAt = item.createdAt.UTC()
@@ -684,6 +1254,50 @@ func (repository *PostgresEvidenceRepository) startAdmittedTransaction(ctx conte
 		return nil, err
 	}
 	if err := repository.platform.admit(ctx, tx); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
+}
+
+func (repository *PostgresEvidenceRepository) runCaptureMutation(ctx context.Context, birth bool, callback func(context.Context, pgx.Tx, []byte) error) error {
+	if repository == nil || repository.platform == nil || callback == nil {
+		return ErrRecordPlatformAdmissionUnavailable
+	}
+	run := func(ctx context.Context, transaction *RecordPlatformTransaction, proof []byte) error {
+		if err := lockComparisonDecisionForWriter(ctx, transaction.tx); err != nil {
+			return err
+		}
+		return callback(ctx, transaction.tx, proof)
+	}
+	if birth {
+		return repository.platform.runSourceAuthorizedBirthMutationTransaction(ctx, repository.continuity, run)
+	}
+	return repository.platform.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		return run(ctx, transaction, nil)
+	})
+}
+
+// Evidence mutations share the source graph and comparison decision fences.
+// Acquire them before any record or evidence rows, and keep them through the
+// transaction so a deletion decision cannot become stale before its gate.
+func (repository *PostgresEvidenceRepository) startEvidenceMutationTransaction(ctx context.Context) (pgx.Tx, error) {
+	if repository == nil || repository.platform == nil {
+		return nil, ErrRecordPlatformAdmissionUnavailable
+	}
+	tx, err := repository.platform.startTransactionWithOptions(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	if err := repository.platform.admit(ctx, tx); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	if err := lockComparisonDecisionForWriter(ctx, tx); err != nil {
 		_ = tx.Rollback(ctx)
 		return nil, err
 	}

@@ -7,14 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/platformmigrate"
+	"houfeng/internal/center/recordauthority"
 	"houfeng/internal/center/recordplatform"
+	"houfeng/internal/center/records"
 	storemigrate "houfeng/internal/center/store/migrate"
 )
 
@@ -189,23 +194,8 @@ func TestPostgresIntegrationRecordPlatformConcurrentIdempotencyClaimHasOneFenced
 func TestPostgresIntegrationRecordPlatformConcurrentOutboxAndLeaseClaimsHaveOneWinner(t *testing.T) {
 	ctx := context.Background()
 	t.Run("outbox", func(t *testing.T) {
-		fixture := newRecordsPostgresFixture(t, ctx)
-		seedRepository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-seed", 1), allowRecordPlatformAdmissionGate)
-		if err := seedRepository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-			_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
-				Event: recordplatform.OutboxEvent{
-					ProjectID:          "default",
-					EventKind:          recordplatform.OutboxEventKindRecordCreated,
-					SubjectKind:        recordplatform.OutboxSubjectKindRecord,
-					SubjectID:          "rec_outboxrace",
-					AuthorizationEpoch: 1,
-				},
-				ExpiresAfter: 5 * time.Minute,
-			})
-			return err
-		}); err != nil {
-			t.Fatalf("seed outbox event: %v", err)
-		}
+		fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+		seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-race-parent")
 
 		results := make(chan struct {
 			claim *recordplatform.ClaimedOutboxEventV1
@@ -213,8 +203,8 @@ func TestPostgresIntegrationRecordPlatformConcurrentOutboxAndLeaseClaimsHaveOneW
 		}, 2)
 		start := make(chan struct{})
 		for _, repository := range []*PostgresRecordPlatformRepository{
-			NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-claim-a", 1), allowRecordPlatformAdmissionGate),
-			NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-claim-b", 1), allowRecordPlatformAdmissionGate),
+			NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-claim-a", 1), gate),
+			NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-claim-b", 1), gate),
 		} {
 			repository := repository
 			go func() {
@@ -247,9 +237,9 @@ func TestPostgresIntegrationRecordPlatformConcurrentOutboxAndLeaseClaimsHaveOneW
 	})
 
 	t.Run("object content lease", func(t *testing.T) {
-		fixture := newRecordPlatformPostgresFixture(t, ctx)
-		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_leaserace"}
-		fixture.seedContentDeliveryEpoch(t, ctx, object, 0)
+		fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+		created := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "lease-race-parent")
+		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: created.RecordID}
 
 		results := make(chan struct {
 			lease recordplatform.ObjectContentLeaseV1
@@ -264,7 +254,7 @@ func TestPostgresIntegrationRecordPlatformConcurrentOutboxAndLeaseClaimsHaveOneW
 			{owner: "lease_worker_b", applicationName: "record-platform-lease-claim-b"},
 		} {
 			worker := worker
-			repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, worker.applicationName, 1), allowRecordPlatformAdmissionGate)
+			repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, worker.applicationName, 1), gate)
 			go func() {
 				<-start
 				lease, err := repository.AcquireObjectContentLease(context.Background(), object, recordplatform.LeaseClaimInputV1{OwnerID: worker.owner, LeaseDuration: time.Minute})
@@ -358,26 +348,34 @@ func TestPostgresIntegrationRecordPlatformRejectsRawDeletionTokenTransportBefore
 
 func TestPostgresIntegrationRecordPlatformTransactionRollsBackBusinessIdempotencyAndOutbox(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
 	fixture.installAtomicBusinessFactTable(t, ctx)
-	repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-atomic-rollback", 1), allowRecordPlatformAdmissionGate)
+	repository := NewPostgresRecordPlatformRepository(runtime, gate)
 	const (
 		factID         = "fact_atomicrollback"
 		idempotencyKey = "atomic-rollback"
-		subjectID      = "rec_atomicrollback"
 	)
+	parent := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "atomic-rollback-parent")
+	subjectID := parent.RecordID
+	var initialOutboxRows int
+	if err := runtime.QueryRow(ctx, `select count(*)::int from public.record_outbox where subject_id=$1`, subjectID).Scan(&initialOutboxRows); err != nil {
+		t.Fatal(err)
+	}
+	key := recordplatform.IdempotencyKey{ProjectID: recordplatform.ProjectIDDefault, OperationKind: recordplatform.OperationKindRecordCreate, Key: idempotencyKey}
 	rollback := errors.New("force atomic record platform rollback")
 
-	err := repository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err := repository.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		acquired, err := acquireEffectMutationResources(ctx, transaction.tx, []string{subjectID}, nil,
+			records.RevisionMutationResources{Idempotency: []records.RevisionMutationIdempotency{{Key: key}}})
+		if err != nil {
+			return err
+		}
+		transaction.registerAcquiredRecordMutationResources(acquired)
 		if _, err := recordPlatformTestExec(ctx, transaction, `insert into public.record_platform_test_business_facts_v1 (fact_id) values ($1)`, factID); err != nil {
 			return err
 		}
 		if _, err := transaction.ClaimIdempotency(ctx, recordplatform.IdempotencyClaimInputV1{
-			Key: recordplatform.IdempotencyKey{
-				ProjectID:     recordplatform.ProjectIDDefault,
-				OperationKind: recordplatform.OperationKindRecordCreate,
-				Key:           idempotencyKey,
-			},
+			Key:                key,
 			RequestFingerprint: recordPlatformIntegrationRequestFingerprint(t, recordplatform.OperationKindRecordCreate, 0x81),
 			OwnerID:            "atomic_rollback_worker",
 			OwnerLeaseDuration: time.Minute,
@@ -391,7 +389,7 @@ func TestPostgresIntegrationRecordPlatformTransactionRollsBackBusinessIdempotenc
 				EventKind:          recordplatform.OutboxEventKindRecordCreated,
 				SubjectKind:        recordplatform.OutboxSubjectKindRecord,
 				SubjectID:          subjectID,
-				AuthorizationEpoch: 0,
+				AuthorizationEpoch: parent.AuthorizationEpoch,
 			},
 			ExpiresAfter: time.Hour,
 		})
@@ -424,8 +422,8 @@ func TestPostgresIntegrationRecordPlatformTransactionRollsBackBusinessIdempotenc
 	if err := runtimePool.QueryRow(ctx, `select count(*)::int from public.record_outbox where subject_id = $1`, subjectID).Scan(&outboxRows); err != nil {
 		t.Fatalf("count rolled-back outbox rows as direct runtime: %v", err)
 	}
-	if businessRows != 0 || idempotencyRows != 0 || outboxRows != 0 {
-		t.Fatalf("rolled-back transaction rows = business %d idempotency %d outbox %d, want 0/0/0", businessRows, idempotencyRows, outboxRows)
+	if businessRows != 0 || idempotencyRows != 0 || outboxRows != initialOutboxRows {
+		t.Fatalf("rolled-back transaction rows = business %d idempotency %d outbox %d, want 0/0/%d", businessRows, idempotencyRows, outboxRows, initialOutboxRows)
 	}
 }
 
@@ -464,23 +462,9 @@ func TestPostgresIntegrationRecordPlatformExpiredTakeoverFencesStaleFinalizers(t
 	})
 
 	t.Run("outbox sent finalization", func(t *testing.T) {
-		fixture := newRecordsPostgresFixture(t, ctx)
-		repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-takeover", 1), allowRecordPlatformAdmissionGate)
-		if err := repository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-			_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
-				Event: recordplatform.OutboxEvent{
-					ProjectID:          "default",
-					EventKind:          recordplatform.OutboxEventKindRecordUpdated,
-					SubjectKind:        recordplatform.OutboxSubjectKindRecord,
-					SubjectID:          "rec_outboxtakeover",
-					AuthorizationEpoch: 1,
-				},
-				ExpiresAfter: 5 * time.Minute,
-			})
-			return err
-		}); err != nil {
-			t.Fatalf("seed outbox event: %v", err)
-		}
+		fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+		seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-takeover-parent")
+		repository := NewPostgresRecordPlatformRepository(runtime, gate)
 		first, err := repository.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "outbox_owner_a", OwnerLeaseDuration: time.Minute})
 		if err != nil || first == nil || first.Owner.Generation != 1 {
 			t.Fatalf("first ClaimOutbox() = (%#v, %v), want generation-one owner", first, err)
@@ -489,6 +473,12 @@ func TestPostgresIntegrationRecordPlatformExpiredTakeoverFencesStaleFinalizers(t
 		second, err := repository.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "outbox_owner_b", OwnerLeaseDuration: time.Minute})
 		if err != nil || second == nil || second.Owner.Generation != 2 {
 			t.Fatalf("takeover ClaimOutbox() = (%#v, %v), want generation-two owner", second, err)
+		}
+		if err := repository.CancelOutbox(ctx, *first); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+			t.Fatalf("CancelOutbox() from stale owner error = %v, want ErrLostOwnerLease", err)
+		}
+		if err := repository.RetryOutbox(ctx, *first, time.Second); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+			t.Fatalf("RetryOutbox() from stale owner error = %v, want ErrLostOwnerLease", err)
 		}
 		if err := repository.MarkOutboxSent(ctx, *first); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
 			t.Fatalf("MarkOutboxSent() from stale owner error = %v, want ErrLostOwnerLease", err)
@@ -499,10 +489,10 @@ func TestPostgresIntegrationRecordPlatformExpiredTakeoverFencesStaleFinalizers(t
 	})
 
 	t.Run("object content release", func(t *testing.T) {
-		fixture := newRecordPlatformPostgresFixture(t, ctx)
-		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_leasetakeover"}
-		fixture.seedContentDeliveryEpoch(t, ctx, object, 0)
-		repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-lease-takeover", 1), allowRecordPlatformAdmissionGate)
+		fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+		created := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "lease-takeover-parent")
+		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: created.RecordID}
+		repository := NewPostgresRecordPlatformRepository(runtime, gate)
 		first, err := repository.AcquireObjectContentLease(ctx, object, recordplatform.LeaseClaimInputV1{OwnerID: "lease_owner_a", LeaseDuration: time.Minute})
 		if err != nil || first.Owner.Generation != 1 {
 			t.Fatalf("first AcquireObjectContentLease() = (%#v, %v), want generation-one owner", first, err)
@@ -519,6 +509,673 @@ func TestPostgresIntegrationRecordPlatformExpiredTakeoverFencesStaleFinalizers(t
 			t.Fatalf("ReleaseObjectContentLease() from current owner: %v", err)
 		}
 	})
+}
+
+func TestPostgresIntegrationOutboxRequiresAcquiredRecordRoute(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	parent := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-required-parent")
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	claim, err := queue.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "outbox_route_owner", OwnerLeaseDuration: time.Minute})
+	if err != nil || claim == nil {
+		t.Fatalf("claim outbox = %#v, %v", claim, err)
+	}
+	input := recordplatform.OutboxEnqueueInputV1{Event: recordplatform.OutboxEvent{
+		ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordUpdated,
+		SubjectKind: recordplatform.OutboxSubjectKindRecord, SubjectID: parent.RecordID, AuthorizationEpoch: parent.AuthorizationEpoch,
+	}, ExpiresAfter: time.Hour}
+	err = queue.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		_, err := transaction.EnqueueOutbox(ctx, input)
+		return err
+	})
+	if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("enqueue without acquired route = %v", err)
+	}
+	err = queue.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		return transaction.AssertOutboxClaim(ctx, *claim)
+	})
+	if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("assert without acquired route = %v", err)
+	}
+	err = queue.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		acquired, err := acquireEffectMutationResources(ctx, transaction.tx, []string{parent.RecordID}, nil, records.RevisionMutationResources{})
+		if err != nil {
+			return err
+		}
+		transaction.registerAcquiredRecordMutationResources(acquired)
+		if err := transaction.AssertOutboxClaim(ctx, *claim); err != nil {
+			return err
+		}
+		_, err = transaction.EnqueueOutbox(ctx, input)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("assert and enqueue with acquired route: %v", err)
+	}
+	var count int
+	if err := fixture.db.QueryRow(ctx, `select count(*) from public.record_outbox where subject_id=$1`, parent.RecordID).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("outbox row count=%d error=%v, want original plus admitted enqueue", count, err)
+	}
+}
+
+func TestPostgresIntegrationOutboxFenceAndTerminalOutcomes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	ids := make([]string, 4)
+	for index := range ids {
+		ids[index] = seedAdmittedOutboxRecord(t, ctx, runtime, gate, fmt.Sprintf("outbox-fence-parent-%d", index)).RecordID
+	}
+	claims := make([]recordplatform.ClaimedOutboxEventV1, 2)
+	for index := range claims {
+		claim, err := queue.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "outbox_fence_worker", OwnerLeaseDuration: time.Minute})
+		if err != nil || claim == nil || claim.Event.SubjectID != ids[index] {
+			t.Fatalf("claim %d = (%#v, %v)", index, claim, err)
+		}
+		claims[index] = *claim
+	}
+	for _, id := range ids[:3] {
+		_, err := queue.AcquireDeletionFenceLease(ctx, recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: id},
+			recordplatform.LeaseClaimInputV1{OwnerID: "outbox_fence_owner", LeaseDuration: time.Minute})
+		if err != nil {
+			t.Fatalf("acquire deletion fence for %s: %v", id, err)
+		}
+	}
+	if err := queue.RetryOutbox(ctx, claims[0], time.Second); !errors.Is(err, records.ErrRecordDeletionReserved) {
+		t.Fatalf("retry behind deletion fence = %v, want reserved", err)
+	}
+	if err := queue.CancelOutbox(ctx, claims[0]); err != nil {
+		t.Fatalf("cancel terminal claim behind deletion fence: %v", err)
+	}
+	if err := queue.MarkOutboxSent(ctx, claims[1]); err != nil {
+		t.Fatalf("record terminal sent outcome behind deletion fence: %v", err)
+	}
+	claim, err := queue.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "outbox_unrelated_worker", OwnerLeaseDuration: time.Minute})
+	if err != nil || claim == nil || claim.Event.SubjectID != ids[3] {
+		t.Fatalf("claim after fenced candidate = (%#v, %v), want unrelated record", claim, err)
+	}
+	var cancelled, sent, pending string
+	if err := fixture.db.QueryRow(ctx, `select
+		(select status from public.record_outbox where outbox_row_id=$1),
+		(select status from public.record_outbox where outbox_row_id=$2),
+		(select status from public.record_outbox where subject_id=$3)`, claims[0].Event.RowID, claims[1].Event.RowID, ids[2]).Scan(&cancelled, &sent, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != "cancelled" || sent != "sent" || pending != "pending" {
+		t.Fatalf("outbox states = %q/%q/%q, want cancelled/sent/pending", cancelled, sent, pending)
+	}
+}
+
+func TestPostgresIntegrationOutboxClaimPagesPastFencedRecords(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	blocked := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-page-parent-a")
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	if err := queue.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		acquired, err := acquireEffectMutationResources(ctx, transaction.tx, []string{blocked.RecordID}, nil, records.RevisionMutationResources{})
+		if err != nil {
+			return err
+		}
+		transaction.registerAcquiredRecordMutationResources(acquired)
+		for range 129 {
+			_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{Event: recordplatform.OutboxEvent{
+				ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordUpdated,
+				SubjectKind: recordplatform.OutboxSubjectKindRecord, SubjectID: blocked.RecordID,
+				AuthorizationEpoch: blocked.AuthorizationEpoch,
+			}, ExpiresAfter: time.Hour})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("enqueue fenced page: %v", err)
+	}
+	if _, err := queue.AcquireDeletionFenceLease(ctx, recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: blocked.RecordID},
+		recordplatform.LeaseClaimInputV1{OwnerID: "outbox_page_fence", LeaseDuration: 10 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	available := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-page-parent-b")
+	claim, err := queue.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "outbox_page_worker", OwnerLeaseDuration: time.Minute})
+	if err != nil || claim == nil || claim.Event.SubjectID != available.RecordID {
+		t.Fatalf("claim after fenced pages = %#v, %v", claim, err)
+	}
+	var pending int
+	if err := fixture.db.QueryRow(ctx, `select count(*) from public.record_outbox where subject_id=$1 and status='pending'`, blocked.RecordID).Scan(&pending); err != nil || pending != 130 {
+		t.Fatalf("fenced pending events=%d error=%v, want 130", pending, err)
+	}
+}
+
+func TestPostgresIntegrationOutboxRetrySerializesBeforeDeletionFence(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	parent := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-writer-first-parent")
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	claim, err := queue.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "writer_first", OwnerLeaseDuration: time.Minute})
+	if err != nil || claim == nil {
+		t.Fatalf("claim outbox: %#v %v", claim, err)
+	}
+	for _, statement := range []string{
+		`create table public.test_outbox_retry_latch (id integer primary key)`,
+		`insert into public.test_outbox_retry_latch values (1)`,
+		`create function record_platform_internal.test_outbox_retry_latch() returns trigger
+		 language plpgsql security definer set search_path=pg_catalog as $$
+		 begin perform id from public.test_outbox_retry_latch where id=1 for update; return new; end $$`,
+		`create trigger test_outbox_retry_latch after update on public.record_outbox for each row
+		 when (old.status='processing' and new.status='pending') execute function record_platform_internal.test_outbox_retry_latch()`,
+	} {
+		if _, err := fixture.db.Exec(ctx, statement); err != nil {
+			t.Fatalf("install retry barrier: %v", err)
+		}
+	}
+	holder, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	var holderPID int
+	if err := holder.QueryRow(ctx, `select pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `select id from public.test_outbox_retry_latch where id=1 for update`); err != nil {
+		t.Fatal(err)
+	}
+	writerPool := fixture.openDirectRuntimePool(t, ctx, "outbox-writer-first", 1)
+	fencePool := fixture.openDirectRuntimePool(t, ctx, "outbox-fence-second", 1)
+	var writerPID, fencePID int
+	if err := writerPool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&writerPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fencePool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&fencePID); err != nil {
+		t.Fatal(err)
+	}
+	writerResult := make(chan error, 1)
+	go func() {
+		writerResult <- NewPostgresRecordPlatformRepository(writerPool, gate).RetryOutbox(ctx, *claim, time.Second)
+	}()
+	waitForPostgresBlockingPID(t, ctx, fixture.db, writerPID, holderPID)
+	fenceResult := make(chan error, 1)
+	go func() {
+		_, err := NewPostgresRecordPlatformRepository(fencePool, gate).AcquireDeletionFenceLease(ctx,
+			recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: parent.RecordID},
+			recordplatform.LeaseClaimInputV1{OwnerID: "outbox_later_fence", LeaseDuration: time.Minute})
+		fenceResult <- err
+	}()
+	waitForPostgresBlockingPID(t, ctx, fixture.db, fencePID, writerPID)
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForRecordPlatformResult(t, writerResult, "outbox retry"); err != nil {
+		t.Fatalf("retry before deletion fence: %v", err)
+	}
+	if err := waitForRecordPlatformResult(t, fenceResult, "outbox deletion fence"); err != nil {
+		t.Fatalf("deletion fence after retry: %v", err)
+	}
+	var status string
+	if err := fixture.db.QueryRow(ctx, `select status from public.record_outbox where outbox_row_id=$1`, claim.Event.RowID).Scan(&status); err != nil || status != "pending" {
+		t.Fatalf("writer-first durable status=%q error=%v", status, err)
+	}
+}
+
+func TestPostgresIntegrationOutboxFinalizationRestartsOnRouteDrift(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	first := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-route-parent-a")
+	second := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-route-parent-b")
+	if _, err := fixture.db.Exec(ctx, `insert into public.record_actions
+		(action_id,record_id,action_version,title,status,created_by,updated_by,record_fence_epoch)
+		values ('ract_outboxroute',$1,1,'Route','open','usr_aaaaaaaaaaaaaaaaaaaaaaaa','usr_aaaaaaaaaaaaaaaaaaaaaaaa',0)`, first.RecordID); err != nil {
+		t.Fatal(err)
+	}
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	if err := queue.runSourceAuthorizedMutationTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		acquired, err := acquireEffectMutationResources(ctx, transaction.tx, []string{first.RecordID}, nil, records.RevisionMutationResources{})
+		if err != nil {
+			return err
+		}
+		transaction.registerAcquiredRecordMutationResources(acquired)
+		_, err = transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{Event: recordplatform.OutboxEvent{
+			ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionAssigned,
+			SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: "ract_outboxroute",
+			SourceVersion: 1, AuthorizationEpoch: first.AuthorizationEpoch,
+		}, ExpiresAfter: time.Hour})
+		return err
+	}); err != nil {
+		t.Fatalf("enqueue real action route: %v", err)
+	}
+	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, "route_drift_owner")
+	holder, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	var holderPID int
+	if err := holder.QueryRow(ctx, `select pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `select 1 from public.content_delivery_epochs where project_id='default' and object_kind='record' and object_id=$1 for update`, first.RecordID); err != nil {
+		t.Fatal(err)
+	}
+	secondHolder, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = secondHolder.Rollback(context.Background()) }()
+	if _, err := secondHolder.Exec(ctx, `select 1 from public.content_delivery_epochs where project_id='default' and object_kind='record' and object_id=$1 for update`, second.RecordID); err != nil {
+		t.Fatal(err)
+	}
+	workerPool := fixture.openDirectRuntimePool(t, ctx, "outbox-route-drift", 1)
+	var workerPID int
+	if err := workerPool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&workerPID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- NewPostgresRecordPlatformRepository(workerPool, gate).CancelOutbox(ctx, claim) }()
+	waitForPostgresBlockingPID(t, ctx, fixture.db, workerPID, holderPID)
+	if _, err := fixture.db.Exec(ctx, `update public.record_actions set record_id=$2 where action_id=$1`, "ract_outboxroute", second.RecordID); err != nil {
+		t.Fatalf("change persisted action route: %v", err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var pgErr *pgconn.PgError
+	if err := waitForRecordPlatformResult(t, result, "outbox route drift"); !errors.As(err, &pgErr) || pgErr.Code != "40001" {
+		t.Fatalf("cancel with changed subject route = %v, want serialization failure", err)
+	}
+	// B remains locked while the worker finishes: it never substitutes B's
+	// scope for the immutable route captured when the event was enqueued.
+	var status, route string
+	if err := fixture.db.QueryRow(ctx, `select status,record_id from public.record_outbox where outbox_row_id=$1`, claim.Event.RowID).Scan(&status, &route); err != nil {
+		t.Fatal(err)
+	}
+	if status != "processing" || route != first.RecordID {
+		t.Fatalf("drifted outbox row = %s/%s, want processing/%s", status, route, first.RecordID)
+	}
+	if err := secondHolder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostgresIntegrationOutboxFinalizersRejectExpiryAfterLockWait(t *testing.T) {
+	for _, operation := range []struct {
+		name string
+		run  func(context.Context, *PostgresRecordPlatformRepository, recordplatform.ClaimedOutboxEventV1) error
+	}{
+		{name: "cancel", run: func(ctx context.Context, queue *PostgresRecordPlatformRepository, claim recordplatform.ClaimedOutboxEventV1) error {
+			return queue.CancelOutbox(ctx, claim)
+		}},
+		{name: "sent", run: func(ctx context.Context, queue *PostgresRecordPlatformRepository, claim recordplatform.ClaimedOutboxEventV1) error {
+			return queue.MarkOutboxSent(ctx, claim)
+		}},
+		{name: "retry", run: func(ctx context.Context, queue *PostgresRecordPlatformRepository, claim recordplatform.ClaimedOutboxEventV1) error {
+			return queue.RetryOutbox(ctx, claim, time.Second)
+		}},
+	} {
+		for _, lockKind := range []string{"record", "outbox"} {
+			t.Run(operation.name+"-"+lockKind, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+				parent := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-expiry-parent")
+				queue := NewPostgresRecordPlatformRepository(runtime, gate)
+				claim, err := queue.ClaimOutbox(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "expiry_worker", OwnerLeaseDuration: time.Minute})
+				if err != nil || claim == nil {
+					t.Fatalf("claim outbox: %#v %v", claim, err)
+				}
+				if err := fixture.db.QueryRow(ctx, `update public.record_outbox set owner_expires_at=clock_timestamp()+interval '2 seconds'
+				where outbox_row_id=$1 returning owner_expires_at`, claim.Event.RowID).Scan(&claim.Owner.ExpiresAt); err != nil {
+					t.Fatal(err)
+				}
+				holder, err := fixture.db.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = holder.Rollback(context.Background()) }()
+				var holderPID int
+				if err := holder.QueryRow(ctx, `select pg_backend_pid()`).Scan(&holderPID); err != nil {
+					t.Fatal(err)
+				}
+				if lockKind == "record" {
+					if _, err := holder.Exec(ctx, `select 1 from public.content_delivery_epochs where project_id='default' and object_kind='record' and object_id=$1 for update`, parent.RecordID); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if _, err := holder.Exec(ctx, `select 1 from public.record_outbox where outbox_row_id=$1 for update`, claim.Event.RowID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				workerPool := fixture.openDirectRuntimePool(t, ctx, "outbox-expiry-wait-"+operation.name, 1)
+				var workerPID int
+				if err := workerPool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&workerPID); err != nil {
+					t.Fatal(err)
+				}
+				result := make(chan error, 1)
+				go func() { result <- operation.run(ctx, NewPostgresRecordPlatformRepository(workerPool, gate), *claim) }()
+				if lockKind == "record" {
+					waitForPostgresBlockingPID(t, ctx, fixture.db, workerPID, holderPID)
+				} else {
+					var pgErr *pgconn.PgError
+					if err := waitForRecordPlatformResult(t, result, "contended outbox row"); !errors.As(err, &pgErr) || pgErr.Code != "40001" {
+						t.Fatalf("contended outbox finalizer = %v, want serialization failure", err)
+					}
+				}
+				if _, err := fixture.db.Exec(ctx, `select pg_catalog.pg_sleep_until($1::timestamptz + interval '1 millisecond')`, claim.Owner.ExpiresAt); err != nil {
+					t.Fatal(err)
+				}
+				if err := holder.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				var finalErr error
+				if lockKind == "record" {
+					finalErr = waitForRecordPlatformResult(t, result, "outbox expiry after wait")
+				} else {
+					finalErr = operation.run(ctx, NewPostgresRecordPlatformRepository(workerPool, gate), *claim)
+				}
+				if !errors.Is(finalErr, recordplatform.ErrLostOwnerLease) {
+					t.Fatalf("%s after expiry wait = %v, want lost owner", operation.name, finalErr)
+				}
+				var status string
+				if err := fixture.db.QueryRow(ctx, `select status from public.record_outbox where outbox_row_id=$1`, claim.Event.RowID).Scan(&status); err != nil || status != "processing" {
+					t.Fatalf("expired finalization status=%q error=%v", status, err)
+				}
+			})
+		}
+	}
+}
+
+func TestPostgresIntegrationIdempotencyEntryPointsShareScope(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	seed := NewPostgresRecordPlatformRepository(runtime, gate)
+	for _, transactional := range []bool{false, true} {
+		for _, operation := range []string{"claim", "complete", "renew", "release"} {
+			name := fmt.Sprintf("%s-%t", operation, transactional)
+			t.Run(name, func(t *testing.T) {
+				input := recordplatform.IdempotencyClaimInputV1{
+					Key:                recordplatform.IdempotencyKey{ProjectID: recordplatform.ProjectIDDefault, OperationKind: recordplatform.OperationKindRecordUpdate, Key: "scope-" + name},
+					RequestFingerprint: recordPlatformIntegrationRequestFingerprint(t, recordplatform.OperationKindRecordUpdate, 0x31),
+					OwnerID:            "scope_owner", OwnerLeaseDuration: time.Minute, RecordTTL: 5 * time.Minute,
+				}
+				fingerprint := recordPlatformIntegrationRequestFingerprint(t, input.Key.OperationKind, 0x32)
+				var owner recordplatform.OwnerLease
+				if operation != "claim" {
+					claimed, err := seed.ClaimIdempotency(ctx, input)
+					if err != nil || claimed.Owner == nil {
+						t.Fatalf("seed idempotency owner: %#v %v", claimed, err)
+					}
+					owner = *claimed.Owner
+				}
+				holder, err := fixture.db.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = holder.Rollback(context.Background()) }()
+				var holderPID int
+				if err := holder.QueryRow(ctx, `select pg_backend_pid()`).Scan(&holderPID); err != nil {
+					t.Fatal(err)
+				}
+				if err := lockRecordIdempotencyScope(ctx, holder, input.Key); err != nil {
+					t.Fatal(err)
+				}
+				workerPool := fixture.openDirectRuntimePool(t, ctx, "idempotency-scope-"+name, 1)
+				var workerPID int
+				if err := workerPool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&workerPID); err != nil {
+					t.Fatal(err)
+				}
+				worker := NewPostgresRecordPlatformRepository(workerPool, gate)
+				result := make(chan error, 1)
+				go func() {
+					perform := func(transaction *RecordPlatformTransaction) error {
+						switch operation {
+						case "claim":
+							var got recordplatform.IdempotencyClaimResultV1
+							var err error
+							if transaction == nil {
+								got, err = worker.ClaimIdempotency(ctx, input)
+							} else {
+								got, err = transaction.ClaimIdempotency(ctx, input)
+							}
+							if err == nil && got.Owner == nil {
+								return errors.New("claim returned no owner")
+							}
+							return err
+						case "complete":
+							if transaction == nil {
+								return worker.CompleteIdempotency(ctx, input.Key, owner, fingerprint)
+							}
+							return transaction.CompleteIdempotency(ctx, input.Key, owner, fingerprint)
+						case "renew":
+							renewal := recordplatform.IdempotencyRenewInputV1{Key: input.Key, Owner: owner, OwnerLeaseDuration: 2 * time.Minute, RecordTTL: 5 * time.Minute}
+							if transaction == nil {
+								_, err := worker.RenewIdempotency(ctx, renewal)
+								return err
+							}
+							_, err := transaction.RenewIdempotency(ctx, renewal)
+							return err
+						default:
+							if transaction == nil {
+								return worker.ReleaseIdempotency(ctx, input.Key, owner)
+							}
+							return transaction.ReleaseIdempotency(ctx, input.Key, owner)
+						}
+					}
+					if !transactional {
+						result <- perform(nil)
+						return
+					}
+					result <- worker.RunRecordPlatformTransaction(ctx, func(_ context.Context, transaction *RecordPlatformTransaction) error { return perform(transaction) })
+				}()
+				waitForPostgresBlockingPID(t, ctx, fixture.db, workerPID, holderPID)
+				if err := holder.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := waitForRecordPlatformResult(t, result, name); err != nil {
+					t.Fatalf("%s after scope release: %v", name, err)
+				}
+			})
+		}
+	}
+}
+
+func TestPostgresIntegrationIdempotencyRejectsUndeclaredLateScope(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	base := recordplatform.IdempotencyClaimInputV1{
+		Key:                recordplatform.IdempotencyKey{ProjectID: recordplatform.ProjectIDDefault, OperationKind: recordplatform.OperationKindRecordUpdate, Key: "late-existing"},
+		RequestFingerprint: recordPlatformIntegrationRequestFingerprint(t, recordplatform.OperationKindRecordUpdate, 0x41),
+		OwnerID:            "late_scope_owner", OwnerLeaseDuration: time.Minute, RecordTTL: 5 * time.Minute,
+	}
+	claimed, err := queue.ClaimIdempotency(ctx, base)
+	if err != nil || claimed.Owner == nil {
+		t.Fatalf("seed existing owner: %#v %v", claimed, err)
+	}
+	for _, operation := range []string{"claim", "complete", "renew", "release"} {
+		t.Run(operation, func(t *testing.T) {
+			first := base
+			first.Key.Key = "late-first-" + operation
+			err := queue.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+				if _, err := transaction.ClaimIdempotency(ctx, first); err != nil {
+					return err
+				}
+				switch operation {
+				case "claim":
+					_, err := transaction.ClaimIdempotency(ctx, base)
+					return err
+				case "complete":
+					return transaction.CompleteIdempotency(ctx, base.Key, *claimed.Owner, base.RequestFingerprint)
+				case "renew":
+					_, err := transaction.RenewIdempotency(ctx, recordplatform.IdempotencyRenewInputV1{Key: base.Key, Owner: *claimed.Owner, OwnerLeaseDuration: time.Minute, RecordTTL: 5 * time.Minute})
+					return err
+				default:
+					return transaction.ReleaseIdempotency(ctx, base.Key, *claimed.Owner)
+				}
+			})
+			var postgresError *pgconn.PgError
+			if !errors.As(err, &postgresError) || postgresError.Code != "40001" {
+				t.Fatalf("%s undeclared scope error = %v, want 40001", operation, err)
+			}
+			var firstRows int
+			if err := fixture.db.QueryRow(ctx, `select count(*) from public.record_idempotency_keys where project_id=$1 and operation_kind=$2 and idempotency_key=$3`, first.Key.ProjectID, first.Key.OperationKind, first.Key.Key).Scan(&firstRows); err != nil || firstRows != 0 {
+				t.Fatalf("late scope transaction rollback rows=%d error=%v", firstRows, err)
+			}
+		})
+	}
+	parent := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "outbox-late-scope-parent")
+	err = queue.runSourceAuthorizedTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		acquired, err := acquireEffectMutationResources(ctx, transaction.tx, []string{parent.RecordID}, nil, records.RevisionMutationResources{})
+		if err != nil {
+			return err
+		}
+		transaction.registerAcquiredRecordMutationResources(acquired)
+		return transaction.CompleteIdempotency(ctx, base.Key, *claimed.Owner, base.RequestFingerprint)
+	})
+	var postgresError *pgconn.PgError
+	if !errors.As(err, &postgresError) || postgresError.Code != "40001" {
+		t.Fatalf("undeclared scope after record resources = %v, want 40001", err)
+	}
+}
+
+func TestPostgresIntegrationIdempotencyCollisionDoesNotDeclareAnotherKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	var firstKey, secondKey string
+	err := fixture.db.QueryRow(ctx, `with candidates as (
+		select 'collision-' || value::text as key from generate_series(1,500000) as value
+	), hashed as (
+		select key, pg_catalog.hashtext(length($1::text)::text || ':' || $1::text ||
+			length($2::text)::text || ':' || $2::text || length(key)::text || ':' || key) as hash from candidates
+	)
+	select min(key), max(key) from hashed group by hash having count(*)>1 order by hash limit 1`,
+		string(recordplatform.ProjectIDDefault), string(recordplatform.OperationKindRecordUpdate)).Scan(&firstKey, &secondKey)
+	if err != nil || firstKey == secondKey {
+		t.Fatalf("find distinct physical hash collision: %q/%q %v", firstKey, secondKey, err)
+	}
+	input := recordplatform.IdempotencyClaimInputV1{
+		Key:                recordplatform.IdempotencyKey{ProjectID: recordplatform.ProjectIDDefault, OperationKind: recordplatform.OperationKindRecordUpdate, Key: firstKey},
+		RequestFingerprint: recordPlatformIntegrationRequestFingerprint(t, recordplatform.OperationKindRecordUpdate, 0x49),
+		OwnerID:            "collision_owner", OwnerLeaseDuration: time.Minute, RecordTTL: 5 * time.Minute,
+	}
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	err = queue.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if _, err := transaction.ClaimIdempotency(ctx, input); err != nil {
+			return err
+		}
+		input.Key.Key = secondKey
+		_, err := transaction.ClaimIdempotency(ctx, input)
+		return err
+	})
+	var postgresError *pgconn.PgError
+	if !errors.As(err, &postgresError) || postgresError.Code != "40001" {
+		t.Fatalf("undeclared colliding full key = %v, want 40001", err)
+	}
+	var count int
+	if err := fixture.db.QueryRow(ctx, `select count(*) from public.record_idempotency_keys where idempotency_key=any($1::text[])`, []string{firstKey, secondKey}).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("colliding key rollback count=%d error=%v", count, err)
+	}
+}
+
+func TestPostgresIntegrationIdempotencyRejectsExpiredOwnerAfterScopeWait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	input := recordplatform.IdempotencyClaimInputV1{
+		Key:                recordplatform.IdempotencyKey{ProjectID: recordplatform.ProjectIDDefault, OperationKind: recordplatform.OperationKindRecordUpdate, Key: "scope-expiry"},
+		RequestFingerprint: recordPlatformIntegrationRequestFingerprint(t, recordplatform.OperationKindRecordUpdate, 0x51),
+		OwnerID:            "expiry_scope_owner", OwnerLeaseDuration: time.Minute, RecordTTL: 5 * time.Minute,
+	}
+	claim, err := queue.ClaimIdempotency(ctx, input)
+	if err != nil || claim.Owner == nil {
+		t.Fatalf("seed claim = %#v, %v", claim, err)
+	}
+	if err := fixture.db.QueryRow(ctx, `update public.record_idempotency_keys set owner_expires_at=clock_timestamp()+interval '2 seconds'
+		where project_id=$1 and operation_kind=$2 and idempotency_key=$3 returning owner_expires_at`,
+		input.Key.ProjectID, input.Key.OperationKind, input.Key.Key).Scan(&claim.Owner.ExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	var holderPID int
+	if err := holder.QueryRow(ctx, `select pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := lockRecordIdempotencyScope(ctx, holder, input.Key); err != nil {
+		t.Fatal(err)
+	}
+	workerPool := fixture.openDirectRuntimePool(t, ctx, "idempotency-expiry-wait", 1)
+	var workerPID int
+	if err := workerPool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&workerPID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		result <- NewPostgresRecordPlatformRepository(workerPool, gate).CompleteIdempotency(ctx, input.Key, *claim.Owner, input.RequestFingerprint)
+	}()
+	waitForPostgresBlockingPID(t, ctx, fixture.db, workerPID, holderPID)
+	if _, err := fixture.db.Exec(ctx, `select pg_catalog.pg_sleep_until($1::timestamptz + interval '1 millisecond')`, claim.Owner.ExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForRecordPlatformResult(t, result, "idempotency completion after expiry"); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("completion after scope wait = %v, want lost owner", err)
+	}
+	input.OwnerID = "takeover_scope_owner"
+	takeover, err := queue.ClaimIdempotency(ctx, input)
+	if err != nil || takeover.Owner == nil || takeover.Owner.Generation != claim.Owner.Generation+1 {
+		t.Fatalf("takeover after expiry = %#v, %v", takeover, err)
+	}
+}
+
+func TestPostgresIntegrationStaleIdempotencyCompletionRollsBackBusiness(t *testing.T) {
+	ctx := context.Background()
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	fixture.installAtomicBusinessFactTable(t, ctx)
+	queue := NewPostgresRecordPlatformRepository(runtime, gate)
+	input := recordplatform.IdempotencyClaimInputV1{
+		Key:                recordplatform.IdempotencyKey{ProjectID: recordplatform.ProjectIDDefault, OperationKind: recordplatform.OperationKindRecordUpdate, Key: "stale-atomic"},
+		RequestFingerprint: recordPlatformIntegrationRequestFingerprint(t, recordplatform.OperationKindRecordUpdate, 0x61),
+		OwnerID:            "stale_atomic_owner", OwnerLeaseDuration: time.Minute, RecordTTL: 5 * time.Minute,
+	}
+	first, err := queue.ClaimIdempotency(ctx, input)
+	if err != nil || first.Owner == nil {
+		t.Fatalf("first claim = %#v, %v", first, err)
+	}
+	fixture.expireIdempotencyOwner(t, ctx, input.Key)
+	input.OwnerID = "current_atomic_owner"
+	current, err := queue.ClaimIdempotency(ctx, input)
+	if err != nil || current.Owner == nil || current.Owner.Generation != first.Owner.Generation+1 {
+		t.Fatalf("takeover = %#v, %v", current, err)
+	}
+	err = queue.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if _, err := recordPlatformTestExec(ctx, transaction, `insert into public.record_platform_test_business_facts_v1(fact_id) values('stale_atomic')`); err != nil {
+			return err
+		}
+		return transaction.CompleteIdempotency(ctx, input.Key, *first.Owner, input.RequestFingerprint)
+	})
+	if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("stale completion = %v", err)
+	}
+	var facts int
+	if err := runtime.QueryRow(ctx, `select count(*) from public.record_platform_test_business_facts_v1 where fact_id='stale_atomic'`).Scan(&facts); err != nil || facts != 0 {
+		t.Fatalf("stale completion business facts=%d error=%v", facts, err)
+	}
+	if err := queue.CompleteIdempotency(ctx, input.Key, *current.Owner, input.RequestFingerprint); err != nil {
+		t.Fatalf("complete current owner: %v", err)
+	}
 }
 
 func TestPostgresIntegrationRecordPlatformRenewalRejectsPreRenewExpiryTokens(t *testing.T) {
@@ -604,10 +1261,10 @@ func TestPostgresIntegrationRecordPlatformRenewalRejectsPreRenewExpiryTokens(t *
 	})
 
 	t.Run("object content release", func(t *testing.T) {
-		fixture := newRecordPlatformPostgresFixture(t, ctx)
-		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_same_owner_renewal"}
-		fixture.seedContentDeliveryEpoch(t, ctx, object, 0)
-		repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-object-renewal", 1), allowRecordPlatformAdmissionGate)
+		fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+		created := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "lease-renewal-parent")
+		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: created.RecordID}
+		repository := NewPostgresRecordPlatformRepository(runtime, gate)
 		claimed, err := repository.AcquireObjectContentLease(ctx, object, recordplatform.LeaseClaimInputV1{
 			OwnerID:       "renewal_owner",
 			LeaseDuration: time.Minute,
@@ -669,10 +1326,10 @@ func TestPostgresIntegrationRecordPlatformReleaseAndCleanupRetainGenerationFence
 	ctx := context.Background()
 
 	t.Run("object-content release", func(t *testing.T) {
-		fixture := newRecordPlatformPostgresFixture(t, ctx)
-		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_aba_release"}
-		fixture.seedContentDeliveryEpoch(t, ctx, object, 0)
-		repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-aba-object", 1), allowRecordPlatformAdmissionGate)
+		_, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+		created := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "lease-aba-parent")
+		object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: created.RecordID}
+		repository := NewPostgresRecordPlatformRepository(runtime, gate)
 		first, err := repository.AcquireObjectContentLease(ctx, object, recordplatform.LeaseClaimInputV1{OwnerID: "aba_owner", LeaseDuration: time.Minute})
 		if err != nil || first.Owner.Generation != 1 {
 			t.Fatalf("first AcquireObjectContentLease() = (%#v, %v), want generation-one owner", first, err)
@@ -736,17 +1393,17 @@ func TestPostgresIntegrationRecordPlatformReleaseAndCleanupRetainGenerationFence
 
 func TestPostgresIntegrationRecordPlatformServingLeaseUsesDatabaseState(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordPlatformPostgresFixture(t, ctx)
-	repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-serving-lease", 1), allowRecordPlatformAdmissionGate)
-	object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_serving_lease"}
-	fixture.seedContentDeliveryEpoch(t, ctx, object, 4)
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	repository := NewPostgresRecordPlatformRepository(runtime, gate)
+	created := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "serving-lease-parent")
+	object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: created.RecordID}
 
 	serving, err := repository.AcquireServingLease(ctx, object, recordplatform.LeaseClaimInputV1{OwnerID: "serving_owner", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatalf("AcquireServingLease() error = %v", err)
 	}
-	if serving.CapturedEpoch != 4 {
-		t.Fatalf("AcquireServingLease() captured epoch = %d, want 4", serving.CapturedEpoch)
+	if serving.CapturedEpoch != 0 {
+		t.Fatalf("AcquireServingLease() captured epoch = %d, want 0", serving.CapturedEpoch)
 	}
 	if err := repository.AssertServingLease(ctx, serving); err != nil {
 		t.Fatalf("AssertServingLease() live database-backed permit: %v", err)
@@ -757,20 +1414,20 @@ func TestPostgresIntegrationRecordPlatformServingLeaseUsesDatabaseState(t *testi
 	if err := repository.AssertServingLease(ctx, fabricated); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
 		t.Fatalf("AssertServingLease() fabricated epoch error = %v, want ErrLostOwnerLease", err)
 	}
-	fixture.advanceContentDeliveryEpoch(t, ctx, object)
+	if _, err := fixture.db.Exec(ctx, `update public.content_delivery_epochs set delivery_epoch = delivery_epoch + 1 where project_id=$1 and object_kind=$2 and object_id=$3`, object.ProjectID, object.ObjectKind, object.ObjectID); err != nil {
+		t.Fatalf("advance content delivery epoch: %v", err)
+	}
 	if err := repository.AssertServingLease(ctx, serving); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
 		t.Fatalf("AssertServingLease() advanced epoch error = %v, want ErrLostOwnerLease", err)
 	}
 
-	secondObject := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_serving_fence"}
-	fixture.seedContentDeliveryEpoch(t, ctx, secondObject, 0)
+	secondCreated := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "serving-fence-parent")
+	secondObject := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: secondCreated.RecordID}
 	secondServing, err := repository.AcquireServingLease(ctx, secondObject, recordplatform.LeaseClaimInputV1{OwnerID: "serving_owner", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatalf("AcquireServingLease() second object: %v", err)
 	}
-	if _, err := repository.AcquireDeletionFenceLease(ctx, secondObject, recordplatform.LeaseClaimInputV1{OwnerID: "fence_owner", LeaseDuration: time.Minute}); err != nil {
-		t.Fatalf("AcquireDeletionFenceLease() live fence: %v", err)
-	}
+	seedServingTestFence(t, ctx, fixture, secondObject, "clock_timestamp() + interval '5 minutes'")
 	if err := repository.AssertServingLease(ctx, secondServing); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
 		t.Fatalf("AssertServingLease() live deletion fence error = %v, want ErrLostOwnerLease", err)
 	}
@@ -778,13 +1435,10 @@ func TestPostgresIntegrationRecordPlatformServingLeaseUsesDatabaseState(t *testi
 
 func TestPostgresIntegrationRecordPlatformReservationFenceCancelsServingRenewal(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordPlatformPostgresFixture(t, ctx)
-	object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_serving_drain"}
-	fixture.seedFenceObjectLeaseRace(t, ctx, object)
-	repository := NewPostgresRecordPlatformRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-platform-serving-drain", 2),
-		allowRecordPlatformAdmissionGate,
-	)
+	fixture, gate, runtime := newAdmittedOutboxFixture(t, ctx)
+	created := seedAdmittedOutboxRecord(t, ctx, runtime, gate, "serving-drain-parent")
+	object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: created.RecordID}
+	repository := NewPostgresRecordPlatformRepository(runtime, gate)
 	serving, err := repository.AcquireServingLease(ctx, object, recordplatform.LeaseClaimInputV1{
 		OwnerID:       "serving_owner",
 		LeaseDuration: time.Second,
@@ -792,14 +1446,7 @@ func TestPostgresIntegrationRecordPlatformReservationFenceCancelsServingRenewal(
 	if err != nil {
 		t.Fatalf("AcquireServingLease() error = %v", err)
 	}
-	if _, err := repository.FenceDeletionReservation(ctx, recordplatform.ReservationFenceInputV1{
-		ReservationID:      "drs_fencerace",
-		Object:             object,
-		OwnerID:            "deletion_owner",
-		OwnerLeaseDuration: time.Minute,
-	}); err != nil {
-		t.Fatalf("FenceDeletionReservation() with live serving lease error = %v", err)
-	}
+	seedServingTestFence(t, ctx, fixture, object, "clock_timestamp() + interval '5 minutes'")
 	if _, err := repository.RenewServingLease(ctx, serving, time.Second); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
 		t.Fatalf("RenewServingLease() after reservation fence error = %v, want ErrLostOwnerLease", err)
 	}
@@ -819,8 +1466,100 @@ type recordPlatformPostgresFixture struct {
 	bootstrapOwner string
 	runtime        string
 	admin          string
+	deletionWorker string
 	migrator       string
 	passwords      map[string]string
+	admissionGate  AdmissionGate
+}
+
+// Use the production signed activation and heartbeat with a direct runtime
+// role, so outbox tests exercise admission as well as the record route.
+func newAdmittedOutboxFixture(t *testing.T, ctx context.Context) (recordPlatformPostgresFixture, AdmissionGate, *pgxpool.Pool) {
+	t.Helper()
+	importAttachmentAuthorityMu.Lock()
+	t.Cleanup(importAttachmentAuthorityMu.Unlock)
+	fixture := newRecordPlatformPostgresBaseFixture(t, ctx)
+	stateRoot := filepath.Join(t.TempDir(), "outbox-authority")
+	state, err := recordauthority.CreateComposeState(stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const authorityRole = "houfeng_records_authority"
+	var exists bool
+	if err := fixture.db.QueryRow(ctx, `select pg_catalog.to_regrole($1) is not null`, authorityRole).Scan(&exists); err != nil || exists {
+		t.Fatalf("outbox fixture requires absent authority role: exists=%t error=%v", exists, err)
+	}
+	if err := platformmigrate.ProvisionComposeBootstrap(ctx, fixture.db, platformmigrate.ComposeBootstrapConfig{
+		DatabaseName: fixture.databaseName, BootstrapRole: fixture.bootstrapOwner, AuthorityRole: authorityRole,
+		Roles:     platformmigrate.AppRoleSetV2{CenterRuntime: fixture.runtime, PlatformAdmin: fixture.admin, DeletionWorker: fixture.deletionWorker, Migrator: fixture.migrator},
+		Passwords: platformmigrate.ComposeRolePasswords{Runtime: fixture.passwords[fixture.runtime], PlatformAdmin: fixture.passwords[fixture.admin], DeletionWorker: fixture.passwords[fixture.deletionWorker], Migrator: fixture.passwords[fixture.migrator], Authority: state.DatabasePassword()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fixture.passwords[authorityRole] = state.DatabasePassword()
+	fixture.dropRole(t, authorityRole)
+	migrator := fixture.openDirectRolePool(t, ctx, fixture.migrator, "outbox-admission-migrator", 1)
+	if _, err := storemigrate.ConvergeAppACLCurrent(ctx, migrator, fixture.runtime, fixture.admin, fixture.deletionWorker); err != nil {
+		t.Fatal(err)
+	}
+	activation, err := state.ActivationCommand.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt []byte
+	if err := migrator.QueryRow(ctx, `select public.record_platform_cas_contract_activation_projection($1::bytea)`, activation).Scan(&receipt); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordauthority.PersistActivationReceipt(stateRoot, state, receipt); err != nil {
+		t.Fatal(err)
+	}
+	authority := fixture.openDirectRolePool(t, ctx, authorityRole, "outbox-admission-heartbeat", 1)
+	heartbeat, wantExpiry, err := recordauthority.MarshalMembershipHeartbeatCommandV1(state, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expiry time.Time
+	if err := authority.QueryRow(ctx, `select public.record_platform_compose_membership_heartbeat($1::bytea)`, heartbeat).Scan(&expiry); err != nil || !expiry.Equal(wantExpiry) {
+		t.Fatalf("outbox heartbeat expiry=%v want=%v error=%v", expiry, wantExpiry, err)
+	}
+	runtime := fixture.openDirectRuntimePool(t, ctx, "outbox-admitted-runtime", 4)
+	if err := storemigrate.AdmitAppACLCurrentRuntime(ctx, runtime); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := NewDeploymentMembershipAdmissionGate(DeploymentMembershipIdentity{
+		InstanceID: "compose-center", DeploymentID: state.DeploymentID, ProjectID: recordplatform.ProjectIDDefault,
+		InstanceKind: "api", Capability: "records.runtime",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	seedPostgresCollaborationSource(t, ctx, fixture)
+	return fixture, gate, runtime
+}
+
+// newAdmittedCoreRecordFixture retains the signed deployment gate for
+// independent runtime pools opened by record integration tests.
+func newAdmittedCoreRecordFixture(t *testing.T, ctx context.Context) recordPlatformPostgresFixture {
+	t.Helper()
+	fixture, gate, _ := newAdmittedOutboxFixture(t, ctx)
+	fixture.admissionGate = gate
+	return fixture
+}
+
+func seedAdmittedOutboxRecord(t *testing.T, ctx context.Context, runtime *pgxpool.Pool, gate AdmissionGate, key string) records.RevisionCommitResult {
+	t.Helper()
+	repository, err := NewPostgresRecordRepository(runtime, gate, nil, newRecordsPostgresAuthorization(t, runtime, gate), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: runtime, Gate: gate},
+		recordsPostgresCompleteRevisionInput(t, "Outbox owner"), key)
+	result, err := repository.CommitRevision(ctx, command)
+	if err != nil {
+		t.Fatalf("create outbox record: %v", err)
+	}
+	return result
 }
 
 func newRecordPlatformPostgresFixture(t *testing.T, ctx context.Context) recordPlatformPostgresFixture {
@@ -842,7 +1581,7 @@ func newRecordPlatformPostgresBaseFixture(t *testing.T, ctx context.Context) rec
 	db := openRecordPlatformTemporaryPostgresDatabase(t, ctx)
 	fixture := recordPlatformPostgresFixture{
 		db:        db,
-		passwords: make(map[string]string, 3),
+		passwords: make(map[string]string, 4),
 	}
 	if err := db.QueryRow(ctx, `select pg_catalog.current_database(), current_user`).Scan(&fixture.databaseName, &fixture.bootstrapOwner); err != nil {
 		t.Fatalf("read record platform integration database identity: %v", err)
@@ -850,8 +1589,9 @@ func newRecordPlatformPostgresBaseFixture(t *testing.T, ctx context.Context) rec
 	suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
 	fixture.runtime = "houfeng_delivery_runtime_" + suffix
 	fixture.admin = "houfeng_delivery_admin_" + suffix
+	fixture.deletionWorker = "houfeng_deletion_worker_" + suffix
 	fixture.migrator = "houfeng_delivery_migrator_" + suffix
-	for _, role := range []string{fixture.runtime, fixture.admin, fixture.migrator} {
+	for _, role := range []string{fixture.runtime, fixture.admin, fixture.deletionWorker, fixture.migrator} {
 		password := recordPlatformIntegrationPassword(t)
 		fixture.passwords[role] = password
 		if _, err := db.Exec(ctx, `create role `+pgx.Identifier{role}.Sanitize()+` login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls password '`+password+`'`); err != nil {
@@ -1042,8 +1782,7 @@ func (fixture recordPlatformPostgresFixture) expireIdempotencyRow(t *testing.T, 
 
 func (fixture recordPlatformPostgresFixture) expireOutboxOwner(t *testing.T, ctx context.Context, rowID int64) {
 	t.Helper()
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-expire", 1)
-	if _, err := runtimePool.Exec(ctx, `
+	if _, err := fixture.db.Exec(ctx, `
 		update public.record_outbox
 		set owner_expires_at = transaction_timestamp() - interval '1 second'
 		where outbox_row_id = $1

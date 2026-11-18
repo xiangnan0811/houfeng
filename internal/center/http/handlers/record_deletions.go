@@ -10,6 +10,7 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recorddeletion"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
@@ -102,10 +103,16 @@ func handleRecordDeletionPreview(
 	}
 	survivingCopies := make([]recordDeletionSurvivingCopyResponse, len(result.Summary.SurvivingCopies))
 	for index, surviving := range result.Summary.SurvivingCopies {
+		var copyCount *uint64
+		if surviving.CountStatus == recorddeletion.SurvivingCopyCountKnown {
+			count := *surviving.CopyCount
+			copyCount = &count
+		}
 		survivingCopies[index] = recordDeletionSurvivingCopyResponse{
-			Scope:     string(surviving.Scope),
-			Kind:      string(surviving.Kind),
-			CopyCount: surviving.CopyCount,
+			Scope:       string(surviving.Scope),
+			Kind:        string(surviving.Kind),
+			CountStatus: string(surviving.CountStatus),
+			CopyCount:   copyCount,
 		}
 	}
 	var latestBackupExpiry *time.Time
@@ -194,10 +201,13 @@ type recordDeletionPreviewResponse struct {
 	LedgerHealth         string                                `json:"ledger_health"`
 }
 
+// recordDeletionSurvivingCopyResponse is identity-free. Known copies carry a
+// positive copy_count; unknown copies encode copy_count as null.
 type recordDeletionSurvivingCopyResponse struct {
-	Scope     string `json:"scope"`
-	Kind      string `json:"kind"`
-	CopyCount uint64 `json:"copy_count"`
+	Scope       string  `json:"scope"`
+	Kind        string  `json:"kind"`
+	CountStatus string  `json:"count_status"`
+	CopyCount   *uint64 `json:"copy_count"`
 }
 
 type recordDeletionManagedBackupResponse struct {
@@ -284,7 +294,7 @@ func recordDeletionIdempotencyToken(request *http.Request) (recordplatform.Delet
 
 func recordDeletionRouteFromPath(path string) (recordDeletionRoute, string, bool) {
 	segments := strings.Split(strings.Trim(path, "/"), "/")
-	if len(segments) == 4 && segments[0] == "api" && segments[1] == "records" && validRecordTransportID(segments[2]) {
+	if len(segments) == 4 && segments[0] == "api" && segments[1] == "records" && recordidentity.IsValid(segments[2]) {
 		switch segments[3] {
 		case "permanent-delete-preview":
 			return recordDeletionRoutePreview, segments[2], true

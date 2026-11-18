@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`monitoring_instances.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 为 C80，止于 `0080_bound_agent_sync_replay.sql`，共 81 个 source / 29 个 post-R1 exact fragments。历史 C77/C78/C79 的 78/79/80 sources 与 26/27/28 fragments 原字节不变。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations`。两个 record flag 都关闭的 legacy 路径由 `migrate.Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛 exact current 或完整独立 golden 匹配的注册 predecessor，center/importer 启动只做 current read-only admission，不补跑迁移。0067 对旧业务数据仍明确拒绝自动转换/删除；0072 增加新鲜度投影，0073 增加并回填资料版本，0074 增加月末汇率标记，0075 增加设置所有权字段（empty ACL fragment）。历史 0076 仅增加 family-state view/SELECT，0077 增加 product 两表/七个 runtime grants，0078 只替换 family-state view，0079 只增加普通 cache expiry B-tree 索引。0080 的精确退休与有界重放合同见下文。
+- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 为 C81，止于 `0081_record_deletion_successor.sql`，共 82 个 source / 30 个 post-R1 exact fragments。历史 `0001`–`0080` 原字节不变。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations`。两个 record flag 都关闭的 legacy 路径由 `migrate.Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛 exact current 或完整独立 golden 匹配的注册 predecessor，center/importer 启动只做 current read-only admission，不补跑迁移。0067 对旧业务数据仍明确拒绝自动转换/删除；0072 增加新鲜度投影，0073 增加并回填资料版本，0074 增加月末汇率标记，0075 增加设置所有权字段（empty ACL fragment）。历史 0076 仅增加 family-state view/SELECT，0077 增加 product 两表/七个 runtime grants，0078 只替换 family-state view，0079 只增加普通 cache expiry B-tree 索引。0080 的精确退休与有界重放合同见下文。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（MonitoringInstance/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -68,7 +68,7 @@
   1. `EnsureLedger` —— 建 `schema_migrations(name primary key, applied_at)` 表
   2. 按文件名排序遍历，逐条 `HasMigration` 检查，未应用则 `ExecMigration` + `RecordMigration`
 - `records-on/delete-off` 不复用这个逐迁移提交的 API：`houfeng-record-platform-admin migrate --scope app` 先编译 exact embedded set 与 post-`0051` fragment registry，再在一个 scoped `SERIALIZABLE` 事务内处理 migration、ACL 和 manifest；center/importer 的启动路径只能执行 current read-only admission。
-- 当前 C80 registry 为 17 个固定 profile（P62/P64/P63/P66/P67/P68/P69/P70/P71/P72/P73/P74/P75/P76/P77/P78/P79）、98303 条注册 predecessor chains。原 profile ID、R1/R2 及历史 C79 49151-chain/C78 24575-chain/C77 12287-chain 等 oracle 不变；所有旧 successor suffix 追加 0080，P79（ID=17）仅执行 `[0080]`，P78 执行 `[0079,0080]`，P77 执行 `[0078,0079,0080]`。current admission 仅接受 C80，任何旧终点必须先经 scoped migrator。独立 C79 oracle 在修改 compiler/retirement registry 前冻结：migration body 5832 bytes，SHA-256 `3879119c952bd0a59dee938a0468ce848070985bd0b6bd55a7da26d40263c7db`；privilege body 35745 bytes，SHA-256 `3bda892781478202e876702943a66463e25345c205c9c125304b2b6ba1a1eb0c`。独立 C78 oracle 的 migration SHA-256 仍为 `af2497ecde095a8f33e847dd21fd2f863764c86ff1a141aa40fac6ae6cb34ad3`。不得用修改后 current compiler 动态截取的 oracle 代替独立前驱事实；详见 [APP 当前迁移合同](../contracts/platform/app-acl-current.md)。
+- 当前 C81 registry 为 18 个固定 profile、196607 条注册 predecessor chains；current admission 仅接受 C81，任何旧终点必须先经 scoped migrator。每个 post-R1 source 必须注册 exact fragment，无 APP 对象时注册 explicit empty fragment；全部注册链均须验证，不能采样。profile、suffix、冻结独立 predecessor oracle 及 hash 的权威记录见 [APP 当前迁移合同](../contracts/platform/app-acl-current.md)；不得用修改后 current compiler 动态截取的结果代替独立前驱事实。
 - `ipQualityProductAppACLCurrentMigrationFragment()` 只注册 `ip_quality_intelligence` 与 `ip_quality_source_cache`；center_runtime 对前者仅 SELECT/INSERT/UPDATE，对后者仅 SELECT/INSERT/UPDATE/DELETE。0077 SQL 不包含角色名或 GRANT；scoped convergence 在同事务内应用 exact DCL、验证完整 catalog 并发布 successor。旧报告/来源/服务的新增 JSONB 列保持 NULL，不回填 product、不生成历史 job/cache，原表 ACL 不变。
 - 历史 `ipQualityCollectionScopeAppACLCurrentMigrationFragment()`（0078）只替换 family-state view；`ipQualityCacheExpiryAppACLCurrentMigrationFragment()`（0079）只增加 `ip_quality_source_cache(expires_at)` 的普通、非 concurrent、非 partial B-tree 索引。二者自身无 managed object/function/ACL delta。升级到 C80 时 P77/P78 也必须执行 0080 的精确权限增删，不能把“历史迁移空 delta”误当“current successor 空 delta”。旧 manifest 历史字节及业务/settings/cache 数据保持不变。
 - `AppACLCurrentMigrationFragment.RetiredObjects` 随 fragment/compiler clone 深拷贝；effective object/privilege/function inventory 从冻结 R1 按 migration 顺序物化。退休必须针对当时存在的对象，移除该对象及关联权限，拒绝不存在/重复退休、同 fragment 重新声明和退休后悬空权限。0080 只允许退休 `agent_sync_batches` 与 `agent_live_signals`，以无 `CASCADE` 的 `DROP TABLE` 移除，未知依赖必须失败回滚。新 catalog delta 恰为两个旧表移除、两个新表及两个 hardened invoker functions 增加，不能放宽其他角色绑定、权限移除/增加或 GRANT OPTION。迁移前验证前驱 catalog，同一个 scoped 事务执行 DDL、exact DCL、current catalog 验证及 manifest/head 发布，失败整体回滚。
@@ -82,11 +82,13 @@
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号。冻结 R1 仍止于 0051，current 已到 `0080_bound_agent_sync_replay.sql`；若无并发新增，下一个候选是 `0081_<verb>_<scope>.sql`。post-R1 APP migration 必须同时注册 exact fragment、更新全部 exact successor suffix，并以独立冻结的 predecessor golden 明确支持升级；records-on 启动不补跑迁移。
+2. 合并前普通 Compose 所需的 `0081` schema/ACL 修订须同步 compiler 与独立 oracle 并验证，`0001`–`0080` 原字节不变；最终合并 C81 以实际候选为准。阶段合并后最终合并的 `0081`/C81 冻结为不可回写的前驱，未来 schema/ACL 变化另行追加迁移：先检查 `db/migrations/` 届时的实际最大已占编号，在其后新建下一个未占用序号；`0082_<verb>_<scope>.sql` 仅在届时没有并发新增时是例子。
+   后继 compiler 修改前，从精确的最终合并 C81 修订及 pristine C81 PostgreSQL 独立捕获 canonical migration/privilege bodies 和 catalog 事实，记录修订、数据库和角色绑定、body 长度及 hash；禁止用改后 current compiler 截取前驱。注册 C81 predecessor profile、每个 post-R1 source 的 exact fragment、精确 catalog/权限差量及 function hardening，更新所有声明支持的 predecessor chains 和完整 successor suffix，并保留独立 oracle。scoped migrator 仍在单个 `SERIALIZABLE` 事务内验证前驱、应用迁移及 ACL、验证 catalog 并发布 manifest/head，失败整体回滚；runtime 启动只做只读准入。
+   后继验证必须覆盖 fresh 与 registered successor、C81 upgrade、全部声明支持的链、自定义数据库/角色、历史 manifest/source 字节保持、exact repeat、升级前拒绝/升级后准入、漂移拒绝及 DDL/DCL/manifest 失败回滚。后继策略本身不要求提前新增 P81 或后继 golden；当前为 82 sources / 30 fragments / 18 profiles / 196607 chains。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
-   C80 必须经 strict PostgreSQL wrapper 运行 current umbrella 与 `TestPostgresIntegrationAgentReplayMigration`：fresh C80、独立 C79 genesis/历史 chain、credentials/session/trusted-online/raw/aggregate/business/settings 完整行保持、exact ACL/真实 runtime 操作与拒绝、reject-before/admit-after、repeat、无关权限增删/假 retirement 拒绝，以及 DDL/DCL/manifest 失败回滚（旧表及其旧记录复原、新表不存在）。保留历史 product/collection-scope/cache-expiry 专项的真实前驱证据。`scripts/test-pg16-catalog.sh` 在 PG16 16.0/16.6/16.12 要求 R2、current umbrella 和 replay migration 三个顶级 anchor 全部 RUN/PASS，任意 skip/fail 均拒绝。`scripts/test-business-postgres.sh` 在保留既有 anchors 上增加 `TestPostgresIntegrationAgentReplayWindow`、`TestPostgresIntegrationRetentionConcurrentSync`、`TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets`，不以源码字符串断言或被 skip 的测试替代真实事务/并发证据。
+   当前 C81 必须经 strict PostgreSQL wrapper 运行 current umbrella 与 `TestPostgresIntegrationAgentReplayMigration`：fresh current C81、独立 C79 genesis/历史 chain、credentials/session/trusted-online/raw/aggregate/business/settings 完整行保持、exact ACL/真实 runtime 操作与拒绝、reject-before/admit-after、repeat、无关权限增删/假 retirement 拒绝，以及 DDL/DCL/manifest 失败回滚（旧表及其旧记录复原、新表不存在）。保留历史 product/collection-scope/cache-expiry 专项的真实前驱证据。`scripts/test-pg16-catalog.sh` 在 PG16 16.0/16.6/16.12 要求 R2、current umbrella 和 replay migration 三个顶级 anchor 全部 RUN/PASS，任意 skip/fail 均拒绝。`scripts/test-business-postgres.sh` 在保留既有 anchors 上增加 `TestPostgresIntegrationAgentReplayWindow`、`TestPostgresIntegrationRetentionConcurrentSync`、`TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets`，不以源码字符串断言或被 skip 的测试替代真实事务/并发证据。
 
 ### 历史 / 审计字段同步
 
@@ -98,11 +100,11 @@
 ### 不要做
 
 - ❌ 修改已经合并/发布过的迁移文件内容（包括加空格）。要修就再写一个新迁移。
-- 例外：如果某个已发布迁移在记录到 `schema_migrations` 前必然失败，导致后续修复迁移无法执行，可以修正该失败迁移本身；修复必须保持幂等，并增加回归测试说明原因。涉及约束收口时，测试必须断言 backfill 在约束前执行。
+- 对一般已发布迁移的例外：如果它在记录到 `schema_migrations` 前必然失败，导致后续修复迁移无法执行，可以修正该失败迁移本身；修复必须保持幂等，并增加回归测试说明原因。涉及约束收口时，测试必须断言 backfill 在约束前执行。此例外不允许回写阶段合并后冻结的 `0081`/C81，后续变化须追加迁移。
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**：存在两个历史 `0004_*`（`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`），仍按文件名字典序作为冻结 R1 的两个独立 checksum source。新增迁移必须先检查目录并使用最大已占编号之后的下一个空号；current root 为 0080，无并发迁移时下一个候选为 `0081_*`，不得覆盖他人的迁移。
+> ⚠️ **已知 gap**：存在两个历史 `0004_*`（`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`），仍按文件名字典序作为冻结 R1 的两个独立 checksum source。新增迁移必须先检查目录并使用最大已占编号之后的下一个空号；current root 为 0081，无并发迁移时下一个候选为 `0082_*`，不得覆盖他人的迁移。
 
 ## Naming Conventions
 

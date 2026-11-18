@@ -22,6 +22,59 @@ type RuntimeStreamSocketRecord = {
   phase: 'connecting' | 'open' | 'error' | 'closed'
 }
 
+type RecordCleanupSocketRecord = {
+  url: string
+  browserId: string
+  phase: RuntimeStreamSocketRecord['phase']
+}
+
+type RecordCleanupReconcileBody = {
+  browser_id: string
+  record_ids: string[]
+  allocation_references?: Array<{ record_id: string; allocation_id: string }>
+}
+
+const RECORD_CLEANUP_RECONCILE_KEY = apiRouteKey('POST', '/api/records/client-cleanup/reconcile')
+const BROWSER_ID_PATTERN = /^browser_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
+// Mirrors the reconcile request the record cleanup consumer sends on startup.
+function parseRecordCleanupReconcileBody(body: unknown): RecordCleanupReconcileBody | null {
+  const keys = sortedKeys(body)
+  if (!keys) return null
+  const value = body as Record<string, unknown>
+  const allowedKeys = ['allocation_references', 'browser_id', 'record_ids']
+  if (!keys.includes('browser_id') || !keys.includes('record_ids') || keys.some((key) => !allowedKeys.includes(key))) return null
+  if (typeof value.browser_id !== 'string' || !BROWSER_ID_PATTERN.test(value.browser_id)) return null
+  if (!Array.isArray(value.record_ids) || !value.record_ids.every(isNonEmptyString)) return null
+  let references: RecordCleanupReconcileBody['allocation_references']
+  if ('allocation_references' in value) {
+    const raw = value.allocation_references
+    if (!Array.isArray(raw) || raw.length === 0) return null
+    references = []
+    for (const reference of raw) {
+      if (JSON.stringify(sortedKeys(reference)) !== JSON.stringify(['allocation_id', 'record_id'])) return null
+      const { record_id: recordId, allocation_id: allocationId } = reference as Record<string, unknown>
+      if (!isNonEmptyString(recordId) || !isNonEmptyString(allocationId)) return null
+      references.push({ record_id: recordId, allocation_id: allocationId })
+    }
+  }
+  const ids = [...value.record_ids, ...(references ?? []).map((reference) => reference.record_id)]
+  if (new Set(ids).size !== ids.length) return null
+  return { browser_id: value.browser_id, record_ids: value.record_ids, ...(references ? { allocation_references: references } : {}) }
+}
+
+function recordCleanupReconcileResponse(body: RecordCleanupReconcileBody) {
+  return {
+    allowed: body.record_ids,
+    invalidate: [],
+    pending: (body.allocation_references ?? []).map((reference) => reference.record_id),
+  }
+}
+
 export class ApiFixtureController {
   private profile: ApiFixtureProfile = {}
   private readonly requests: ApiRouteKey[] = []
@@ -42,13 +95,15 @@ export class ApiFixtureController {
   async install(): Promise<void> {
     await this.page.addInitScript(() => {
       type SocketRecord = RuntimeStreamSocketRecord
+      type CleanupSocketRecord = RecordCleanupSocketRecord
       const pending = ((window as unknown as {
         __houfengE2EPendingRuntimeStreams?: Set<string>
       }).__houfengE2EPendingRuntimeStreams ??= new Set<string>())
       const allowed = new Set<string>(pending)
       const sockets: SocketRecord[] = []
-      const socketInstances: FixtureWebSocket[] = []
+      const socketInstances: Array<FixtureWebSocket & { record: SocketRecord }> = []
       const unexpected: string[] = []
+      const cleanupSockets: CleanupSocketRecord[] = []
 
       function runtimeStreamID(url: string): string | null {
         let parsed: URL
@@ -66,6 +121,29 @@ export class ApiFixtureController {
         const expectedURL = `${expectedProtocol}//${window.location.host}/api/monitoring-instances/${match[1]}/runtime-stream${parsed.search}`
         if (url !== expectedURL) return null
         return match[1]
+      }
+
+      // Exact same-origin record client-cleanup channel opened by the consumer:
+      // ?browser_id=browser_<uuid>[&cursor=<value>], nothing else.
+      function recordCleanupBrowserID(url: string): string | null {
+        let parsed: URL
+        try {
+          parsed = new URL(url, window.location.href)
+        } catch {
+          return null
+        }
+        const expectedProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        if (parsed.protocol !== expectedProtocol) return null
+        if (parsed.hostname !== window.location.hostname || parsed.port !== window.location.port) return null
+        if (parsed.pathname !== '/api/records/client-cleanup' || parsed.hash !== '') return null
+        const entries = [...parsed.searchParams.entries()]
+        const [first, second, ...rest] = entries
+        if (!first || first[0] !== 'browser_id' || rest.length > 0) return null
+        if (!/^browser_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(first[1])) return null
+        if (second && (second[0] !== 'cursor' || second[1] === '')) return null
+        const query = new URLSearchParams(entries).toString()
+        if (url !== `${expectedProtocol}//${window.location.host}/api/records/client-cleanup?${query}`) return null
+        return first[1]
       }
 
       function isAllowed(id: string): boolean {
@@ -97,6 +175,9 @@ export class ApiFixtureController {
           unexpected() {
             return unexpected
           },
+          cleanupSockets() {
+            return cleanupSockets
+          },
         },
       })
 
@@ -116,20 +197,29 @@ export class ApiFixtureController {
         onmessage: ((event: MessageEvent) => void) | null = null
         onerror: ((event: Event) => void) | null = null
         onclose: ((event: CloseEvent) => void) | null = null
-        readonly record: SocketRecord
+        readonly record: SocketRecord | CleanupSocketRecord
         private readonly listeners = new Map<string, Array<(event: Event) => void>>()
 
         constructor(url: string | URL) {
           this.url = String(url)
+          const browserId = recordCleanupBrowserID(this.url)
+          if (browserId) {
+            // Healthy idle cleanup channel: opens and never sends frames.
+            this.record = { url: this.url, browserId, phase: 'connecting' }
+            cleanupSockets.push(this.record)
+            this.open()
+            return
+          }
           const monitoringInstanceId = runtimeStreamID(this.url) ?? ''
-          this.record = {
+          const record: SocketRecord = {
             url: this.url,
             monitoringInstanceId,
             includeSamples: !this.url.endsWith('?include_samples=false'),
             phase: 'connecting',
           }
-          sockets.push(this.record)
-          socketInstances.push(this)
+          this.record = record
+          sockets.push(record)
+          socketInstances.push(this as FixtureWebSocket & { record: SocketRecord })
 
           if (!monitoringInstanceId || !isAllowed(monitoringInstanceId)) {
             unexpected.push(this.url)
@@ -142,6 +232,10 @@ export class ApiFixtureController {
             return
           }
 
+          this.open()
+        }
+
+        private open(): void {
           queueMicrotask(() => {
             if (this.readyState === FixtureWebSocket.CLOSED) return
             this.readyState = FixtureWebSocket.OPEN
@@ -311,6 +405,10 @@ export class ApiFixtureController {
     }
   }
 
+  async snapshotRecordCleanupSockets(): Promise<RecordCleanupSocketRecord[]> {
+    return this.page.evaluate(() => window.__houfengE2EWebSockets?.cleanupSockets() ?? [])
+  }
+
   private async handle(route: Route): Promise<void> {
     const request = route.request()
     const method = request.method() as ApiMethod
@@ -318,6 +416,10 @@ export class ApiFixtureController {
     const key = apiRouteKey(method, path)
     this.requests.push(key)
     const fixture = this.profile[key]
+    if (!fixture && key === RECORD_CLEANUP_RECONCILE_KEY) {
+      await this.fulfillRecordCleanupReconcile(route, request, key)
+      return
+    }
     if (!fixture) {
       this.unexpectedRequests.push(key)
       await route.fulfill({
@@ -350,6 +452,31 @@ export class ApiFixtureController {
         ...fixture.headers,
       },
       body: fixture.status === 204 ? '' : fixture.rawBody ?? JSON.stringify(fixture.body),
+    })
+  }
+
+  // Default idle, healthy record client-cleanup channel: every requested id is
+  // allowed (or pending for allocation references) and nothing is invalidated.
+  private async fulfillRecordCleanupReconcile(route: Route, request: Request, key: string): Promise<void> {
+    let body: RecordCleanupReconcileBody | null = null
+    try {
+      body = parseRecordCleanupReconcileBody(request.postDataJSON())
+    } catch {
+      body = null
+    }
+    if (!body) {
+      this.unexpectedRequests.push(`${key} body must be {browser_id, record_ids, allocation_references?}`)
+      await route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: `fixture request body mismatch: ${key}` }),
+      })
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(recordCleanupReconcileResponse(body)),
     })
   }
 
@@ -401,6 +528,7 @@ declare global {
       unexpected: () => string[]
       deliver: (monitoringInstanceId: string, message: unknown) => void
       disconnect: (monitoringInstanceId: string) => void
+      cleanupSockets: () => RecordCleanupSocketRecord[]
     }
   }
 }

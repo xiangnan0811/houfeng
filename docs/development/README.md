@@ -6,6 +6,7 @@
 | --- | --- |
 | [分支与交付](branch-workflow-governance.md) | 选择 checkout、修改、提交、PR、发布或清理前 |
 | [协作与验证](agent-collaboration.md) | 委派实现、独立审查、项目加载变更和证据交付 |
+| [普通 Compose 隔离验证](ordinary-compose-validation.md) | 验证普通 fresh、精确重放及同一物理 namespace 的冷升级 |
 | [代码复用](code-reuse-thinking-guide.md) | 新增 helper、重复逻辑、配置或批量修改 |
 | [跨层开发](cross-layer-thinking-guide.md) | API、数据库、服务与界面的边界变化 |
 | [UI 预览与浏览器验证](ui-preview-and-browser-sanity.md) | 页面预览、Chromium、局部浏览器检查与 staging 验证 |

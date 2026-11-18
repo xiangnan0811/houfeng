@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -13,6 +15,7 @@ import (
 
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/records"
 )
 
 const blobPublicationCleanupReceiptDigestDomainV1 = "houfeng.attachments.blob-publication-cleanup-receipt.v1"
@@ -25,29 +28,6 @@ func (repository *PostgresAttachmentRepository) PrepareBlobPublication(
 		return attachments.BlobPublicationIntent{}, attachments.ErrInvalidBlobPublicationRequest
 	}
 	request.PublishExpiresAt = request.PublishExpiresAt.UTC().Truncate(time.Microsecond)
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return attachments.BlobPublicationIntent{}, fmt.Errorf("begin Blob publication preparation: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := lockBlobPublicationOwner(ctx, tx, request); err != nil {
-		return attachments.BlobPublicationIntent{}, err
-	}
-	if _, err := tx.Exec(ctx, `lock table public.blob_objects in share row exclusive mode`); err != nil {
-		return attachments.BlobPublicationIntent{}, fmt.Errorf("lock Blob metadata for publication preparation: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `lock table public.attachment_upload_parts in share row exclusive mode`); err != nil {
-		return attachments.BlobPublicationIntent{}, fmt.Errorf("lock attachment upload parts for publication preparation: %w", err)
-	}
-	activeGC, err := activeBlobGCDeletionForKeyExists(ctx, tx, request.Target.Key)
-	if err != nil {
-		return attachments.BlobPublicationIntent{}, err
-	}
-	if activeGC {
-		return attachments.BlobPublicationIntent{}, attachments.ErrBlobGCProtected
-	}
-
 	newPublicationID := repository.newBlobPublicationID
 	if newPublicationID == nil {
 		newPublicationID = func() (string, error) { return ids.New("bpi") }
@@ -56,177 +36,64 @@ func (repository *PostgresAttachmentRepository) PrepareBlobPublication(
 	if err != nil {
 		return attachments.BlobPublicationIntent{}, fmt.Errorf("create Blob publication ID: %w", err)
 	}
-	intent, err := scanBlobPublicationIntent(tx.QueryRow(ctx, `
-		insert into public.blob_publication_intents (
-			publication_id, project_id, owner_kind, owner_id, owner_generation,
-			blob_key, sha256_digest, size_bytes, backend_kind,
-			publication_state, publish_expires_at
-		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'prepared', $10)
-		on conflict (blob_key) where publication_state <> 'completed' do nothing
-		returning publication_id, project_id, owner_kind, owner_id, owner_generation,
-		          blob_key, sha256_digest, size_bytes, backend_kind,
-		          coalesce(object_version, ''), publication_state, publish_expires_at`,
-		publicationID,
-		request.ProjectID,
-		request.OwnerKind,
-		request.OwnerID,
-		request.OwnerGeneration,
-		request.Target.Key,
-		request.Target.SHA256[:],
-		request.Target.SizeBytes,
-		request.Target.BackendKind,
-		request.PublishExpiresAt,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		var outcome *attachments.BlobPublicationCompletionOutcome
-		intent, outcome, err = scanBlobPublicationIntentWithOutcome(tx.QueryRow(ctx, `
-			select publication_id, project_id, owner_kind, owner_id, owner_generation,
-			       blob_key, sha256_digest, size_bytes, backend_kind,
-				       coalesce(object_version, ''), publication_state, publish_expires_at,
-				       completion_outcome
-				from public.blob_publication_intents
-				where publication_state <> 'completed'
-				  and project_id = $1 and owner_kind = $2 and owner_id = $3
-				  and owner_generation = $4 and blob_key = $5 and sha256_digest = $6
-				  and size_bytes = $7 and backend_kind = $8 and publish_expires_at = $9`,
-			request.ProjectID,
-			request.OwnerKind,
-			request.OwnerID,
-			request.OwnerGeneration,
-			request.Target.Key,
-			request.Target.SHA256[:],
-			request.Target.SizeBytes,
-			request.Target.BackendKind,
-			request.PublishExpiresAt,
-		))
-		if err != nil {
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return attachments.BlobPublicationIntent{}, fmt.Errorf("read Blob publication preparation replay: %w", err)
-			}
-			if request.OwnerKind != attachments.BlobPublicationOwnerProcessorPreview {
-				return attachments.BlobPublicationIntent{}, attachments.ErrBlobPublicationConflict
-			}
-			intent, err = rebindProcessorPreviewPublication(ctx, tx, request)
-			if err != nil {
-				return attachments.BlobPublicationIntent{}, err
-			}
-		}
-		if outcome != nil || !blobPublicationIntentMatchesPrepare(intent, request) ||
-			(intent.State != attachments.BlobPublicationStatePrepared &&
-				intent.State != attachments.BlobPublicationStatePublished) {
-			return attachments.BlobPublicationIntent{}, attachments.ErrBlobPublicationConflict
-		}
-	} else if err != nil {
-		return attachments.BlobPublicationIntent{}, mapBlobPublicationWriteError("insert Blob publication intent", err)
-	} else if intent.PublicationID != publicationID || !blobPublicationIntentMatchesPrepare(intent, request) ||
-		intent.State != attachments.BlobPublicationStatePrepared {
-		return attachments.BlobPublicationIntent{}, attachments.ErrBlobPublicationConflict
+	var claimOwner *string
+	var claimExpiry *time.Time
+	if request.OwnerKind == attachments.BlobPublicationOwnerProcessorPreview {
+		claimOwner = &request.ClaimOwnerID
+		expiry := request.ClaimExpiresAt.UTC().Truncate(time.Microsecond)
+		claimExpiry = &expiry
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return attachments.BlobPublicationIntent{}, fmt.Errorf("commit Blob publication preparation: %w", err)
-	}
-	return intent, nil
-}
-
-// lockBlobPublicationOwner 在登记写入意图前锁住并复核所有者：草稿释放会删掉上传与处理任务行，
-// 若意图在释放之后才登记，就成了没有所有者的 prepared 意图，过期清理可能误删去重共用的对象。
-// 所有者行锁先于 Blob/分片表锁取得，与释放（先锁上传/任务行、后锁 blob_objects）不成环。
-// 所有者还必须处于可写入状态（上传 created/uploading、预览任务 claimed），否则立即拒绝、
-// 不去等表锁：永久删除先取 blob_objects 表锁、只删除终态所有者，对可写入的所有者会 fail closed，
-// 因此两者不会互相等待成环。
-func lockBlobPublicationOwner(
-	ctx context.Context,
-	tx attachmentTx,
-	request attachments.BlobPublicationPrepareRequest,
-) error {
-	var query string
-	switch request.OwnerKind {
-	case attachments.BlobPublicationOwnerUpload:
-		query = `select upload_id, upload_state from public.attachment_uploads
-			where upload_id = $1 and project_id = $2
-			for share`
-	case attachments.BlobPublicationOwnerProcessorPreview:
-		query = `select job.processor_job_id, job.processor_state
-			from public.attachment_processor_jobs as job
-			join public.attachment_uploads as upload on upload.upload_id = job.upload_id
-			where job.processor_job_id = $1 and upload.project_id = $2
-			for share of job`
-	default:
-		return attachments.ErrInvalidBlobPublicationRequest
-	}
-	var ownerID, state string
-	err := tx.QueryRow(ctx, query, request.OwnerID, request.ProjectID).Scan(&ownerID, &state)
-	if errors.Is(err, pgx.ErrNoRows) {
-		if request.OwnerKind == attachments.BlobPublicationOwnerProcessorPreview {
-			return attachments.ErrProcessorClaimLost
-		}
-		return attachments.ErrAttachmentOwnerNotFound
-	}
+	command, err := json.Marshal(struct {
+		PublicationID    string                               `json:"publication_id"`
+		ProjectID        string                               `json:"project_id"`
+		OwnerKind        attachments.BlobPublicationOwnerKind `json:"owner_kind"`
+		OwnerID          string                               `json:"owner_id"`
+		OwnerGeneration  int64                                `json:"owner_generation"`
+		Key              string                               `json:"key"`
+		SHA256           string                               `json:"sha256"`
+		Size             int64                                `json:"size"`
+		BackendKind      attachments.BackendKind              `json:"backend_kind"`
+		NamespaceID      string                               `json:"namespace_id"`
+		PublishExpiresAt time.Time                            `json:"publish_expires_at"`
+		ClaimOwnerID     *string                              `json:"origin_owner_id"`
+		ClaimExpiresAt   *time.Time                           `json:"origin_owner_expires_at"`
+	}{publicationID, request.ProjectID, request.OwnerKind, request.OwnerID, request.OwnerGeneration,
+		request.Target.Key, hex.EncodeToString(request.Target.SHA256[:]), request.Target.SizeBytes, request.Target.BackendKind,
+		request.NamespaceID, request.PublishExpiresAt, claimOwner, claimExpiry})
 	if err != nil {
-		return fmt.Errorf("lock Blob publication owner: %w", err)
+		return attachments.BlobPublicationIntent{}, err
 	}
-	if ownerID != request.OwnerID {
-		return attachments.ErrBlobPublicationConflict
-	}
-	switch request.OwnerKind {
-	case attachments.BlobPublicationOwnerUpload:
-		switch attachments.UploadState(state) {
-		case attachments.UploadStateCreated, attachments.UploadStateUploading:
-			return nil
-		case attachments.UploadStateExpired:
-			return attachments.ErrUploadExpired
-		default:
-			return attachments.ErrAttachmentConflict
-		}
-	default:
-		if state != "claimed" {
-			return attachments.ErrProcessorClaimLost
-		}
-		return nil
-	}
-}
-
-// rebindProcessorPreviewPublication fences a crashed processor generation
-// before the replacement worker resumes the same content-addressed preview.
-// The target and job deadline remain immutable; only a strictly newer claim
-// generation may take over a still-publishable intent.
-func rebindProcessorPreviewPublication(
-	ctx context.Context,
-	tx attachmentTx,
-	request attachments.BlobPublicationPrepareRequest,
-) (attachments.BlobPublicationIntent, error) {
-	intent, err := scanBlobPublicationIntent(tx.QueryRow(ctx, `
-		update public.blob_publication_intents
-		set owner_generation = $1
-		where project_id = $2 and owner_kind = $3 and owner_id = $4
-		  and blob_key = $5 and sha256_digest = $6 and size_bytes = $7
-		  and backend_kind = $8 and publish_expires_at = $9
-		  and owner_generation < $1
-		  and publication_state in ('prepared', 'published')
-		returning publication_id, project_id, owner_kind, owner_id, owner_generation,
-		          blob_key, sha256_digest, size_bytes, backend_kind,
-		          coalesce(object_version, ''), publication_state, publish_expires_at`,
-		request.OwnerGeneration,
-		request.ProjectID,
-		request.OwnerKind,
-		request.OwnerID,
-		request.Target.Key,
-		request.Target.SHA256[:],
-		request.Target.SizeBytes,
-		request.Target.BackendKind,
-		request.PublishExpiresAt,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return attachments.BlobPublicationIntent{}, attachments.ErrBlobPublicationConflict
-	}
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return attachments.BlobPublicationIntent{}, mapBlobPublicationWriteError("rebind processor preview Blob publication", err)
+		return attachments.BlobPublicationIntent{}, fmt.Errorf("begin Blob publication preparation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	route := attachmentWriterRoute{namespaces: []string{request.NamespaceID}}
+	if request.OwnerKind == attachments.BlobPublicationOwnerUpload {
+		route.uploadIDs = []string{request.OwnerID}
+	}
+	if err := lockAttachmentWriterPrefix(ctx, tx, route); err != nil {
+		return attachments.BlobPublicationIntent{}, err
+	}
+	intent, err := scanBlobPublicationIntent(tx.QueryRow(ctx, `
+		select publication_id,project_id,owner_kind,owner_id,owner_generation,
+		       blob_key,sha256_digest,size_bytes,backend_kind,
+		       coalesce(namespace_id::text,''),coalesce(obligation_id,''),
+		       coalesce(object_version,''),publication_state,publish_expires_at
+		from public.record_blob_publication_prepare($1)`, command))
+	if err != nil {
+		var postgresError *pgconn.PgError
+		if errors.As(err, &postgresError) && postgresError.Code == "55000" && postgresError.Message == "blob key has active cleanup responsibility" {
+			return attachments.BlobPublicationIntent{}, attachments.ErrBlobGCProtected
+		}
+		return attachments.BlobPublicationIntent{}, mapBlobPublicationWriteError("prepare Blob publication", err)
 	}
 	if !blobPublicationIntentMatchesPrepare(intent, request) ||
-		(intent.State != attachments.BlobPublicationStatePrepared &&
-			intent.State != attachments.BlobPublicationStatePublished) {
+		(intent.State != attachments.BlobPublicationStatePrepared && intent.State != attachments.BlobPublicationStatePublished) {
 		return attachments.BlobPublicationIntent{}, attachments.ErrBlobPublicationConflict
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return attachments.BlobPublicationIntent{}, fmt.Errorf("commit Blob publication preparation: %w", err)
 	}
 	return intent, nil
 }
@@ -239,55 +106,36 @@ func (repository *PostgresAttachmentRepository) RecordBlobPublicationVersion(
 		return attachments.BlobPublicationIntent{}, attachments.ErrInvalidBlobPublicationRequest
 	}
 	request.Intent.PublishExpiresAt = request.Intent.PublishExpiresAt.UTC().Truncate(time.Microsecond)
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return attachments.BlobPublicationIntent{}, fmt.Errorf("begin Blob publication version record: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAttachmentWriterPrefix(ctx, tx, attachmentWriterRoute{
+		obligationIDs: []string{request.ObligationID}, namespaces: []string{request.Intent.NamespaceID},
+	}); err != nil {
+		return attachments.BlobPublicationIntent{}, err
+	}
 
+	command, err := json.Marshal(struct {
+		PublicationID string `json:"publication_id"`
+		ObligationID  string `json:"obligation_id"`
+	}{request.Intent.PublicationID, request.ObligationID})
+	if err != nil {
+		return attachments.BlobPublicationIntent{}, err
+	}
 	intent, err := scanBlobPublicationIntent(tx.QueryRow(ctx, `
-		update public.blob_publication_intents
-		set object_version = $2, publication_state = 'published'
-		where publication_id = $1 and publication_state = 'prepared'
-		  and object_version is null
-		  and project_id = $3 and owner_kind = $4 and owner_id = $5
-		  and owner_generation = $6 and blob_key = $7 and sha256_digest = $8
-		  and size_bytes = $9 and backend_kind = $10 and publish_expires_at = $11
-		returning publication_id, project_id, owner_kind, owner_id, owner_generation,
-		          blob_key, sha256_digest, size_bytes, backend_kind,
-		          coalesce(object_version, ''), publication_state, publish_expires_at`,
-		request.Intent.PublicationID,
-		request.Object.VersionID,
-		request.Intent.ProjectID,
-		request.Intent.OwnerKind,
-		request.Intent.OwnerID,
-		request.Intent.OwnerGeneration,
-		request.Intent.Target.Key,
-		request.Intent.Target.SHA256[:],
-		request.Intent.Target.SizeBytes,
-		request.Intent.Target.BackendKind,
-		request.Intent.PublishExpiresAt,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		intent, err = scanBlobPublicationIntent(tx.QueryRow(ctx, `
-			select publication_id, project_id, owner_kind, owner_id, owner_generation,
-			       blob_key, sha256_digest, size_bytes, backend_kind,
-			       coalesce(object_version, ''), publication_state, publish_expires_at
-			from public.blob_publication_intents
-			where publication_id = $1 and publication_state = 'published'`,
-			request.Intent.PublicationID,
-		))
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return attachments.BlobPublicationIntent{}, attachments.ErrBlobPublicationConflict
-			}
-			return attachments.BlobPublicationIntent{}, fmt.Errorf("read Blob publication version replay: %w", err)
-		}
-	} else if err != nil {
+		select publication_id, project_id, owner_kind, owner_id, owner_generation,
+		       blob_key, sha256_digest, size_bytes, backend_kind,
+		       coalesce(namespace_id::text, ''), coalesce(obligation_id, ''),
+		       coalesce(object_version, ''), publication_state, publish_expires_at
+		from public.record_blob_publication_bind($1)`, command))
+	if err != nil {
 		return attachments.BlobPublicationIntent{}, mapBlobPublicationWriteError("record Blob publication version", err)
 	}
 	expected := request.Intent
 	expected.ObjectVersion = request.Object.VersionID
+	expected.ObligationID = request.ObligationID
 	expected.State = attachments.BlobPublicationStatePublished
 	if !sameBlobPublicationIntent(intent, expected) {
 		return attachments.BlobPublicationIntent{}, attachments.ErrBlobPublicationConflict
@@ -330,6 +178,7 @@ func (repository *PostgresAttachmentRepository) RecordBlobPublicationCleanupVers
 			  and size_bytes = $13 and backend_kind = $14
 			returning publication_id, project_id, owner_kind, owner_id, owner_generation,
 		          blob_key, sha256_digest, size_bytes, backend_kind,
+		          coalesce(namespace_id::text, ''), coalesce(obligation_id, ''),
 		          coalesce(object_version, ''), publication_state, publish_expires_at,
 			          cleanup_owner_id, cleanup_generation, attempt, cleanup_lease_expires_at`,
 		blobPublicationCleanupVersionArgs(request)...,
@@ -339,6 +188,7 @@ func (repository *PostgresAttachmentRepository) RecordBlobPublicationCleanupVers
 		replay, replayErr := scanBlobPublicationCleanupClaim(tx.QueryRow(ctx, `
 				select publication_id, project_id, owner_kind, owner_id, owner_generation,
 				       blob_key, sha256_digest, size_bytes, backend_kind,
+			       coalesce(namespace_id::text, ''), coalesce(obligation_id, ''),
 				       coalesce(object_version, ''), publication_state, publish_expires_at,
 				       cleanup_owner_id, cleanup_generation, attempt, cleanup_lease_expires_at
 				from public.blob_publication_intents
@@ -388,7 +238,7 @@ func (repository *PostgresAttachmentRepository) ClaimBlobPublicationCleanup(
 	if ctx == nil || repository == nil || repository.beginTx == nil || request.Validate() != nil {
 		return nil, attachments.ErrInvalidBlobPublicationRequest
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return nil, fmt.Errorf("begin Blob publication cleanup claim: %w", err)
 	}
@@ -445,6 +295,10 @@ func (repository *PostgresAttachmentRepository) ClaimBlobPublicationCleanup(
 		return nil, attachments.ErrBlobPublicationConflict
 	}
 
+	// A prepared intent may have deduplicated onto an already retained object
+	// without recording its version. Protect matching content across all versions
+	// in that case; a bound intent protects only its exact version. Apply these
+	// exclusions to initial claims, retries and expired-owner takeovers alike.
 	claim, err := scanBlobPublicationCleanupClaim(tx.QueryRow(ctx, `
 		with candidate as (
 			select publication.publication_id
@@ -457,6 +311,20 @@ func (repository *PostgresAttachmentRepository) ClaimBlobPublicationCleanup(
 			      and publication.retry_at <= transaction_timestamp())
 			    or (publication.publication_state = 'cleanup_claimed'
 			      and publication.cleanup_lease_expires_at <= transaction_timestamp()))
+			  and not exists (
+			    select 1 from public.attachment_upload_parts as part
+			    where part.sha256_digest = publication.sha256_digest
+			      and part.size_bytes = publication.size_bytes
+			      and (publication.object_version is null or part.object_version = publication.object_version)
+			  )
+			  and not exists (
+			    select 1 from public.blob_objects as blob
+			    where blob.blob_key = publication.blob_key
+			      and blob.sha256_digest = publication.sha256_digest
+			      and blob.size_bytes = publication.size_bytes
+			      and blob.backend_kind = publication.backend_kind
+			      and (publication.object_version is null or blob.object_version = publication.object_version)
+			  )
 			order by coalesce(publication.retry_at, publication.cleanup_lease_expires_at,
 			                  publication.publish_expires_at), publication.publication_id
 			for update skip locked
@@ -473,7 +341,7 @@ func (repository *PostgresAttachmentRepository) ClaimBlobPublicationCleanup(
 		returning publication.publication_id, publication.project_id,
 		          publication.owner_kind, publication.owner_id, publication.owner_generation,
 		          publication.blob_key, publication.sha256_digest, publication.size_bytes,
-		          publication.backend_kind, coalesce(publication.object_version, ''),
+		          publication.backend_kind, coalesce(publication.namespace_id::text, ''), coalesce(publication.obligation_id, ''), coalesce(publication.object_version, ''),
 		          publication.publication_state, publication.publish_expires_at,
 		          publication.cleanup_owner_id, publication.cleanup_generation,
 		          publication.attempt, publication.cleanup_lease_expires_at`,
@@ -617,6 +485,39 @@ func (repository *PostgresAttachmentRepository) CompleteBlobPublicationCleanup(
 	return result, nil
 }
 
+func marshalProcessorPublicationCommand(input attachments.ProcessorCompletionInput, candidate processorClaimCandidate, source records.RevisionMutationWriteObligation) ([]byte, error) {
+	var publicationID, mediaType *string
+	if input.Result.HasPreview {
+		publicationID = &input.PreviewPublicationIntent.PublicationID
+		mediaType = &input.Result.Preview.MediaType
+	}
+	return json.Marshal(struct {
+		JobID                string    `json:"job_id"`
+		OwnerID              string    `json:"owner_id"`
+		OwnerGeneration      int64     `json:"owner_generation"`
+		LeaseExpiresAt       time.Time `json:"lease_expires_at"`
+		Attempt              int64     `json:"attempt"`
+		PreviewPublicationID *string   `json:"preview_publication_id"`
+		PreviewMediaType     *string   `json:"preview_media_type"`
+		SourceObligationID   string    `json:"source_obligation_id"`
+		PreviewObligationID  any       `json:"preview_obligation_id"`
+		SourceNamespaceID    any       `json:"source_namespace_id"`
+		SourceIncarnationID  any       `json:"source_incarnation_id"`
+		AttachmentID         string    `json:"attachment_id"`
+		UploadID             string    `json:"upload_id"`
+		DraftID              string    `json:"draft_id"`
+		RecordID             any       `json:"record_id"`
+	}{
+		JobID: input.Claim.ProcessorJobID, OwnerID: input.Claim.OwnerID, OwnerGeneration: input.Claim.OwnerGeneration,
+		LeaseExpiresAt: input.Claim.LeaseExpiresAt.UTC().Truncate(time.Microsecond), Attempt: input.Claim.Attempt,
+		PreviewPublicationID: publicationID, PreviewMediaType: mediaType, SourceObligationID: source.ObligationID,
+		PreviewObligationID: nullableAttachmentString(input.PreviewPublicationIntent.ObligationID),
+		SourceNamespaceID:   nullableAttachmentString(source.NamespaceID), SourceIncarnationID: nullableAttachmentString(source.IncarnationID),
+		AttachmentID: candidate.attachmentID, UploadID: candidate.uploadID, DraftID: candidate.draftID,
+		RecordID: nullableAttachmentString(candidate.recordID),
+	})
+}
+
 func consumeBlobPublicationForUploadPart(
 	ctx context.Context,
 	tx attachmentTx,
@@ -631,91 +532,27 @@ func consumeBlobPublicationForUploadPart(
 		intent.Target.SHA256 != object.SHA256 || intent.Target.SizeBytes != object.SizeBytes {
 		return attachments.ErrInvalidBlobPublicationRequest
 	}
-	if err := ensureAttachmentUploadPart(ctx, tx, uploadID, object); err != nil {
+	command, err := json.Marshal(struct {
+		PublicationID string `json:"publication_id"`
+		ObligationID  string `json:"obligation_id"`
+		UploadID      string `json:"upload_id"`
+	}{intent.PublicationID, intent.ObligationID, uploadID})
+	if err != nil {
 		return err
 	}
-	return consumeExactBlobPublication(ctx, tx, intent)
-}
-
-func consumeBlobPublicationForBlobObject(
-	ctx context.Context,
-	tx attachmentTx,
-	object attachments.BlobObject,
-	intent attachments.BlobPublicationIntent,
-) (bool, error) {
-	expected, ok := intent.Object()
-	if ctx == nil || tx == nil || !ok || expected != object ||
-		intent.State != attachments.BlobPublicationStatePublished ||
-		intent.OwnerKind != attachments.BlobPublicationOwnerProcessorPreview {
-		return false, attachments.ErrInvalidBlobPublicationRequest
-	}
-	inserted, err := ensureAttachmentBlob(ctx, tx, object)
+	consumed, err := scanBlobPublicationIntent(tx.QueryRow(ctx, `
+		select publication_id,project_id,owner_kind,owner_id,owner_generation,
+		       blob_key,sha256_digest,size_bytes,backend_kind,
+		       coalesce(namespace_id::text,''),coalesce(obligation_id,''),
+		       coalesce(object_version,''),publication_state,publish_expires_at
+		from public.record_upload_part_publish($1)`, command))
 	if err != nil {
-		return false, err
+		return mapBlobPublicationWriteError("publish upload part", err)
 	}
-	if err := consumeExactBlobPublication(ctx, tx, intent); err != nil {
-		return false, err
-	}
-	return inserted, nil
-}
-
-func consumeExactBlobPublication(
-	ctx context.Context,
-	tx attachmentTx,
-	intent attachments.BlobPublicationIntent,
-) error {
-	updated, err := tx.Exec(ctx, `
-		update public.blob_publication_intents as publication
-		set publication_state = 'completed', completion_outcome = 'consumed',
-		    receipt_digest = publication.sha256_digest,
-		    completed_at = transaction_timestamp()
-		where publication_id = $1 and owner_kind = $2 and owner_id = $3
-		  and owner_generation = $4 and blob_key = $5 and sha256_digest = $6
-		  and object_version = $7 and size_bytes = $8 and backend_kind = $9
-		  and publication_state = 'published'`,
-		intent.PublicationID,
-		intent.OwnerKind,
-		intent.OwnerID,
-		intent.OwnerGeneration,
-		intent.Target.Key,
-		intent.Target.SHA256[:],
-		intent.ObjectVersion,
-		intent.Target.SizeBytes,
-		intent.Target.BackendKind,
-	)
-	if err != nil {
-		return mapBlobPublicationWriteError("consume Blob publication intent", err)
-	}
-	if updated.RowsAffected() != 1 {
-		var replay bool
-		if err := tx.QueryRow(ctx, `
-			select exists(
-				select 1 from public.blob_publication_intents
-				where publication_id = $1 and owner_kind = $2 and owner_id = $3
-				  and owner_generation = $4 and blob_key = $5 and sha256_digest = $6
-				  and object_version = $7 and size_bytes = $8 and backend_kind = $9
-				  and project_id = $10 and publish_expires_at = $11
-				  and publication_state = 'completed'
-				  and completion_outcome = 'consumed'
-				  and receipt_digest = sha256_digest
-			)`,
-			intent.PublicationID,
-			intent.OwnerKind,
-			intent.OwnerID,
-			intent.OwnerGeneration,
-			intent.Target.Key,
-			intent.Target.SHA256[:],
-			intent.ObjectVersion,
-			intent.Target.SizeBytes,
-			intent.Target.BackendKind,
-			intent.ProjectID,
-			intent.PublishExpiresAt.UTC().Truncate(time.Microsecond),
-		).Scan(&replay); err != nil {
-			return fmt.Errorf("read consumed Blob publication replay: %w", err)
-		}
-		if !replay {
-			return attachments.ErrBlobPublicationConflict
-		}
+	expected := intent
+	expected.State = attachments.BlobPublicationStateCompleted
+	if !sameBlobPublicationIntent(consumed, expected) {
+		return attachments.ErrBlobPublicationConflict
 	}
 	return nil
 }
@@ -749,6 +586,7 @@ func scanBlobPublicationIntent(row pgx.Row) (attachments.BlobPublicationIntent, 
 		&digest,
 		&intent.Target.SizeBytes,
 		&intent.Target.BackendKind,
+		&intent.NamespaceID, &intent.ObligationID,
 		&intent.ObjectVersion,
 		&intent.State,
 		&intent.PublishExpiresAt,
@@ -782,6 +620,7 @@ func scanBlobPublicationIntentWithOutcome(
 		&digest,
 		&intent.Target.SizeBytes,
 		&intent.Target.BackendKind,
+		&intent.NamespaceID, &intent.ObligationID,
 		&intent.ObjectVersion,
 		&intent.State,
 		&intent.PublishExpiresAt,
@@ -813,6 +652,7 @@ func scanBlobPublicationCleanupClaim(row pgx.Row) (attachments.BlobPublicationCl
 		&digest,
 		&claim.Intent.Target.SizeBytes,
 		&claim.Intent.Target.BackendKind,
+		&claim.Intent.NamespaceID, &claim.Intent.ObligationID,
 		&claim.Intent.ObjectVersion,
 		&claim.Intent.State,
 		&claim.Intent.PublishExpiresAt,
@@ -841,6 +681,7 @@ func blobPublicationIntentMatchesPrepare(
 ) bool {
 	return intent.ProjectID == request.ProjectID && intent.OwnerKind == request.OwnerKind &&
 		intent.OwnerID == request.OwnerID && intent.OwnerGeneration == request.OwnerGeneration &&
+		intent.NamespaceID == request.NamespaceID &&
 		intent.Target == request.Target && intent.PublishExpiresAt.Equal(request.PublishExpiresAt)
 }
 
@@ -848,6 +689,7 @@ func sameBlobPublicationIntent(left, right attachments.BlobPublicationIntent) bo
 	return left.PublicationID == right.PublicationID && left.ProjectID == right.ProjectID &&
 		left.OwnerKind == right.OwnerKind && left.OwnerID == right.OwnerID &&
 		left.OwnerGeneration == right.OwnerGeneration && left.Target == right.Target &&
+		left.NamespaceID == right.NamespaceID && left.ObligationID == right.ObligationID &&
 		left.ObjectVersion == right.ObjectVersion && left.State == right.State &&
 		left.PublishExpiresAt.Equal(right.PublishExpiresAt)
 }
@@ -985,8 +827,22 @@ func newBlobPublicationCleanupResult(
 
 func mapBlobPublicationWriteError(operation string, err error) error {
 	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) && postgresError.Code == "55000" {
+		switch postgresError.Message {
+		case "Blob metadata identity conflict":
+			return fmt.Errorf("%w: %s", attachments.ErrAttachmentConflict, operation)
+		case "upload write origin unavailable":
+			return fmt.Errorf("%w: %s", attachments.ErrAttachmentConflict, operation)
+		case "processor write claim unavailable":
+			return fmt.Errorf("%w: %s", attachments.ErrProcessorClaimLost, operation)
+		case "upload write owner unavailable":
+			return fmt.Errorf("%w: %s", attachments.ErrAttachmentOwnerNotFound, operation)
+		case "upload write owner expired":
+			return fmt.Errorf("%w: %s", attachments.ErrUploadExpired, operation)
+		}
+	}
 	if errors.As(err, &postgresError) &&
-		(postgresError.Code == "23505" || postgresError.Code == "23514") {
+		(postgresError.Code == "23505" || postgresError.Code == "23514" || postgresError.Code == "55000" || postgresError.Code == "P0002") {
 		return fmt.Errorf("%w: %s", attachments.ErrBlobPublicationConflict, operation)
 	}
 	return fmt.Errorf("%s: %w", operation, err)

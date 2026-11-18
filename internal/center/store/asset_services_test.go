@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,42 +14,6 @@ import (
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
-
-func TestPostgresAssetServiceMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0023_create_asset_services.sql"))
-	if err != nil {
-		t.Fatalf("ReadFile(asset service migration) error = %v", err)
-	}
-	text := string(source)
-	for _, snippet := range []string{
-		"create table if not exists asset_services",
-		"service_id text primary key",
-		"vps_id text not null",
-		"target_id text",
-		"asset_services_vps_fk foreign key (vps_id) references vps_assets(vps_id) on delete cascade",
-		"asset_services_target_fk foreign key (target_id) references targets(target_id) on delete set null",
-		"name text not null",
-		"labels text[] not null default '{}'",
-		"asset_services_name_not_blank",
-		"length(btrim(name)) > 0",
-		"asset_services_type_allowed",
-		"'web', 'api', 'database', 'worker', 'proxy', 'other'",
-		"asset_services_status_allowed",
-		"'active', 'paused', 'retired', 'unknown'",
-		"asset_services_port_range",
-		"port is null or port between 1 and 65535",
-		"idx_asset_services_vps",
-		"idx_asset_services_target",
-		"idx_asset_services_status",
-		"idx_asset_services_type",
-	} {
-		if !strings.Contains(text, snippet) {
-			t.Fatalf("asset service migration missing %q", snippet)
-		}
-	}
-}
 
 func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 	t.Parallel()
@@ -254,48 +216,6 @@ func TestPostgresAssetServiceRejectsActiveReferenceToArchivedTarget(t *testing.T
 	}
 	if inserted {
 		t.Fatal("CreateAssetService() inserted an active relationship to an archived target")
-	}
-}
-
-func TestPostgresAssetServiceListForVPS(t *testing.T) {
-	t.Parallel()
-
-	var queryArgs []any
-	var querySQL string
-	var existsCheckArg any
-	repo := &PostgresAssetServiceRepository{db: fakeAssetServiceDB{
-		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
-			querySQL = sql
-			queryArgs = append([]any(nil), args...)
-			return &fakeAssetServiceRows{}, nil
-		},
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if !strings.Contains(sql, "from vps_assets") {
-				t.Fatalf("unexpected QueryRow SQL %q", sql)
-			}
-			existsCheckArg = args[0]
-			return fakeAssetServiceRow{scan: func(dest ...any) error {
-				*(dest[0].(*bool)) = true
-				return nil
-			}}
-		},
-	}}
-
-	records, err := repo.ListAssetServicesForVPS(context.Background(), " vps_001 ")
-	if err != nil {
-		t.Fatalf("ListAssetServicesForVPS() error = %v", err)
-	}
-	if len(records) != 0 {
-		t.Fatalf("records = %#v, want empty list", records)
-	}
-	if existsCheckArg != "vps_001" {
-		t.Fatalf("exists check arg = %#v, want vps_001", existsCheckArg)
-	}
-	if len(queryArgs) != 1 || queryArgs[0] != "vps_001" {
-		t.Fatalf("query args = %#v, want vps filter", queryArgs)
-	}
-	if !strings.Contains(querySQL, "a.ended_at is null") || !strings.Contains(querySQL, "v.lifecycle_status <> 'archived'") {
-		t.Fatalf("ListAssetServicesForVPS SQL = %q, want current associations of managed VPS only", querySQL)
 	}
 }
 

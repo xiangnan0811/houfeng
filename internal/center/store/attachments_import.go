@@ -4,13 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 
 	"github.com/jackc/pgx/v5"
 
 	"houfeng/internal/center/attachments"
-	"houfeng/internal/center/records"
+	"houfeng/internal/center/recordidentity"
 )
 
 // ObserveImportBlobGC commits a short, read-only snapshot before any Blob Put.
@@ -89,7 +90,7 @@ func insertImportedAvailableAttachments(
 	projectID, recordID string,
 	items []attachments.ImportedAvailableAttachment,
 ) error {
-	if ctx == nil || tx == nil || projectID != "default" || !records.ValidRecordRootID(recordID) {
+	if ctx == nil || tx == nil || projectID != "default" || !recordidentity.IsValid(recordID) {
 		return attachments.ErrInvalidAttachmentCommand
 	}
 	if len(items) == 0 {
@@ -112,7 +113,7 @@ func insertImportedAvailableAttachments(
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `lock table public.blob_objects in row exclusive mode`); err != nil {
+	if _, err := tx.Exec(ctx, `select public.record_revision_blob_fence()`); err != nil {
 		return fmt.Errorf("lock Blob metadata for import: %w", err)
 	}
 	counts, active, err := readImportBlobGCHistory(ctx, tx, keys)
@@ -131,29 +132,19 @@ func insertImportedAvailableAttachments(
 		return attachments.ErrQuotaOverflow
 	}
 	for _, item := range items {
-		inserted, err := ensureAttachmentBlobLocked(ctx, tx, attachments.BlobObject{
-			Key: item.Object.Key, SHA256: item.Object.SHA256,
-			ObjectVersion: item.Object.VersionID, SizeBytes: item.Object.SizeBytes,
-			BackendKind: item.BackendKind,
+		body, err := json.Marshal(importAttachmentPublication{
+			RecordID: recordID, AttachmentID: item.AttachmentID, ObligationID: item.ObligationID,
+			NamespaceID: item.NamespaceID, BackendKind: item.BackendKind,
+			Key: item.Object.Key, Version: item.Object.VersionID, SHA256: hex.EncodeToString(item.Object.SHA256[:]),
+			Size: item.Object.SizeBytes, DisplayName: item.DisplayName, MediaType: item.MediaType,
+			CreatedBy: item.CreatedBy, GCCount: item.GCObservation.DeletionCount(),
 		})
 		if err != nil {
 			return err
 		}
-		written, err := tx.Exec(ctx, `
-			insert into public.record_attachments (
-				attachment_id, project_id, record_id,
-				attachment_state, display_name, media_type, logical_size_bytes,
-				blob_key, blob_object_version, created_by
-			) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			item.AttachmentID, projectID, recordID, attachments.UploadStateAvailable,
-			item.DisplayName, item.MediaType, item.LogicalSizeBytes,
-			item.Object.Key, item.Object.VersionID, item.CreatedBy,
-		)
-		if err != nil {
-			return fmt.Errorf("insert imported attachment: %w", err)
-		}
-		if written.RowsAffected() != 1 {
-			return attachments.ErrAttachmentConflict
+		var inserted bool
+		if err := tx.QueryRow(ctx, `select public.record_import_attachment_publish($1)`, body).Scan(&inserted); err != nil {
+			return fmt.Errorf("publish imported attachment: %w", err)
 		}
 		physicalDelta := int64(0)
 		if inserted {
@@ -165,4 +156,20 @@ func insertImportedAvailableAttachments(
 		}
 	}
 	return updateAttachmentQuotaAccount(ctx, tx, projectID, quotaVersion, usage)
+}
+
+type importAttachmentPublication struct {
+	RecordID     string                  `json:"record_id"`
+	AttachmentID string                  `json:"attachment_id"`
+	ObligationID string                  `json:"obligation_id"`
+	NamespaceID  string                  `json:"namespace_id"`
+	BackendKind  attachments.BackendKind `json:"backend_kind"`
+	Key          string                  `json:"key"`
+	Version      string                  `json:"version"`
+	SHA256       string                  `json:"sha256"`
+	Size         int64                   `json:"size"`
+	DisplayName  string                  `json:"display_name"`
+	MediaType    string                  `json:"media_type"`
+	CreatedBy    string                  `json:"created_by"`
+	GCCount      int64                   `json:"gc_count"`
 }

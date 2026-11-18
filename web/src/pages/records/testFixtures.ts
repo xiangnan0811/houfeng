@@ -1,7 +1,22 @@
-import type { RecordDetail, RecordRevision } from '../../lib/types'
+import type { RecordAllocation, RecordDetail, RecordRevision } from '../../lib/types'
 import { DOCUMENT_MARKDOWN_VERSION_V1 } from '../../lib/documentMarkdown'
 
 export { emptyRecordDraftPayload, payloadFromRevision } from './recordPayload'
+
+/** A well-formed server reservation; `seed` keeps IDs distinct across one test. */
+export function recordAllocationFixture(seed: string, overrides: Partial<RecordAllocation> = {}): RecordAllocation {
+  const hex = (seed.length > 0 ? [...seed].map((character) => character.charCodeAt(0).toString(16)).join('') : '0').padStart(31, '0').slice(-31)
+  return {
+    allocation_id: `rqa_${hex}0`,
+    reservation_id: `rba_${hex}1`,
+    record_id: `rec2_${hex}2`,
+    purpose: 'record_create',
+    request_digest: 'd'.repeat(64),
+    generation: 0,
+    idempotency_key: `allocation-${seed || 'default'}`,
+    ...overrides,
+  }
+}
 
 export function recordRevisionFixture(overrides: Partial<RecordRevision> = {}): RecordRevision {
   return {

@@ -170,6 +170,11 @@ type BlobGCDeleter interface {
 	DeleteGCVersion(context.Context, ObjectVersion) (DeletionReceipt, error)
 }
 
+// BlobGCStorageIdentity binds GC authorization to the configured storage route.
+type BlobGCStorageIdentity interface {
+	GCStorageIdentity() ([sha256.Size]byte, error)
+}
+
 func nilUploadServiceDependency(value any) bool {
 	if value == nil {
 		return true

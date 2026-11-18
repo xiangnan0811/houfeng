@@ -14,10 +14,10 @@ func TestPreparedImportedSnapshotRejectsUnknownKindAndAcceptsKnownSnapshot(t *te
 		t.Fatalf("NewComparisonResultKind() error = %v", err)
 	}
 	snapshot := mustComparisonResultSnapshot(t, kind, comparisonResultTestPayload("evs_leftcopy", "evs_rightcopy"))
-	if _, err := NewPreparedImportedSnapshot("rec_imported01", "evs_imported01", CanonicalSnapshot{}); !errors.Is(err, ErrInvalidRevisionPreparation) {
+	if _, err := NewPreparedImportedSnapshot("rec_imported01", "evs_imported01", CanonicalSnapshot{}, ImportedSnapshotRoute{ImportJobID: "rij_test", ImportPlanID: "rip_test"}); !errors.Is(err, ErrInvalidRevisionPreparation) {
 		t.Fatalf("empty snapshot error = %v, want ErrInvalidRevisionPreparation", err)
 	}
-	prepared, err := NewPreparedImportedSnapshot("rec_imported01", "evs_imported01", snapshot)
+	prepared, err := NewPreparedImportedSnapshot("rec_imported01", "evs_imported01", snapshot, ImportedSnapshotRoute{ImportJobID: "rij_test", ImportPlanID: "rip_test"})
 	if err != nil {
 		t.Fatalf("NewPreparedImportedSnapshot() error = %v", err)
 	}
@@ -35,7 +35,7 @@ func TestRevisionPreparationIncludesImportedSnapshotsInOrderedIdentities(t *test
 		t.Fatalf("NewComparisonResultKind() error = %v", err)
 	}
 	snapshot := mustComparisonResultSnapshot(t, kind, comparisonResultTestPayload("evs_leftcopy", "evs_rightcopy"))
-	imported, err := NewPreparedImportedSnapshot("rec_imported02", "evs_imported02", snapshot)
+	imported, err := NewPreparedImportedSnapshot("rec_imported02", "evs_imported02", snapshot, ImportedSnapshotRoute{ImportJobID: "rij_test", ImportPlanID: "rip_test"})
 	if err != nil {
 		t.Fatalf("NewPreparedImportedSnapshot() error = %v", err)
 	}

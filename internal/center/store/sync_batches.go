@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -90,6 +91,9 @@ func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.B
 	}()
 	if err := lockAssetGraphForSync(ctx, tx); err != nil {
 		return syncing.Result{}, fmt.Errorf("lock asset graph for sync batch of monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+	}
+	if err := assertSyncBatchSourcesWritable(ctx, tx, batch); err != nil {
+		return syncing.Result{}, err
 	}
 
 	syncState, err := r.validateAcceptedSyncBatch(ctx, tx, batch)
@@ -532,5 +536,43 @@ func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batc
 		}
 	}
 
+	return nil
+}
+
+// Direct repository callers can supply per-fact identities distinct from the
+// carrier. Guard the actual complete source set before replay or live effects.
+func assertSyncBatchSourcesWritable(ctx context.Context, tx syncBatchTx, batch syncing.Batch) error {
+	instanceIDs := map[string]struct{}{batch.MonitoringInstanceID: {}}
+	targetIDs := make(map[string]struct{})
+	for _, sample := range batch.Observations.HostSamples {
+		instanceIDs[sample.MonitoringInstanceID] = struct{}{}
+	}
+	for _, observation := range batch.Observations.ProbeObservations {
+		instanceIDs[observation.MonitoringInstanceID] = struct{}{}
+		targetIDs[observation.TargetID] = struct{}{}
+	}
+	for _, report := range batch.IPQualityReports {
+		instanceIDs[report.MonitoringInstanceID] = struct{}{}
+	}
+	keys := make([]string, 0, len(instanceIDs))
+	for id := range instanceIDs {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	for _, id := range keys {
+		if err := assertMonitoringSourceWritable(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	keys = keys[:0]
+	for id := range targetIDs {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	for _, id := range keys {
+		if err := assertSourceWritable(ctx, tx, "target", id); err != nil {
+			return fmt.Errorf("%w: source unavailable: %w", observations.ErrInvalidProbeObservation, err)
+		}
+	}
 	return nil
 }

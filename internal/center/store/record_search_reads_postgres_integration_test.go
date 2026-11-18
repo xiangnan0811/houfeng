@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
-	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/recordsearch"
 )
@@ -95,23 +94,21 @@ func recordSearchSeedCorpus() []recordSearchSeedRecord {
 
 func newRecordSearchReadFixture(t *testing.T, ctx context.Context, name string) recordSearchReadFixture {
 	t.Helper()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	pool := fixture.openDirectRuntimePool(t, ctx, name, 2)
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.vps_assets(vps_id, display_name, lifecycle_status, usage_status)
+		values ($1, 'Other search VPS', 'active', 'in_use'),
+		       ($2, 'Network search VPS', 'active', 'in_use')`,
+		recordSearchOtherVPSID, recordSearchNetworkVPSID); err != nil {
+		t.Fatalf("seed search subject sources: %v", err)
+	}
 	seedRecordSearchGeneration(t, ctx, fixture.db, 1, "published")
-	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+	repository := newRevisionMutationAdmittedRepository(t, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, NewRecordSearchRevisionParticipant())
 
 	byName := make(map[string]string, len(recordSearchSeedCorpus()))
 	for index, seed := range recordSearchSeedCorpus() {
-		committed, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
-			t,
-			recordplatform.OperationKindRecordCreate,
-			"rec_pgsearchread"+seed.name,
-			"",
-			0,
-			0,
-			recordSearchSeedInput(t, seed),
-			"record-search-read-"+seed.name,
-		))
+		committed, err := repository.CommitRevision(ctx, revisionBirthBatchCommand(t, ctx, ImportAttachmentGCFixture{Runtime: pool, Gate: fixture.admissionGate}, recordSearchSeedInput(t, seed), "record-search-read-"+seed.name))
 		if err != nil {
 			t.Fatalf("CommitRevision(%s) error = %v", seed.name, err)
 		}
@@ -139,7 +136,7 @@ func newRecordSearchReadFixture(t *testing.T, ctx context.Context, name string) 
 	}
 	return recordSearchReadFixture{
 		fixture: fixture,
-		store:   NewPostgresRecordSearchStore(pool, allowRecordPlatformAdmissionGate),
+		store:   NewPostgresRecordSearchStore(pool, fixture.admissionGate),
 		byName:  byName,
 	}
 }

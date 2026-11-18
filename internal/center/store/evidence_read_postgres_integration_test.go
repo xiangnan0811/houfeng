@@ -5,39 +5,46 @@ import (
 	"errors"
 	"testing"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
 
 func TestPostgresIntegrationEvidenceProductionReadExportAndReferenceReuse(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-production-read", 3)
-	writer := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, NewRecordEvidenceRevisionParticipant())
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture, runtimePool := signed.platform, signed.Runtime
+	writer := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant())
+	allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "production-evidence-create", recordbirth.PurposeEvidence)
 	databaseNow := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
 	capture := storePreparedEvidenceCapture(
-		t, "rec_evidenceproduction", "evs_evidenceproduction", "evi_777777777777777777777777", databaseNow,
+		t, allocation.RecordID, "evs_evidenceproduction", "evi_777777777777777777777777", databaseNow,
 	)
-	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, writer, capture)
-	created, err := recordRepository.CommitRevision(ctx, recordEvidenceParticipantCommand(
-		t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, writer, capture, allocation.AllocationID)
+	command := recordEvidenceParticipantCommand(t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 		"Production evidence", "production-evidence-create",
-		storeEvidenceRevisionPreparation(t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()}),
-	))
+		storeEvidenceRevisionPreparation(t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()}))
+	command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
+	created, err := recordRepository.CommitRevision(ctx, command)
 	if err != nil {
 		t.Fatalf("CommitRevision(create) error = %v", err)
 	}
 
 	subjects := evidenceReadPostgresSubjects(t, nil)
-	subjectResolver := NewRecordSubjectReadResolver(subjects, nil)
+	tombstones, err := NewWitnessedRecordSubjectTombstoneReader("", recordauth.ProjectIDDefault, nil, runtimePool)
+	if err != nil {
+		t.Fatalf("NewWitnessedRecordSubjectTombstoneReader() error = %v", err)
+	}
+	subjectResolver := NewRecordSubjectReadResolver(subjects, tombstones)
 	authorizations := NewPostgresCurrentRecordAuthorizationSource(runtimePool, subjectResolver, allowRecordPlatformAdmissionGate)
 	registry := evidenceReadPostgresRegistry(t)
-	repository, err := NewPostgresEvidenceRepositoryWithReadSources(
-		runtimePool, allowRecordPlatformAdmissionGate, registry, authorizations, subjectResolver,
-	)
+	repository, err := NewPostgresEvidenceRepositoryWithReadSources(runtimePool, allowRecordPlatformAdmissionGate, registry, authorizations, subjectResolver, nil)
 	if err != nil {
 		t.Fatalf("NewPostgresEvidenceRepositoryWithReadSources() error = %v", err)
 	}
@@ -90,11 +97,9 @@ func TestPostgresIntegrationEvidenceProductionReadExportAndReferenceReuse(t *tes
 
 	restricted := mustStoreRestrictedVisibility(t, []recordauth.Role{recordauth.RoleViewer}, nil, 2)
 	restrictedSubjects := evidenceReadPostgresSubjects(t, &restricted)
-	restrictedResolver := NewRecordSubjectReadResolver(restrictedSubjects, nil)
+	restrictedResolver := NewRecordSubjectReadResolver(restrictedSubjects, tombstones)
 	restrictedAuthorizations := NewPostgresCurrentRecordAuthorizationSource(runtimePool, restrictedResolver, allowRecordPlatformAdmissionGate)
-	restrictedRepository, err := NewPostgresEvidenceRepositoryWithReadSources(
-		runtimePool, allowRecordPlatformAdmissionGate, registry, restrictedAuthorizations, restrictedResolver,
-	)
+	restrictedRepository, err := NewPostgresEvidenceRepositoryWithReadSources(runtimePool, allowRecordPlatformAdmissionGate, registry, restrictedAuthorizations, restrictedResolver, nil)
 	if err != nil {
 		t.Fatalf("NewPostgresEvidenceRepositoryWithReadSources(restricted) error = %v", err)
 	}
@@ -133,6 +138,19 @@ func TestPostgresIntegrationEvidenceProductionReadExportAndReferenceReuse(t *tes
 		t.Fatalf("disable referential triggers for corruption injection: %v", err)
 	}
 	captureDigest := capture.Snapshot().Hash()
+	var originalCompressed []byte
+	if err := corruptConnection.QueryRow(ctx, `select compressed_payload from public.evidence_payloads where payload_digest=$1`, captureDigest[:]).Scan(&originalCompressed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := corruptConnection.Exec(ctx, `update public.evidence_payloads set compressed_payload=set_byte(compressed_payload,0,0) where payload_digest=$1`, captureDigest[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.LoadEvidenceSnapshot(ctx, actor, capture.SnapshotID()); !errors.Is(err, evidence.ErrEvidenceServiceUnavailable) {
+		t.Fatalf("LoadEvidenceSnapshot(corrupt gzip) = %v", err)
+	}
+	if _, err := corruptConnection.Exec(ctx, `update public.evidence_payloads set compressed_payload=$2 where payload_digest=$1`, captureDigest[:], originalCompressed); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := corruptConnection.Exec(ctx, `delete from public.evidence_payloads where payload_digest = $1`, captureDigest[:]); err != nil {
 		t.Fatalf("remove referenced payload for corruption injection: %v", err)
 	}

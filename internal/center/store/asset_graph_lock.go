@@ -12,7 +12,10 @@ import (
 // statement and READ COMMITTED isolation provide a fresh snapshot after waiting.
 // Management must never upgrade a shared sync lock to an exclusive lock.
 func lockAssetGraph(ctx context.Context, tx pgx.Tx) error {
-	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(1213154899, 1)`); err != nil {
+	if _, err := tx.Exec(ctx, `select public.source_application_admit()`); err != nil {
+		return fmt.Errorf("admit source generation before asset graph: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1, $2)`, recordAdvisoryClassID, assetGraphAdvisoryKey); err != nil {
 		return fmt.Errorf("lock asset graph: %w", err)
 	}
 	return nil
@@ -21,7 +24,10 @@ func lockAssetGraph(ctx context.Context, tx pgx.Tx) error {
 func lockAssetGraphForSync(ctx context.Context, tx interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }) error {
-	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock_shared(1213154899, 1)`); err != nil {
+	if _, err := tx.Exec(ctx, `select public.source_application_admit()`); err != nil {
+		return fmt.Errorf("admit source generation before shared asset graph: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock_shared($1, $2)`, recordAdvisoryClassID, assetGraphAdvisoryKey); err != nil {
 		return fmt.Errorf("lock asset graph for sync: %w", err)
 	}
 	return nil

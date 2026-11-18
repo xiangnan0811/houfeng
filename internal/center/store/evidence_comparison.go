@@ -10,6 +10,7 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 	"houfeng/internal/center/records"
 )
 
@@ -180,7 +181,7 @@ func (repository *PostgresEvidenceRepository) LoadComparisonRevisions(
 	revisionIDs := make([]string, 0, len(keys))
 	wanted := make(map[evidence.ComparisonRevisionKey]struct{}, len(keys))
 	for _, key := range keys {
-		if !validEvidenceStoreID(key.RecordID, "rec_") || !validEvidenceStoreID(key.RevisionID, "rrv_") {
+		if !recordidentity.IsValid(key.RecordID) || !validEvidenceStoreID(key.RevisionID, "rrv_") {
 			continue
 		}
 		recordIDs = append(recordIDs, key.RecordID)

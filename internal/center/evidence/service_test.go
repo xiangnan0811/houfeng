@@ -19,16 +19,19 @@ func TestEvidenceServiceCapturePreviewPersistsCompleteServerOwnedBinding(t *test
 		t.Fatalf("NewService() error = %v", err)
 	}
 	result, err := service.CapturePreview(context.Background(), CapturePreviewRequest{
-		Actor: fixture.Actor, RecordID: "rec_service", SnapshotID: "evs_service", Selection: fixture.Selection,
+		Actor: fixture.Actor, AllocationID: "rqa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RecordID: "rec_service", SnapshotID: "evs_service", Selection: fixture.Selection,
 	})
 	if err != nil {
 		t.Fatalf("CapturePreview() error = %v", err)
 	}
 	if result.RecordID != "rec_service" || result.SnapshotID != "evs_service" || intents.calls != 1 ||
-		intents.recordID != result.RecordID || intents.snapshotID != result.SnapshotID ||
+		intents.allocationID != "rqa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || intents.recordID != result.RecordID || intents.snapshotID != result.SnapshotID ||
 		intents.intent.ID != result.Preview.IntentID || intents.intent.PreviewDigest == [32]byte{} ||
 		!reflect.DeepEqual(intents.preview, result.Preview) {
 		t.Fatalf("capture result/persistence = %#v / %#v", result, intents)
+	}
+	if !reflect.DeepEqual(intents.actor, fixture.Actor) || intents.authorization.SourceID != fixture.Selection.SourceID {
+		t.Fatalf("capture intent authority = %#v / %#v", intents.actor, intents.authorization)
 	}
 	if result.Preview.QuotaOutcome.Status != QuotaWarning {
 		t.Fatalf("preview quota = %#v, want warning", result.Preview.QuotaOutcome)
@@ -164,21 +167,22 @@ func mustTestCapacityEnforcer(
 }
 
 type captureIntentStoreStub struct {
-	calls                int
-	recordID, snapshotID string
-	intent               Intent
-	preview              Preview
+	calls                              int
+	allocationID, recordID, snapshotID string
+	intent                             Intent
+	preview                            Preview
+	actor                              ActorScope
+	authorization                      AuthorizationScope
 }
 
 func (store *captureIntentStoreStub) PersistCaptureIntent(
 	_ context.Context,
-	recordID string,
-	snapshotID string,
-	intent Intent,
-	preview Preview,
+	request CaptureIntentPersistence,
 ) error {
 	store.calls++
-	store.recordID, store.snapshotID, store.intent, store.preview = recordID, snapshotID, intent, preview
+	store.recordID, store.snapshotID, store.intent, store.preview = request.RecordID, request.SnapshotID, request.Intent, request.Preview
+	store.allocationID = request.AllocationID
+	store.actor, store.authorization = request.Actor, request.Authorization
 	return nil
 }
 

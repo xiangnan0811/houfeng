@@ -412,6 +412,7 @@ jobs:
           HOUFENG_RUNTIME_PASSWORD: release-validation-runtime
           HOUFENG_MIGRATOR_PASSWORD: release-validation-migrator
           HOUFENG_PLATFORM_ADMIN_PASSWORD: release-validation-admin
+          HOUFENG_RECORD_DELETION_WORKER_PASSWORD: release-validation-deletion-worker
           HOUFENG_INITIAL_PASSWORD: release-validation-initial
           HOUFENG_SESSION_HMAC_KEY: release-validation-session-hmac-key-32-bytes
         run: |

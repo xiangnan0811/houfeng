@@ -5,8 +5,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-
-	"houfeng/internal/center/recordplatform"
+	"math"
+	"reflect"
 )
 
 const RecordDeletionContractVersionV1 uint64 = 1
@@ -90,25 +90,22 @@ func (cursor RecoveryReplayCursor) validate() error {
 	return nil
 }
 
-// RecoveryReplayRequest is accepted only after the independent ledger and
-// full witness have supplied a fresh, continuous entry proof.
+// RecoveryReplayRequest identifies a ledger entry and its expected predecessor.
+// Entry contents, fingerprint and witness proof come from the verifier.
 type RecoveryReplayRequest struct {
-	Cursor                  RecoveryReplayCursor
-	Entry                   DeletionLedgerEntry
-	PreviousHash            [sha256.Size]byte
-	WitnessProofDigest      [sha256.Size]byte
-	RequestFingerprintBytes [sha256.Size]byte
+	Cursor  RecoveryReplayCursor
+	Locator LedgerLocator
 }
 
 type RecoveryReplayCommand struct {
-	Cursor                  RecoveryReplayCursor
-	Entry                   DeletionLedgerEntry
-	PreviousHash            [sha256.Size]byte
-	WitnessProofDigest      [sha256.Size]byte
-	RequestFingerprintBytes [sha256.Size]byte
-	AllowedSurfaces         []RecoverySurface
-	SurfaceDigest           [sha256.Size]byte
-	PurgeContent            bool
+	Cursor                RecoveryReplayCursor
+	VerifiedEntry         VerifiedLedgerEntry
+	MaintenanceRID        string
+	MaintenanceGeneration uint64
+	AllowedSurfaces       []RecoverySurface
+	SurfaceDigest         [sha256.Size]byte
+	PurgeContent          bool
+	fence                 RecoveryMaintenanceFence
 }
 
 type RecoveryReplayReceipt struct {
@@ -122,69 +119,111 @@ type RecoveryStore interface {
 	ApplyRecoveryEntry(context.Context, RecoveryReplayCommand) (RecoveryReplayReceipt, error)
 }
 
-type RecoveryAdapter struct {
-	store RecoveryStore
+// RecoveryMaintenanceFence is the trusted management coordinator's live
+// offline fence. Its lifetime encloses independent verification and replay.
+type RecoveryMaintenanceFence interface {
+	LedgerContinuityGuard
+	WithHeldLedgerFence(context.Context, func(context.Context) error) error
+	RecoveryBinding() (string, uint64, error)
+	NeverEnrolled() (bool, error)
 }
 
-func NewRecoveryAdapter(store RecoveryStore) (*RecoveryAdapter, error) {
-	if nilDeletionServiceDependency(store) {
+type RecoveryAdapter struct {
+	store    RecoveryStore
+	verifier *LedgerVerifier
+	fence    RecoveryMaintenanceFence
+}
+
+func NewRecoveryAdapter(store RecoveryStore, verifier *LedgerVerifier, fence RecoveryMaintenanceFence) (*RecoveryAdapter, error) {
+	if nilDeletionServiceDependency(store) || verifier == nil || nilDeletionServiceDependency(fence) {
 		return nil, ErrInvalidRecoveryAdapter
 	}
-	return &RecoveryAdapter{store: store}, nil
+	// The continuity check and replay lifetime must use the same concrete fence.
+	fenceValue := reflect.ValueOf(fence)
+	if fenceValue.Kind() != reflect.Pointer || fenceValue != reflect.ValueOf(verifier.trust.Continuity) {
+		return nil, ErrInvalidRecoveryAdapter
+	}
+	return &RecoveryAdapter{store: store, verifier: verifier, fence: fence}, nil
 }
 
 func (adapter *RecoveryAdapter) Replay(ctx context.Context, request RecoveryReplayRequest) (RecoveryReplayReceipt, error) {
-	if ctx == nil || adapter == nil || nilDeletionServiceDependency(adapter.store) {
+	if ctx == nil || adapter == nil || nilDeletionServiceDependency(adapter.store) || adapter.verifier == nil || nilDeletionServiceDependency(adapter.fence) {
 		return RecoveryReplayReceipt{}, ErrInvalidRecoveryAdapter
 	}
 	if err := ctx.Err(); err != nil {
 		return RecoveryReplayReceipt{}, err
 	}
-	surfaces, purgeContent, err := validateRecoveryReplayRequest(request)
-	if err != nil {
-		return RecoveryReplayReceipt{}, err
-	}
-	surfaceDigest := digestRecoverySurfaces(request.Entry.Request.EntryType, surfaces)
-	command := RecoveryReplayCommand{
-		Cursor:                  request.Cursor,
-		Entry:                   request.Entry,
-		PreviousHash:            request.PreviousHash,
-		WitnessProofDigest:      request.WitnessProofDigest,
-		RequestFingerprintBytes: request.RequestFingerprintBytes,
-		AllowedSurfaces:         append([]RecoverySurface(nil), surfaces...),
-		SurfaceDigest:           surfaceDigest,
-		PurgeContent:            purgeContent,
-	}
-	receipt, err := adapter.store.ApplyRecoveryEntry(ctx, command)
-	if err != nil {
-		return RecoveryReplayReceipt{}, err
-	}
-	if receipt.Sequence != request.Entry.Sequence || receipt.EntryHash != request.Entry.EntryHash ||
-		receipt.SurfaceDigest != surfaceDigest || receipt.ContentPurged != purgeContent {
+	if request.Cursor.validate() != nil || request.Cursor.Sequence >= math.MaxInt64 ||
+		request.Locator.Sequence != request.Cursor.Sequence+1 || zeroDeletionDigest(request.Locator.LedgerDomain) ||
+		zeroDeletionDigest(request.Locator.EntryHash) {
 		return RecoveryReplayReceipt{}, ErrRecoveryContractUnavailable
+	}
+	var receipt RecoveryReplayReceipt
+	err := adapter.fence.WithHeldLedgerFence(ctx, func(heldCtx context.Context) error {
+		rid, generation, err := adapter.fence.RecoveryBinding()
+		if err != nil {
+			return err
+		}
+		neverEnrolled, err := adapter.fence.NeverEnrolled()
+		if err != nil {
+			return err
+		}
+		if rid == "" || generation > math.MaxInt64 || (generation == 0) != neverEnrolled {
+			return ErrRecoveryContractUnavailable
+		}
+		verified, err := adapter.verifier.Verify(heldCtx, request.Locator)
+		if err != nil {
+			return err
+		}
+		surfaces, purgeContent, err := recoveryEntrySurfaces(request.Cursor, verified)
+		if err != nil {
+			return err
+		}
+		entry := verified.Entry()
+		surfaceDigest := digestRecoverySurfaces(entry.Request.EntryType, surfaces)
+		command := RecoveryReplayCommand{
+			Cursor: request.Cursor, VerifiedEntry: verified, MaintenanceRID: rid, MaintenanceGeneration: generation,
+			AllowedSurfaces: surfaces, SurfaceDigest: surfaceDigest, PurgeContent: purgeContent, fence: adapter.fence,
+		}
+		receipt, err = adapter.store.ApplyRecoveryEntry(heldCtx, command)
+		if err != nil {
+			return err
+		}
+		if receipt.Sequence != request.Locator.Sequence || receipt.EntryHash != request.Locator.EntryHash ||
+			receipt.SurfaceDigest != surfaceDigest || receipt.ContentPurged != purgeContent {
+			return ErrRecoveryContractUnavailable
+		}
+		currentRID, currentGeneration, err := adapter.fence.RecoveryBinding()
+		if err != nil {
+			return err
+		}
+		if currentRID != rid || currentGeneration != generation {
+			return ErrRecoveryContractUnavailable
+		}
+		return nil
+	})
+	if err != nil {
+		return RecoveryReplayReceipt{}, err
 	}
 	return receipt, nil
 }
 
-func validateRecoveryReplayRequest(request RecoveryReplayRequest) ([]RecoverySurface, bool, error) {
-	persistedFingerprint, fingerprintErr := recordplatform.ParseTrustedPersistedRequestFingerprintV1(
-		request.RequestFingerprintBytes[:],
-	)
-	if request.Cursor.validate() != nil || request.Entry.Validate() != nil ||
-		request.Cursor.Sequence == ^uint64(0) || request.Entry.Sequence != request.Cursor.Sequence+1 ||
-		request.PreviousHash != request.Cursor.EntryHash || zeroDeletionDigest(request.WitnessProofDigest) ||
-		fingerprintErr != nil || !persistedFingerprint.Equal(request.Entry.Request.RequestFingerprint) ||
-		request.Entry.Request.Object.ObjectKind != "record" {
+func recoveryEntrySurfaces(cursor RecoveryReplayCursor, verified VerifiedLedgerEntry) ([]RecoverySurface, bool, error) {
+	if cursor.validate() != nil || cursor.Sequence >= math.MaxInt64 || !verified.Valid() {
 		return nil, false, ErrRecoveryContractUnavailable
 	}
-	switch request.Entry.Request.EntryType {
+	entry := verified.Entry()
+	if entry.Sequence != cursor.Sequence+1 || entry.PreviousHash != cursor.EntryHash || entry.Request.Object.ObjectKind != "record" {
+		return nil, false, ErrRecoveryContractUnavailable
+	}
+	switch entry.Request.EntryType {
 	case LedgerEntryDeleteCommit:
-		if request.Entry.Request.DeletionContractVersion != RecordDeletionContractVersionV1 || request.Entry.Request.ReleaseEpoch != 0 {
+		if entry.Request.DeletionContractVersion != RecordDeletionContractVersionV1 || entry.Request.ReleaseEpoch != 0 {
 			return nil, false, ErrRecoveryContractUnavailable
 		}
 		return RecordDeleteRecoverySurfaces(), true, nil
 	case LedgerEntryAttemptNotCommitted:
-		if request.Entry.Request.DeletionContractVersion != 0 || request.Entry.Request.ReleaseEpoch == 0 {
+		if entry.Request.DeletionContractVersion != 0 || entry.Request.ReleaseEpoch == 0 {
 			return nil, false, ErrRecoveryContractUnavailable
 		}
 		return RecordNotCommittedRecoverySurfaces(), false, nil
@@ -206,19 +245,36 @@ func digestRecoverySurfaces(entryType LedgerEntryType, surfaces []RecoverySurfac
 }
 
 func (command RecoveryReplayCommand) Validate() error {
-	request := RecoveryReplayRequest{
-		Cursor:                  command.Cursor,
-		Entry:                   command.Entry,
-		PreviousHash:            command.PreviousHash,
-		WitnessProofDigest:      command.WitnessProofDigest,
-		RequestFingerprintBytes: command.RequestFingerprintBytes,
-	}
-	expected, purge, err := validateRecoveryReplayRequest(request)
-	if err != nil || purge != command.PurgeContent || command.SurfaceDigest != digestRecoverySurfaces(command.Entry.Request.EntryType, expected) ||
+	expected, purge, err := recoveryEntrySurfaces(command.Cursor, command.VerifiedEntry)
+	if err != nil || nilDeletionServiceDependency(command.fence) || command.MaintenanceRID == "" ||
+		command.MaintenanceGeneration > math.MaxInt64 ||
+		purge != command.PurgeContent || command.SurfaceDigest != digestRecoverySurfaces(command.VerifiedEntry.Entry().Request.EntryType, expected) ||
 		!equalRecoverySurfaces(command.AllowedSurfaces, expected) {
 		return fmt.Errorf("%w: replay command", ErrRecoveryContractUnavailable)
 	}
+	rid, generation, err := command.fence.RecoveryBinding()
+	if err != nil || rid != command.MaintenanceRID || generation != command.MaintenanceGeneration {
+		return fmt.Errorf("%w: maintenance binding", ErrRecoveryContractUnavailable)
+	}
+	neverEnrolled, err := command.fence.NeverEnrolled()
+	if err != nil || (generation == 0) != neverEnrolled {
+		return fmt.Errorf("%w: maintenance enrollment", ErrRecoveryContractUnavailable)
+	}
 	return nil
+}
+
+// WithHeldMaintenance keeps the verified fence live through transaction commit,
+// even if a caller retains the command after the adapter callback returns.
+func (command RecoveryReplayCommand) WithHeldMaintenance(ctx context.Context, apply func(context.Context) error) error {
+	if ctx == nil || apply == nil || nilDeletionServiceDependency(command.fence) {
+		return ErrRecoveryContractUnavailable
+	}
+	return command.fence.WithHeldLedgerFence(ctx, func(heldCtx context.Context) error {
+		if err := command.Validate(); err != nil {
+			return err
+		}
+		return apply(heldCtx)
+	})
 }
 
 func equalRecoverySurfaces(left, right []RecoverySurface) bool {

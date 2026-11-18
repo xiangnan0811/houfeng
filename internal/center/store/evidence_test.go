@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,33 +19,30 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/records"
 )
 
 func TestPostgresEvidenceRepositoryPersistsCaptureIntentAfterAdmission(t *testing.T) {
 	intent, preview := storeEvidenceIntentFixture()
 	tx := &fakeRecordPlatformTx{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-		if !storeEvidenceSQLContains(sql, "insert into public.evidence_capture_intents") {
-			t.Fatalf("unexpected SQL:\n%s", sql)
+		if !storeEvidenceSQLContains(sql, "select public.record_evidence_intent_insert") || len(args) != 1 {
+			t.Fatalf("unexpected intent command: %s %#v", sql, args)
 		}
-		if len(args) != 12 {
-			t.Fatalf("intent insert argument count = %d, want 12", len(args))
-		}
-		if args[0] != intent.ID || args[1] != "rec_evidence1" || args[2] != string(intent.Key.Kind) ||
-			args[3] != int64(intent.Key.SchemaVersion) || !bytes.Equal(args[4].([]byte), intent.PreviewDigest[:]) ||
-			!bytes.Equal(args[5].([]byte), preview.SourceDigest[:]) || args[8] != "evs_evidence1" ||
-			args[9] != int64(preview.EstimatedCanonicalBytes) ||
-			!args[10].(time.Time).Equal(preview.PreviewedAt) || !args[11].(time.Time).Equal(preview.ValidUntil) {
-			t.Fatalf("intent insert arguments = %#v", args)
+		metadata, selectionBytes, previewBytes := unframeEvidenceFixtureCommand(t, args[0].([]byte))
+		var route map[string]string
+		if err := json.Unmarshal(metadata, &route); err != nil || route["intent_id"] != intent.ID ||
+			route["record_id"] != "rec_evidence1" || route["snapshot_id"] != "evs_evidence1" {
+			t.Fatalf("intent route = %#v, error %v", route, err)
 		}
 		var storedSelection evidence.Selection
-		if err := json.Unmarshal(args[6].([]byte), &storedSelection); err != nil || !reflect.DeepEqual(storedSelection, intent.Selection) {
+		if err := json.Unmarshal(selectionBytes, &storedSelection); err != nil || !reflect.DeepEqual(storedSelection, intent.Selection) {
 			t.Fatalf("stored selection = %#v, error = %v", storedSelection, err)
 		}
 		var storedPreview evidence.Preview
-		if err := json.Unmarshal(args[7].([]byte), &storedPreview); err != nil || !reflect.DeepEqual(storedPreview, preview) {
+		if err := json.Unmarshal(previewBytes, &storedPreview); err != nil || !reflect.DeepEqual(storedPreview, preview) {
 			t.Fatalf("stored preview = %#v, error = %v", storedPreview, err)
 		}
-		return pgconn.NewCommandTag("INSERT 0 1"), nil
+		return pgconn.NewCommandTag("SELECT 1"), nil
 	}}
 	repository := newFakePostgresEvidenceRepository(tx, AdmissionGateFunc(func(_ context.Context, got pgx.Tx) error {
 		if got != tx {
@@ -54,11 +52,11 @@ func TestPostgresEvidenceRepositoryPersistsCaptureIntentAfterAdmission(t *testin
 		return nil
 	}))
 
-	if err := repository.PersistCaptureIntent(context.Background(), "rec_evidence1", "evs_evidence1", intent, preview); err != nil {
+	if err := persistEvidenceCaptureIntentFixture(context.Background(), repository, "rec_evidence1", "evs_evidence1", intent, preview); err != nil {
 		t.Fatalf("PersistCaptureIntent() error = %v", err)
 	}
-	if !reflect.DeepEqual(tx.calls, []string{"gate", "exec"}) {
-		t.Fatalf("PersistCaptureIntent() calls = %#v, want gate then exec", tx.calls)
+	if !reflect.DeepEqual(tx.calls, []string{"gate", "exec", "exec", "exec", "exec"}) {
+		t.Fatalf("PersistCaptureIntent() calls = %#v, want admission, fences and insert", tx.calls)
 	}
 	if !tx.committed {
 		t.Fatal("PersistCaptureIntent() did not commit")
@@ -84,8 +82,8 @@ func TestPostgresEvidenceRepositoryLoadsFullLiveCaptureIntentBindingAfterAdmissi
 			t.Fatalf("intent load arguments = %#v", args)
 		}
 		return fakeRecordPlatformRow{scan: func(dest ...any) error {
-			if len(dest) != 12 {
-				t.Fatalf("intent load destination count = %d, want 12", len(dest))
+			if len(dest) != 13 {
+				t.Fatalf("intent load destination count = %d, want 13", len(dest))
 			}
 			*dest[0].(*string) = "rec_evidence1"
 			*dest[1].(*string) = string(intent.Key.Kind)
@@ -99,6 +97,7 @@ func TestPostgresEvidenceRepositoryLoadsFullLiveCaptureIntentBindingAfterAdmissi
 			*dest[9].(*time.Time) = preview.PreviewedAt
 			*dest[10].(*time.Time) = preview.ValidUntil
 			*dest[11].(*string) = intent.ID
+			*dest[12].(*string) = ""
 			return nil
 		}}
 	}}
@@ -179,6 +178,7 @@ func TestPostgresEvidenceRepositoryRejectsNonCanonicalCaptureIntentJSONTimestamp
 			*dest[9].(*time.Time) = preview.PreviewedAt.UTC()
 			*dest[10].(*time.Time) = preview.ValidUntil.UTC()
 			*dest[11].(*string) = intent.ID
+			*dest[12].(*string) = ""
 			return nil
 		}}
 	}}
@@ -197,20 +197,19 @@ func TestPostgresEvidenceRepositoryPersistsDeterministicContentAddressedGzip(t *
 	snapshot := storeEvidenceSnapshotFixture(t, "payload persistence")
 	var compressed []byte
 	tx := &fakeRecordPlatformTx{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-		if !storeEvidenceSQLContains(sql, "insert into public.evidence_payloads") {
-			t.Fatalf("unexpected SQL:\n%s", sql)
+		if !storeEvidenceSQLContains(sql, "select public.record_evidence_payload_insert") || len(args) != 1 {
+			t.Fatalf("unexpected payload command: %s %#v", sql, args)
 		}
-		digest := snapshot.Hash()
-		if len(args) != 4 || !bytes.Equal(args[0].([]byte), digest[:]) ||
-			args[1] != int64(snapshot.Size()) || args[2] != int64(len(args[3].([]byte))) {
-			t.Fatalf("payload insert arguments = %#v", args)
+		_, canonical, body := unframeEvidenceFixtureCommand(t, args[0].([]byte))
+		if !bytes.Equal(canonical, snapshot.Bytes()) {
+			t.Fatal("payload command changed canonical content")
 		}
-		compressed = append([]byte(nil), args[3].([]byte)...)
-		return pgconn.NewCommandTag("INSERT 0 1"), nil
+		compressed = append([]byte(nil), body...)
+		return pgconn.NewCommandTag("SELECT 1"), nil
 	}}
 	repository := newFakePostgresEvidenceRepository(tx, allowRecordPlatformAdmissionGate)
 
-	stored, err := repository.PersistPayload(context.Background(), snapshot)
+	stored, err := persistEvidencePayloadFixture(context.Background(), repository, snapshot, evidencePayloadCommandRoute{})
 	if err != nil {
 		t.Fatalf("PersistPayload() error = %v", err)
 	}
@@ -233,13 +232,13 @@ func TestPostgresEvidenceRepositoryPersistsDeterministicContentAddressedGzip(t *
 		t.Fatalf("decoded payload = %q, want %q", decoded, snapshot.Bytes())
 	}
 
+	firstCompressed := append([]byte(nil), compressed...)
 	second := &fakeRecordPlatformTx{exec: tx.exec}
 	secondRepository := newFakePostgresEvidenceRepository(second, allowRecordPlatformAdmissionGate)
-	if _, err := secondRepository.PersistPayload(context.Background(), snapshot); err != nil {
+	if _, err := persistEvidencePayloadFixture(context.Background(), secondRepository, snapshot, evidencePayloadCommandRoute{}); err != nil {
 		t.Fatalf("PersistPayload(second) error = %v", err)
 	}
-	secondCompressed := second.execArgs[0][3].([]byte)
-	if !bytes.Equal(secondCompressed, compressed) {
+	if !bytes.Equal(compressed, firstCompressed) {
 		t.Fatal("PersistPayload() gzip bytes are not deterministic")
 	}
 }
@@ -278,7 +277,7 @@ func TestPostgresEvidenceRepositoryRejectsCaptureIntentTimestampThatPostgresWoul
 	tx := &fakeRecordPlatformTx{}
 	repository := newFakePostgresEvidenceRepository(tx, allowRecordPlatformAdmissionGate)
 
-	err := repository.PersistCaptureIntent(context.Background(), "rec_evidence1", "evs_evidence1", intent, preview)
+	err := persistEvidenceCaptureIntentFixture(context.Background(), repository, "rec_evidence1", "evs_evidence1", intent, preview)
 	if !errors.Is(err, ErrInvalidEvidencePersistence) {
 		t.Fatalf("PersistCaptureIntent() error = %v, want ErrInvalidEvidencePersistence", err)
 	}
@@ -312,7 +311,7 @@ func TestPostgresEvidenceRepositoryRejectsNestedCaptureIntentTimestampThatPostgr
 			tx := &fakeRecordPlatformTx{}
 			repository := newFakePostgresEvidenceRepository(tx, allowRecordPlatformAdmissionGate)
 
-			err := repository.PersistCaptureIntent(context.Background(), "rec_evidence1", "evs_evidence1", intent, preview)
+			err := persistEvidenceCaptureIntentFixture(context.Background(), repository, "rec_evidence1", "evs_evidence1", intent, preview)
 			if !errors.Is(err, ErrInvalidEvidencePersistence) {
 				t.Fatalf("PersistCaptureIntent() error = %v, want ErrInvalidEvidencePersistence", err)
 			}
@@ -339,12 +338,13 @@ func TestPostgresEvidenceRepositoryNormalizesCaptureIntentTimestampsToUTCBeforeP
 	preview.ValidUntil = preview.ValidUntil.In(offset)
 
 	tx := &fakeRecordPlatformTx{exec: func(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+		_, selectionBytes, previewBytes := unframeEvidenceFixtureCommand(t, args[0].([]byte))
 		var storedSelection evidence.Selection
-		if err := json.Unmarshal(args[6].([]byte), &storedSelection); err != nil {
+		if err := json.Unmarshal(selectionBytes, &storedSelection); err != nil {
 			t.Fatalf("decode stored selection: %v", err)
 		}
 		var storedPreview evidence.Preview
-		if err := json.Unmarshal(args[7].([]byte), &storedPreview); err != nil {
+		if err := json.Unmarshal(previewBytes, &storedPreview); err != nil {
 			t.Fatalf("decode stored preview: %v", err)
 		}
 		for name, value := range map[string]time.Time{
@@ -366,7 +366,7 @@ func TestPostgresEvidenceRepositoryNormalizesCaptureIntentTimestampsToUTCBeforeP
 	}}
 	repository := newFakePostgresEvidenceRepository(tx, allowRecordPlatformAdmissionGate)
 
-	if err := repository.PersistCaptureIntent(context.Background(), "rec_evidence1", "evs_evidence1", intent, preview); err != nil {
+	if err := persistEvidenceCaptureIntentFixture(context.Background(), repository, "rec_evidence1", "evs_evidence1", intent, preview); err != nil {
 		t.Fatalf("PersistCaptureIntent() error = %v", err)
 	}
 }
@@ -377,7 +377,7 @@ func TestPostgresEvidenceRepositoryRejectsOversizedPersistedPreview(t *testing.T
 	tx := &fakeRecordPlatformTx{}
 	repository := newFakePostgresEvidenceRepository(tx, allowRecordPlatformAdmissionGate)
 
-	err := repository.PersistCaptureIntent(context.Background(), "rec_evidence1", "evs_evidence1", intent, preview)
+	err := persistEvidenceCaptureIntentFixture(context.Background(), repository, "rec_evidence1", "evs_evidence1", intent, preview)
 	if !errors.Is(err, ErrInvalidEvidencePersistence) {
 		t.Fatalf("PersistCaptureIntent() error = %v, want ErrInvalidEvidencePersistence", err)
 	}
@@ -394,7 +394,7 @@ func TestPostgresEvidenceRepositoryMapsIntentUniquenessConflict(t *testing.T) {
 	}}
 	repository := newFakePostgresEvidenceRepository(tx, allowRecordPlatformAdmissionGate)
 
-	err := repository.PersistCaptureIntent(context.Background(), "rec_evidence1", "evs_evidence1", intent, preview)
+	err := persistEvidenceCaptureIntentFixture(context.Background(), repository, "rec_evidence1", "evs_evidence1", intent, preview)
 	if !errors.Is(err, ErrEvidencePersistenceConflict) || !errors.Is(err, uniqueErr) {
 		t.Fatalf("PersistCaptureIntent() error = %v, want conflict and PostgreSQL causes", err)
 	}
@@ -417,14 +417,14 @@ func TestPostgresEvidenceRepositoryNilTypedNilAndFailingAdmissionMakeZeroPrimiti
 			run  func(*PostgresEvidenceRepository) error
 		}{
 			{name: "intent", run: func(repository *PostgresEvidenceRepository) error {
-				return repository.PersistCaptureIntent(context.Background(), "rec_evidence1", "evs_evidence1", intent, preview)
+				return persistEvidenceCaptureIntentFixture(context.Background(), repository, "rec_evidence1", "evs_evidence1", intent, preview)
 			}},
 			{name: "intent load", run: func(repository *PostgresEvidenceRepository) error {
 				_, err := repository.LoadCaptureIntentBinding(context.Background(), "rec_evidence1", intent.ID)
 				return err
 			}},
 			{name: "payload", run: func(repository *PostgresEvidenceRepository) error {
-				_, err := repository.PersistPayload(context.Background(), snapshot)
+				_, err := persistEvidencePayloadFixture(context.Background(), repository, snapshot, evidencePayloadCommandRoute{})
 				return err
 			}},
 			{name: "intent cleanup", run: func(repository *PostgresEvidenceRepository) error {
@@ -469,9 +469,70 @@ func (*storeEvidenceTypedNilAdmissionGate) Admit(context.Context, pgx.Tx) error 
 }
 
 func newFakePostgresEvidenceRepository(tx pgx.Tx, gate AdmissionGate) *PostgresEvidenceRepository {
-	repository := NewPostgresEvidenceRepository(nil, gate)
+	if fake, ok := tx.(*fakeRecordPlatformTx); ok {
+		execute := fake.exec
+		fake.exec = func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			if strings.Contains(sql, "source_application_admit") || strings.Contains(sql, "pg_advisory_xact_lock_shared") {
+				return pgconn.NewCommandTag("SELECT 1"), nil
+			}
+			if execute != nil {
+				return execute(ctx, sql, args...)
+			}
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
+	}
+	repository := NewPostgresEvidenceRepository(nil, gate, nil)
 	repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }
 	return repository
+}
+
+// Tests use the same restricted intent command as runtime writers.
+func persistEvidenceCaptureIntentFixture(ctx context.Context, repository *PostgresEvidenceRepository, recordID, snapshotID string, intent evidence.Intent, preview evidence.Preview, allocationIDs ...string) error {
+	intent, preview, selectionJSON, previewJSON, err := prepareEvidenceCaptureIntent(recordID, snapshotID, intent, preview)
+	if err != nil {
+		return err
+	}
+	tx, err := repository.startEvidenceMutationTransaction(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, fake := tx.(*fakeRecordPlatformTx); !fake {
+		resources, err := normalizeRecordMutationDeclarations(records.RevisionMutationResources{
+			Records: []records.RevisionMutationRecord{{ProjectID: "default", RecordID: recordID}},
+		})
+		if err != nil {
+			return err
+		}
+		if err := acquireRecordMutationResources(ctx, tx, resources); err != nil {
+			return err
+		}
+	}
+	allocationID := ""
+	if len(allocationIDs) != 0 {
+		allocationID = allocationIDs[0]
+	}
+	actor := recordauth.ActorScope{UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault}
+	if err := insertEvidenceCaptureIntentCommandOnTx(ctx, tx, actor, allocationID, recordID, snapshotID, intent, preview, selectionJSON, previewJSON); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func persistEvidencePayloadFixture(ctx context.Context, repository *PostgresEvidenceRepository, snapshot evidence.CanonicalSnapshot, route evidencePayloadCommandRoute) (EvidencePayloadMetadata, error) {
+	tx, err := repository.startEvidenceMutationTransaction(ctx)
+	if err != nil {
+		return EvidencePayloadMetadata{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	metadata, err := persistEvidencePayloadOnTx(ctx, tx, route, snapshot)
+	if err != nil {
+		return EvidencePayloadMetadata{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return EvidencePayloadMetadata{}, err
+	}
+	return metadata, nil
 }
 
 func storeEvidenceIntentFixture() (evidence.Intent, evidence.Preview) {
@@ -558,4 +619,21 @@ func storeEvidenceSnapshotFixture(t *testing.T, value string) evidence.Canonical
 
 func storeEvidenceSQLContains(sql, fragment string) bool {
 	return bytes.Contains([]byte(sql), []byte(fragment))
+}
+
+func unframeEvidenceFixtureCommand(t *testing.T, command []byte) ([]byte, []byte, []byte) {
+	t.Helper()
+	if len(command) < 8 {
+		t.Fatal("short evidence command")
+	}
+	metadataSize := int(binary.BigEndian.Uint32(command[:4]))
+	if metadataSize < 1 || len(command) < 8+metadataSize {
+		t.Fatal("invalid evidence command metadata")
+	}
+	metadata := command[4 : 4+metadataSize]
+	bodySize := int(binary.BigEndian.Uint32(command[4+metadataSize : 8+metadataSize]))
+	if bodySize < 1 || len(command) <= 8+metadataSize+bodySize {
+		t.Fatal("invalid evidence command body")
+	}
+	return metadata, command[8+metadataSize : 8+metadataSize+bodySize], command[8+metadataSize+bodySize:]
 }

@@ -3,6 +3,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { RecordNewPage } from './RecordNewPage'
+import type * as DraftBuffers from './draftBuffer'
+
+vi.mock('./draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof DraftBuffers>()
+  return { ...actual, openIndexedDBDraftBuffer: () => actual.memoryDraftBufferStore() }
+})
 
 vi.mock('../../lib/auth-context', () => {
   const auth = {
@@ -47,14 +53,14 @@ vi.mock('../../lib/recordsApi', () => ({
 }))
 
 describe('RecordNewPage', () => {
-  it('renders the new record workspace without loading an existing record', () => {
+  it('renders the new record workspace without loading an existing record', async () => {
     render(<MemoryRouter><RecordNewPage /></MemoryRouter>)
-    expect(screen.getByRole('heading', { name: '新建运维记录' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '新建运维记录' })).toBeInTheDocument()
     expect(screen.getByLabelText('标题')).toBeInTheDocument()
     expect(screen.getByLabelText('Markdown 源文')).toBeInTheDocument()
   })
 
-  it('preselects the subject carried by the existing new-record codec', () => {
+  it('preselects the subject carried by the existing new-record codec', async () => {
     render(
       <MemoryRouter initialEntries={['/records/new?subject=vps%3Avps_001%3Aaffected%3Aprimary&return_to=%2Fvps%2Fvps_001%2Factivity']}>
         <Routes>
@@ -62,11 +68,11 @@ describe('RecordNewPage', () => {
         </Routes>
       </MemoryRouter>,
     )
-    expect(screen.getByLabelText('主体 ID')).toHaveValue('vps_001')
+    expect(await screen.findByLabelText('主体 ID')).toHaveValue('vps_001')
     expect(screen.getByRole('link', { name: '返回主体' })).toHaveAttribute('href', '/vps/vps_001/activity')
   })
 
-  it('ignores a non-canonical return_to', () => {
+  it('ignores a non-canonical return_to', async () => {
     render(
       <MemoryRouter initialEntries={['/records/new?return_to=%2Frecords%2Fnew']}>
         <Routes>
@@ -74,6 +80,7 @@ describe('RecordNewPage', () => {
         </Routes>
       </MemoryRouter>,
     )
+    await screen.findByRole('heading', { name: '新建运维记录' })
     expect(screen.queryByRole('link', { name: '返回主体' })).not.toBeInTheDocument()
   })
 })

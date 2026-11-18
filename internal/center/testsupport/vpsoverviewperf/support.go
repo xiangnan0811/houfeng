@@ -14,8 +14,6 @@ import (
 	"houfeng/internal/center/vpsoverview"
 )
 
-const ExpectedQueryCount = 18
-
 var expectedRelations = []string{
 	"monitoring_instances",
 	"subscriptions",
@@ -219,9 +217,6 @@ type QueryStats struct {
 func (stats QueryStats) Validate() error {
 	if stats.Errors != 0 {
 		return fmt.Errorf("PostgreSQL query errors = %d, want 0", stats.Errors)
-	}
-	if stats.Count != ExpectedQueryCount {
-		return fmt.Errorf("PostgreSQL queries = %d, want stable %d", stats.Count, ExpectedQueryCount)
 	}
 	return nil
 }

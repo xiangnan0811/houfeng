@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 type ComparisonFixedRevision struct {
@@ -227,7 +228,7 @@ func normalizeFixedComparisonItems(request ComparisonEvaluateRequest) ([]normali
 			continue
 		}
 		revision := *item.Revision
-		if !validClosedPreparedID(revision.RecordID, "rec_") || !validClosedPreparedID(revision.RevisionID, "rrv_") {
+		if !recordidentity.IsValid(revision.RecordID) || !validClosedPreparedID(revision.RevisionID, "rrv_") {
 			return nil, nil, nil, fmt.Errorf("%w: revision", ErrInvalidComparisonSelection)
 		}
 		chosen := make([]string, 0, len(revision.ChosenSnapshotIDs))
@@ -278,6 +279,7 @@ func resolveFixedComparisonItem(
 			Revision:        cloneRevisionMetadataSnapshot(&revision.Metadata),
 			RecordID:        item.revision.RecordID,
 			RevisionID:      item.revision.RevisionID,
+			SourceRecordID:  item.revision.RecordID,
 			Reasons:         []ComparisonReason{ReasonMetadataOnly},
 		}
 		if len(revision.RecordScope.Sources) > 0 {
@@ -363,6 +365,7 @@ func comparisonItemFromSnapshot(
 	}
 	item := ComparisonItemInput{
 		SnapshotID:      loaded.SnapshotID,
+		SourceRecordID:  loaded.RecordID,
 		Hash:            loaded.Hash,
 		Kind:            loaded.Kind,
 		RevisionContext: context,

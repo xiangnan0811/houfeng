@@ -58,7 +58,7 @@ func (store *fakeCheckpoints) LoadCheckpoint(_ context.Context, _ uint64, kind S
 	return checkpoint, nil
 }
 
-func (store *fakeCheckpoints) SaveCheckpoint(_ context.Context, _ uint64, checkpoint SourceCheckpoint) error {
+func (store *fakeCheckpoints) SaveCheckpoint(_ context.Context, _ SourceLease, checkpoint SourceCheckpoint) error {
 	if store.saveErr != nil {
 		return store.saveErr
 	}
@@ -67,12 +67,18 @@ func (store *fakeCheckpoints) SaveCheckpoint(_ context.Context, _ uint64, checkp
 	return nil
 }
 
+func (store *fakeCheckpoints) AcquireSourceLease(_ context.Context, generation uint64, kind SourceKind, ownerID string, ttl time.Duration) (SourceLease, bool, error) {
+	return SourceLease{Generation: generation, Kind: kind, OwnerID: ownerID, ExpiresAt: time.Now().UTC().Add(ttl)}, true, nil
+}
+
+func (store *fakeCheckpoints) ReleaseSourceLease(context.Context, SourceLease) error { return nil }
+
 type fakePublisher struct {
 	batches [][]CandidateEvent
 	err     error
 }
 
-func (publisher *fakePublisher) PublishBatch(_ context.Context, _ uint64, candidates []CandidateEvent) (PublishOutcome, error) {
+func (publisher *fakePublisher) PublishBatch(_ context.Context, _ SourceLease, candidates []CandidateEvent) (PublishOutcome, error) {
 	if publisher.err != nil {
 		return PublishOutcome{}, publisher.err
 	}

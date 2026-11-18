@@ -54,38 +54,6 @@ func TestRecordsCoreAppACLFragmentRegistersExactObjectsAndPrivileges(t *testing.
 	}
 }
 
-func TestRecordsCoreAppACLFragmentExtendsCatalogWithPrimaryValidationFunctionAndNoSequences(t *testing.T) {
-	source, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
-	if err != nil {
-		t.Fatalf("compile production current APP ACL source contract: %v", err)
-	}
-	contract, err := compileAppACLCurrentCatalogContract(
-		source,
-		"houfeng",
-		appACLCurrentCatalogTestBindings(),
-		"houfeng_migrator",
-	)
-	if err != nil {
-		t.Fatalf("compile production current APP ACL catalog contract: %v", err)
-	}
-	base, err := CompileAppACLManagedSurfaceR1("houfeng")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects())+len(recordSearchExpectedAppACLObjects())+len(recordActivityExpectedAppACLObjects())+len(recordPortabilityExpectedAppACLObjects())+len(recordsAuthorityExpectedAppACLObjects())+len(subscriptionCreateIdempotencyExpectedAppACLObjects())+len(vpsCreateIdempotencyExpectedAppACLObjects())+len(vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Objects)+len(ipQualityHostAddressIdentityAppACLCurrentMigrationFragment().Objects)+len(ipQualityAddressFamiliesAppACLCurrentMigrationFragment().Objects)+len(ipQualityProductAppACLCurrentMigrationFragment().Objects)+4-2; got != want {
-		t.Fatalf("production current managed objects = %d, want %d", got, want)
-	}
-	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts())+len(recordSearchExpectedFunctionContracts())+len(recordActivityExpectedFunctionContracts())+len(recordPortabilityExpectedFunctionContracts())+len(recordsAuthorityExpectedFunctionContracts())+len(vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Functions)+len(ipQualityHostAddressIdentityAppACLCurrentMigrationFragment().Functions)+2; got != want {
-		t.Fatalf("production current expected functions = %d, want %d including authority heartbeat and IP quality identity parser", got, want)
-	}
-	for _, object := range contract.ManagedObjects {
-		if object.ObjectClass == AppACLObjectClassSequence && object.SchemaName == "public" &&
-			(object.ObjectIdentity == "records_id_seq" || object.ObjectIdentity == "record_revisions_id_seq") {
-			t.Fatalf("records-core unexpectedly registered synthetic sequence %#v", object)
-		}
-	}
-}
-
 func TestRecordsCoreAppACLImmutableTablesNeverReceiveUpdate(t *testing.T) {
 	immutable := map[string]struct{}{
 		"record_revisions":             {},

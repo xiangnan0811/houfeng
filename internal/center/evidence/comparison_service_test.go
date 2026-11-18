@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -135,6 +136,61 @@ func TestFixedComparisonKeepsImpactLevelAndSnapshotOnlyNotApplicable(t *testing.
 	}
 	if result.Items[1].RevisionContext != RevisionContextNotApplicable || result.Items[1].Revision != nil {
 		t.Fatalf("snapshot-only item leaked revision metadata: %#v", result.Items[1])
+	}
+}
+
+func TestFixedComparisonBindsAuthorizedOwnershipWithoutRewritingCanonicalPayload(t *testing.T) {
+	t.Parallel()
+	snapshot := loadedComparisonSnapshot(t, "evs_provenance", CommandAuditV1Key(), false)
+	snapshot.RecordID = "rec_snapshotowner"
+	key := ComparisonRevisionKey{RecordID: "rec_metadata", RevisionID: "rrv_metadata"}
+	source := &comparisonSelectionSourceStub{
+		snapshots: map[string]ComparisonLoadedSnapshot{snapshot.SnapshotID: snapshot},
+		revisions: map[ComparisonRevisionKey]ComparisonLoadedRevision{
+			key: {RecordID: key.RecordID, RevisionID: key.RevisionID,
+				Metadata:    RevisionMetadataSnapshot{RecordType: "note", ImpactLevel: "low"},
+				RecordScope: snapshot.RecordScope},
+		},
+	}
+	signer := &FileComparisonIntentSigner{currentID: "provenance", keys: map[string][]byte{
+		"provenance": []byte("comparison-provenance-test-key-32-bytes"),
+	}}
+	now := time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC)
+	result, err := ResolveFixedComparison(context.Background(), comparisonTestRegistry(t), source, signer, ComparisonEvaluateRequest{
+		Actor: testActor(t),
+		Items: []ComparisonFixedItem{
+			{Revision: &ComparisonFixedRevision{RecordID: key.RecordID, RevisionID: key.RevisionID}},
+			{SnapshotID: &snapshot.SnapshotID},
+		},
+		BaselineIndex: 0, Alignment: CoverageActual, RequestedWindow: testWindow(), Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Intent == nil {
+		t.Fatalf("authorized comparison has no signed intent: %#v", result.SaveEligibility)
+	}
+	claims, err := signer.Verify(result.Intent.Token, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Items[0].SourceRecordID != key.RecordID || claims.Items[0].SnapshotID != "" ||
+		claims.Items[1].SourceRecordID != snapshot.RecordID || claims.Items[1].RecordID != "" ||
+		claims.Items[1].RevisionID != "" || claims.Items[1].RevisionContext != RevisionContextNotApplicable {
+		t.Fatalf("signed ownership/revision identities = %#v", claims.Items)
+	}
+	original, err := json.Marshal(result.Items[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedSidecar := result.Items[1]
+	changedSidecar.SourceRecordID = "rec_differentowner"
+	unchangedPayload, err := json.Marshal(changedSidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(original) != string(unchangedPayload) {
+		t.Fatal("ownership sidecar changed historical canonical comparison payload")
 	}
 }
 

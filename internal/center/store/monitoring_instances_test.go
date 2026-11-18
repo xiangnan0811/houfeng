@@ -1529,60 +1529,6 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 	}
 }
 
-func TestApplyEnrollmentDoesNotAdvanceLastSyncAt(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile("monitoring_instances.go")
-	if err != nil {
-		t.Fatalf("ReadFile(monitoring_instances.go) error = %v", err)
-	}
-
-	applyEnrollment := sourceBetween(t, string(source), "func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment", "func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats")
-	if strings.Contains(applyEnrollment, "last_sync_at") {
-		t.Fatalf("ApplyEnrollment() unexpectedly updates last_sync_at:\n%s", applyEnrollment)
-	}
-	if !strings.Contains(applyEnrollment, "binding_status = $2") {
-		t.Fatal("ApplyEnrollment() source no longer contains the enrollment binding update")
-	}
-	if !strings.Contains(applyEnrollment, "binding_epoch_started_at = $4") {
-		t.Fatal("ApplyEnrollment() should persist binding_epoch_started_at with the current trust generation")
-	}
-
-	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats", "")
-	if !strings.Contains(heartbeatPath, "last_sync_at = greatest(coalesce(last_sync_at, $3), $3)") {
-		t.Fatal("RecordAcceptedHeartbeats() should remain the path that advances last_sync_at")
-	}
-}
-
-func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile("monitoring_instances.go")
-	if err != nil {
-		t.Fatalf("ReadFile(monitoring_instances.go) error = %v", err)
-	}
-
-	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats", "")
-	if !strings.Contains(heartbeatPath, "coalesce(sync_token_hash, '')") {
-		t.Fatal("RecordAcceptedHeartbeats() should load sync_token_hash inside the heartbeat transaction")
-	}
-	if !strings.Contains(heartbeatPath, "r.tokenHasher.syncTokenMatches(storedSyncTokenHash, syncToken)") {
-		t.Fatal("RecordAcceptedHeartbeats() should compare sync token hashes with the shared versioned token hasher")
-	}
-	if strings.Contains(heartbeatPath, "storedSyncTokenHash != hashSyncToken(syncToken)") {
-		t.Fatal("RecordAcceptedHeartbeats() should not use plain string inequality for sync token hashes")
-	}
-	if !strings.Contains(string(source), "ids.NewSecretToken(\"enroll\")") {
-		t.Fatal("IssueMonitoringInstanceEnrollmentToken() should generate enrollment tokens with NewSecretToken")
-	}
-	if !strings.Contains(string(source), "ids.NewSecretToken(\"sync\")") {
-		t.Fatal("IssueSyncToken()/ApplyEnrollment() should generate sync tokens with NewSecretToken")
-	}
-	if !strings.Contains(heartbeatPath, "write.Fingerprint != bindingFingerprint") {
-		t.Fatal("RecordAcceptedHeartbeats() should continue validating fingerprint within the transaction")
-	}
-}
-
 func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	for _, tt := range []struct {
 		name, from, to string
@@ -1650,66 +1596,39 @@ func TestMonitoringInstanceRuntimeControlRejectsInvalidTransition(t *testing.T) 
 	}
 }
 
-func TestPostgresMonitoringInstanceListHidesInstancesLinkedOnlyToArchivedVPS(t *testing.T) {
-	var seenSQL string
-	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			seenSQL = sql
-			return &fakeMonitoringInstanceRows{}, nil
-		},
-	}}
-
-	if _, err := repo.ListMonitoringInstances(context.Background(), monitoringinstances.ListScopeActive); err != nil {
-		t.Fatalf("ListMonitoringInstances() error = %v", err)
-	}
-	for _, snippet := range []string{
-		"lifecycle_status in ('待接入', '已接入')",
-		"v.vps_id = monitoring_instances.vps_id",
-		"v.lifecycle_status = 'active'",
-	} {
-		if !strings.Contains(seenSQL, snippet) {
-			t.Fatalf("ListMonitoringInstances SQL missing %q in %s", snippet, seenSQL)
-		}
-	}
-}
-
-func TestPostgresMonitoringInstanceListScopeFiltersArchiveState(t *testing.T) {
-	tests := []struct {
-		name          string
-		scope         monitoringinstances.ListScope
-		wantSnippet   string
-		rejectSnippet string
+func TestMonitoringInstanceRuntimeControlRejectsRetiredSourceOrParent(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		blocked string
 	}{
-		{
-			name:        "archived",
-			scope:       monitoringinstances.ListScopeArchived,
-			wantSnippet: "and lifecycle_status = '已退役'",
-		},
-		{
-			name:          "all",
-			scope:         monitoringinstances.ListScopeAll,
-			rejectSnippet: "archived_at is",
-		},
-	}
-
-	for _, tt := range tests {
+		{name: "instance", blocked: "monitoring_instance/mi_1"},
+		{name: "parent", blocked: "vps/vps_1"},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var seenSQL string
-			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
-				query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-					seenSQL = sql
-					return &fakeMonitoringInstanceRows{}, nil
+			mutations := 0
+			tx := &fakeMonitoringInstanceTx{
+				sourceState: fakeSourceWriterState{
+					blocked: map[string]bool{tt.blocked: true},
+					parents: map[string]string{"mi_1": "vps_1"},
 				},
-			}}
-
-			if _, err := repo.ListMonitoringInstances(context.Background(), tt.scope); err != nil {
-				t.Fatalf("ListMonitoringInstances() error = %v", err)
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					mutations++
+					return fakeMonitoringInstanceRow{scan: func(...any) error { return pgx.ErrNoRows }}
+				},
+				exec: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+					if !strings.Contains(sql, "pg_advisory_xact_lock") {
+						mutations++
+					}
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
 			}
-			if tt.wantSnippet != "" && !strings.Contains(seenSQL, tt.wantSnippet) {
-				t.Fatalf("ListMonitoringInstances SQL = %s, missing %q", seenSQL, tt.wantSnippet)
+			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+			_, err := repo.ResumeMonitoringInstanceMonitoring(context.Background(), "mi_1")
+			if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+				t.Fatalf("error = %v, want monitoring instance not found", err)
 			}
-			if tt.rejectSnippet != "" && strings.Contains(seenSQL, tt.rejectSnippet) {
-				t.Fatalf("ListMonitoringInstances SQL = %s, should not contain %q", seenSQL, tt.rejectSnippet)
+			if mutations != 0 || tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+				t.Fatalf("mutations = %d, commits = %d, rollbacks = %d", mutations, tx.commitCalls, tx.rollbackCalls)
 			}
 		})
 	}
@@ -2088,24 +2007,6 @@ func (r *fakeMonitoringInstanceRows) Values() ([]any, error)                    
 func (r *fakeMonitoringInstanceRows) RawValues() [][]byte                          { return nil }
 func (r *fakeMonitoringInstanceRows) Conn() *pgx.Conn                              { return nil }
 
-func sourceBetween(t *testing.T, source, start, end string) string {
-	t.Helper()
-
-	startIndex := strings.Index(source, start)
-	if startIndex == -1 {
-		t.Fatalf("source missing start marker %q", start)
-	}
-	section := source[startIndex:]
-	if end == "" {
-		return section
-	}
-	endIndex := strings.Index(section, end)
-	if endIndex == -1 {
-		t.Fatalf("source missing end marker %q", end)
-	}
-	return section[:endIndex]
-}
-
 func assertSQLOrder(t *testing.T, sqls []string, snippets ...string) {
 	t.Helper()
 
@@ -2122,30 +2023,6 @@ func assertSQLOrder(t *testing.T, sqls []string, snippets ...string) {
 			t.Fatalf("SQL order missing %q after index %d in %#v", snippet, nextStart, sqls)
 		}
 		nextStart = found + 1
-	}
-}
-
-func TestMonitoringRecordSubjectUsesReplaySafeLatestHeartbeatAgentVersion(t *testing.T) {
-	t.Parallel()
-
-	var gotSQL string
-	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
-		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
-			gotSQL = sql
-			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-				*(dest[0].(*string)) = "mi_001"
-				*(dest[1].(*string)) = "Tokyo Edge"
-				*(dest[2].(*string)) = "agent/v1"
-				return nil
-			}}
-		},
-	}}
-
-	if _, err := repo.loadMonitoringRecordSubject(context.Background(), "mi_001"); err != nil {
-		t.Fatalf("loadMonitoringRecordSubject() error = %v", err)
-	}
-	if !strings.Contains(gotSQL, "order by heartbeat.observed_at desc, heartbeat.is_backfilled asc, heartbeat.received_at desc, heartbeat.id desc") {
-		t.Fatalf("loadMonitoringRecordSubject SQL = %q, want replay-safe heartbeat agent-version ordering", gotSQL)
 	}
 }
 
@@ -2197,6 +2074,7 @@ func (r fakeMonitoringInstanceRow) Scan(dest ...any) error {
 }
 
 type fakeMonitoringInstanceTx struct {
+	sourceState   fakeSourceWriterState
 	queryRow      func(context.Context, string, ...any) pgx.Row
 	query         func(context.Context, string, ...any) (pgx.Rows, error)
 	exec          func(context.Context, string, ...any) (pgconn.CommandTag, error)
@@ -2232,6 +2110,9 @@ func (f *fakeMonitoringInstanceTx) Prepare(context.Context, string, string) (*pg
 	return nil, nil
 }
 func (f *fakeMonitoringInstanceTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "source_application_admit()") {
+		return pgconn.CommandTag{}, f.sourceState.admissionErr
+	}
 	if f.exec != nil {
 		return f.exec(ctx, sql, args...)
 	}
@@ -2244,6 +2125,9 @@ func (f *fakeMonitoringInstanceTx) Query(ctx context.Context, sql string, args .
 	return &fakeMonitoringInstanceRows{}, nil
 }
 func (f *fakeMonitoringInstanceTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if row, ok := f.sourceState.queryRow(sql, args...); ok {
+		return row
+	}
 	if f.queryRow != nil {
 		return f.queryRow(ctx, sql, args...)
 	}

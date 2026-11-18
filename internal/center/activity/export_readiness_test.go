@@ -91,12 +91,12 @@ func testSettledSource(kind SourceKind, through time.Time) SourceReadiness {
 
 func TestNormalizeRecordSelectionSortsAndDeduplicates(t *testing.T) {
 	selection, err := NormalizeRecordSelection(RecordSelection{
-		RecordIDs: []string{"rec_bbbb", "rec_aaaa", "rec_bbbb", "rec_cccc"},
+		RecordIDs: []string{"rec_bbbb", "rec2_80000000000000000000000000000000", "rec_aaaa", "rec_bbbb", "rec2_70000000000000000000000000000000"},
 	})
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
-	want := []string{"rec_aaaa", "rec_bbbb", "rec_cccc"}
+	want := []string{"rec2_70000000000000000000000000000000", "rec2_80000000000000000000000000000000", "rec_aaaa", "rec_bbbb"}
 	if !reflect.DeepEqual(selection.RecordIDs, want) {
 		t.Fatalf("RecordIDs = %v, want %v", selection.RecordIDs, want)
 	}
@@ -111,6 +111,7 @@ func TestNormalizeRecordSelectionRejectsEmptyOrInvalidIDs(t *testing.T) {
 		"empty id":          {RecordIDs: []string{""}},
 		"wrong prefix":      {RecordIDs: []string{"rrv_aaaa"}},
 		"uppercase letters": {RecordIDs: []string{"rec_AAAA"}},
+		"malformed new id":  {RecordIDs: []string{"rec2_7000000000000000000000000000000z"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := NormalizeRecordSelection(input); !errors.Is(err, ErrInvalidRecordSelection) {

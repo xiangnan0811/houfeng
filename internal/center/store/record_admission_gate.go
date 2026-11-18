@@ -48,6 +48,13 @@ func (gate *DeploymentMembershipAdmissionGate) Admit(ctx context.Context, tx pgx
 	if gate == nil || tx == nil {
 		return ErrRecordPlatformAdmissionUnavailable
 	}
+	if _, err := tx.Exec(ctx, `select public.source_application_admit()`); err != nil {
+		return fmt.Errorf("%w: source generation", ErrRecordPlatformAdmissionUnavailable)
+	}
+	return gate.admitMembership(ctx, tx)
+}
+
+func (gate *DeploymentMembershipAdmissionGate) admitMembership(ctx context.Context, tx pgx.Tx) error {
 
 	var (
 		instanceID           string
@@ -72,11 +79,11 @@ func (gate *DeploymentMembershipAdmissionGate) Admit(ctx context.Context, tx pgx
 		       capability,
 		       load_balancer_admitted,
 		       queue_admitted,
-		       heartbeat_expires_at > transaction_timestamp(),
+		       heartbeat_expires_at > clock_timestamp(),
 		       heartbeat_expires_at
 		from public.deployment_membership
 		where instance_id = $1
-		  and heartbeat_expires_at > transaction_timestamp()
+		  and heartbeat_expires_at > clock_timestamp()
 	`, gate.identity.InstanceID).Scan(
 		&instanceID,
 		&deploymentID,
@@ -136,6 +143,35 @@ func (gate *DeploymentMembershipAdmissionGate) Admit(ctx context.Context, tx pgx
 		return ErrRecordPlatformAdmissionUnavailable
 	}
 	return nil
+}
+
+// BootstrapDeploymentMembershipAdmissionGate is restricted to the direct
+// PostgreSQL bootstrap principal. Initial source enrollment cannot use runtime
+// source admission: the bootstrap principal deliberately has no runtime binding.
+// The membership and contract checks remain identical to ordinary admission.
+type BootstrapDeploymentMembershipAdmissionGate struct {
+	membership *DeploymentMembershipAdmissionGate
+}
+
+func NewBootstrapDeploymentMembershipAdmissionGate(identity DeploymentMembershipIdentity) (*BootstrapDeploymentMembershipAdmissionGate, error) {
+	membership, err := NewDeploymentMembershipAdmissionGate(identity)
+	if err != nil {
+		return nil, err
+	}
+	return &BootstrapDeploymentMembershipAdmissionGate{membership: membership}, nil
+}
+
+func (gate *BootstrapDeploymentMembershipAdmissionGate) Admit(ctx context.Context, tx pgx.Tx) error {
+	if gate == nil || gate.membership == nil || tx == nil {
+		return ErrRecordPlatformAdmissionUnavailable
+	}
+	var bootstrap bool
+	if err := tx.QueryRow(ctx, `select session_user = current_user and r.oid = 10 and r.rolsuper
+		and current_setting('server_version_num')::integer / 10000 = 16
+		from pg_catalog.pg_roles r where r.rolname = current_user`).Scan(&bootstrap); err != nil || !bootstrap {
+		return fmt.Errorf("%w: direct bootstrap identity", ErrRecordPlatformAdmissionUnavailable)
+	}
+	return gate.membership.admitMembership(ctx, tx)
 }
 
 func validateDeploymentMembershipIdentity(identity DeploymentMembershipIdentity) error {

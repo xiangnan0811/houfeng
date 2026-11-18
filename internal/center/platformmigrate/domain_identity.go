@@ -62,19 +62,28 @@ type DomainIdentity struct {
 // ProvisionPostgresDomainIdentity records the physical PostgreSQL identity of
 // a migrated local domain exactly once. Repeated calls only succeed when the
 // database and requested domain kind are byte-for-byte the original identity.
-func ProvisionPostgresDomainIdentity(ctx context.Context, db *pgxpool.Pool, kind DomainKind) (identity DomainIdentity, err error) {
+func ProvisionPostgresDomainIdentity(ctx context.Context, db *pgxpool.Pool, kind DomainKind) (DomainIdentity, error) {
 	if err := kind.Validate(); err != nil {
 		return DomainIdentity{}, err
 	}
-
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return DomainIdentity{}, fmt.Errorf("begin domain identity transaction: %w", err)
 	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
+	defer func() { _ = tx.Rollback(ctx) }()
+	identity, err := provisionPostgresDomainIdentityTx(ctx, tx, kind, true)
+	if err != nil {
+		return DomainIdentity{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return DomainIdentity{}, fmt.Errorf("commit local domain identity: %w", err)
+	}
+	return identity, nil
+}
 
+// Witness convergence shares identity, migration and ACL changes in one
+// transaction. An enrolled predecessor must already have an identity.
+func provisionPostgresDomainIdentityTx(ctx context.Context, tx pgx.Tx, kind DomainKind, allowCreate bool) (DomainIdentity, error) {
 	if _, err := tx.Exec(ctx, `lock table public.record_platform_domain_identity in share row exclusive mode`); err != nil {
 		return DomainIdentity{}, fmt.Errorf("lock local domain identity: %w", err)
 	}
@@ -136,17 +145,17 @@ func ProvisionPostgresDomainIdentity(ctx context.Context, db *pgxpool.Pool, kind
 			row.PostgresSystemIdentifier != systemIdentifier || row.DatabaseOID != databaseOID || row.DatabaseName != databaseName {
 			return DomainIdentity{}, fmt.Errorf("local domain identity does not exactly match this PostgreSQL domain")
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return DomainIdentity{}, fmt.Errorf("commit existing domain identity verification: %w", err)
-		}
 		return row, nil
+	}
+	if !allowCreate {
+		return DomainIdentity{}, fmt.Errorf("enrolled witness domain identity is absent")
 	}
 
 	domainID, err := NewDomainID()
 	if err != nil {
 		return DomainIdentity{}, err
 	}
-	identity = DomainIdentity{
+	identity := DomainIdentity{
 		ID:                       domainID,
 		Kind:                     kind,
 		IdentityEpoch:            1,
@@ -175,9 +184,6 @@ func ProvisionPostgresDomainIdentity(ctx context.Context, db *pgxpool.Pool, kind
 		identity.DatabaseName,
 	); err != nil {
 		return DomainIdentity{}, fmt.Errorf("insert local domain identity: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return DomainIdentity{}, fmt.Errorf("commit local domain identity: %w", err)
 	}
 	return identity, nil
 }

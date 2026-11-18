@@ -270,80 +270,6 @@ func TestPostgresAttachmentRepositoryResolvesOnlyExactTerminalReceipt(t *testing
 	}
 }
 
-func TestEnsureAttachmentBlobRejectsActiveDurableDeletionFence(t *testing.T) {
-	object := storeBlobGCTestObject(0x99, "local-gc-v9", 19, attachments.BackendKindLocal)
-	tx := &blobGCPublicationFenceTx{active: true}
-
-	inserted, err := ensureAttachmentBlob(context.Background(), tx, object)
-	if inserted || !errors.Is(err, attachments.ErrBlobGCProtected) {
-		t.Fatalf("ensureAttachmentBlob(active fence) = (%t, %v), want false/ErrBlobGCProtected", inserted, err)
-	}
-	if want := []string{"blob_table_lock", "active_fence_check"}; !reflect.DeepEqual(tx.steps, want) {
-		t.Fatalf("ensureAttachmentBlob(active fence) steps = %#v, want %#v", tx.steps, want)
-	}
-	if tx.insertSQL != "" {
-		t.Fatalf("ensureAttachmentBlob(active fence) attempted insert:\n%s", tx.insertSQL)
-	}
-}
-
-func TestEnsureAttachmentBlobLocksBeforePublishingWithoutDeletionFence(t *testing.T) {
-	object := storeBlobGCTestObject(0x98, "local-gc-v8", 18, attachments.BackendKindLocal)
-	tx := &blobGCPublicationFenceTx{inserted: true}
-
-	inserted, err := ensureAttachmentBlob(context.Background(), tx, object)
-	if err != nil || !inserted {
-		t.Fatalf("ensureAttachmentBlob(no fence) = (%t, %v), want true/nil", inserted, err)
-	}
-	if want := []string{"blob_table_lock", "active_fence_check", "insert"}; !reflect.DeepEqual(tx.steps, want) {
-		t.Fatalf("ensureAttachmentBlob(no fence) steps = %#v, want %#v", tx.steps, want)
-	}
-	for _, fragment := range []string{
-		"insert into public.blob_objects", "select $1, $2, $3, $4, $5",
-		"from public.blob_gc_deletions", "deletion_state <> 'completed'",
-	} {
-		if !strings.Contains(tx.insertSQL, fragment) {
-			t.Fatalf("Blob metadata insert SQL omitted %q:\n%s", fragment, tx.insertSQL)
-		}
-	}
-}
-
-func TestEnsureAttachmentUploadPartRejectsActiveDurableDeletionFence(t *testing.T) {
-	object := storeBlobGCTestObject(0xaa, "s3-gc-v10", 23, attachments.BackendKindS3)
-	tx := &blobGCPublicationFenceTx{active: true}
-
-	err := ensureAttachmentUploadPart(context.Background(), tx, "aup_gcfence", storeObjectVersion(object))
-	if !errors.Is(err, attachments.ErrBlobGCProtected) {
-		t.Fatalf("ensureAttachmentUploadPart(active fence) error = %v, want ErrBlobGCProtected", err)
-	}
-	if want := []string{"upload_parts_table_lock", "active_fence_check"}; !reflect.DeepEqual(tx.steps, want) {
-		t.Fatalf("ensureAttachmentUploadPart(active fence) steps = %#v, want %#v", tx.steps, want)
-	}
-	if tx.insertSQL != "" {
-		t.Fatalf("ensureAttachmentUploadPart(active fence) attempted insert:\n%s", tx.insertSQL)
-	}
-}
-
-func TestEnsureAttachmentUploadPartLocksBeforePublishingWithoutDeletionFence(t *testing.T) {
-	object := storeBlobGCTestObject(0xab, "s3-gc-v11", 24, attachments.BackendKindS3)
-	tx := &blobGCPublicationFenceTx{inserted: true}
-
-	err := ensureAttachmentUploadPart(context.Background(), tx, "aup_gcpublish", storeObjectVersion(object))
-	if err != nil {
-		t.Fatalf("ensureAttachmentUploadPart(no fence) error = %v", err)
-	}
-	if want := []string{"upload_parts_table_lock", "active_fence_check", "insert"}; !reflect.DeepEqual(tx.steps, want) {
-		t.Fatalf("ensureAttachmentUploadPart(no fence) steps = %#v, want %#v", tx.steps, want)
-	}
-	for _, fragment := range []string{
-		"insert into public.attachment_upload_parts", "select $1, 1, $2, $3, $4",
-		"from public.blob_gc_deletions", "deletion_state <> 'completed'",
-	} {
-		if !strings.Contains(tx.insertSQL, fragment) {
-			t.Fatalf("upload-part insert SQL omitted %q:\n%s", fragment, tx.insertSQL)
-		}
-	}
-}
-
 func assertDurableBlobGCCandidateSQL(t *testing.T, sql string, ordinary bool) {
 	t.Helper()
 	for _, fragment := range []string{
@@ -377,52 +303,6 @@ type durableBlobGCStored struct {
 	receiptDigest  []byte
 	completedAt    *time.Time
 }
-
-type blobGCPublicationFenceTx struct {
-	pgx.Tx
-	active    bool
-	inserted  bool
-	insertSQL string
-	steps     []string
-}
-
-func (tx *blobGCPublicationFenceTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
-	compact := strings.ToLower(strings.Join(strings.Fields(sql), " "))
-	if strings.HasPrefix(compact, "lock table public.blob_objects") {
-		tx.steps = append(tx.steps, "blob_table_lock")
-		return pgconn.NewCommandTag("LOCK TABLE"), nil
-	}
-	if strings.HasPrefix(compact, "lock table public.attachment_upload_parts") {
-		tx.steps = append(tx.steps, "upload_parts_table_lock")
-		return pgconn.NewCommandTag("LOCK TABLE"), nil
-	}
-	if strings.HasPrefix(compact, "insert into public.blob_objects") ||
-		strings.HasPrefix(compact, "insert into public.attachment_upload_parts") {
-		tx.steps = append(tx.steps, "insert")
-		tx.insertSQL = compact
-		if tx.inserted {
-			return pgconn.NewCommandTag("INSERT 1"), nil
-		}
-		return pgconn.NewCommandTag("INSERT 0"), nil
-	}
-	return pgconn.CommandTag{}, fmt.Errorf("unexpected publication fence exec: %s", compact)
-}
-
-func (tx *blobGCPublicationFenceTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
-	compact := strings.ToLower(strings.Join(strings.Fields(sql), " "))
-	if strings.Contains(compact, "from public.blob_gc_deletions") {
-		tx.steps = append(tx.steps, "active_fence_check")
-		return durableBlobGCRow{values: []any{tx.active}}
-	}
-	if strings.Contains(compact, "from public.blob_objects") ||
-		strings.Contains(compact, "from public.attachment_upload_parts") {
-		return durableBlobGCRow{err: pgx.ErrNoRows}
-	}
-	return durableBlobGCRow{err: fmt.Errorf("unexpected publication fence query: %s", compact)}
-}
-
-func (*blobGCPublicationFenceTx) Commit(context.Context) error   { return nil }
-func (*blobGCPublicationFenceTx) Rollback(context.Context) error { return nil }
 
 type durableBlobGCTx struct {
 	pgx.Tx

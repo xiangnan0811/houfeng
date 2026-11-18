@@ -6,11 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"houfeng/internal/center/attachments"
-	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
 
@@ -33,14 +33,15 @@ func TestPostgresIntegrationRecordDraftDiscardReleasesOwnedAttachmentsInEverySta
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-release", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleaseall", recordsPostgresDraftPayload(t, "Release"))
 	states := []draftReleaseUploadState{
-		draftReleaseCreated, draftReleaseUploading, draftReleaseQuarantined,
-		draftReleaseAvailable, draftReleaseRejected, draftReleaseExpired,
+		draftReleaseCreated, draftReleaseUploading, draftReleaseAvailable,
+		draftReleaseQuarantined, draftReleaseRejected, draftReleaseExpired,
 	}
 	for index, state := range states {
-		seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, index, state)
+		seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, index, state)
 	}
 	// 未完成的三项占预留，可用项计逻辑与物理字节，已拒绝/已过期的早已退回。
 	assertDraftReleaseQuota(t, ctx, fixture, draftReleaseSize, 3*draftReleaseSize, draftReleaseSize)
@@ -54,7 +55,7 @@ func TestPostgresIntegrationRecordDraftDiscardReleasesOwnedAttachmentsInEverySta
 	assertDraftReleaseRowsGone(t, ctx, fixture, draft.DraftID)
 	// 隔离中那份的分片对象登记为 Blob，物理字节随之计入，留给 GC 回收；可用附件的原件早已登记。
 	assertDraftReleaseQuota(t, ctx, fixture, 0, 0, 2*draftReleaseSize)
-	quarantinedKey := draftReleaseObject(draft.DraftID, 2).Key
+	quarantinedKey := draftReleaseTarget(draft.DraftID, 3).Key
 	var registered int
 	if err := fixture.db.QueryRow(ctx, `
 		select count(*)::int from public.blob_objects where blob_key = $1`, quarantinedKey).Scan(&registered); err != nil {
@@ -72,9 +73,10 @@ func TestPostgresIntegrationRecordDraftDiscardWaitsForLiveAttachmentProcessing(t
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-busy", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleasebusy", recordsPostgresDraftPayload(t, "Busy"))
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 0, draftReleaseQuarantined)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 0, draftReleaseQuarantined)
 	claim, err := attachmentRepository.ClaimProcessorJob(ctx, attachments.ProcessorClaimInput{
 		OwnerID: "processor_release_busy", OwnerLeaseDuration: 5 * time.Minute,
 	})
@@ -123,10 +125,11 @@ func TestPostgresIntegrationRecordDraftDiscardWaitsForUnfinishedPublication(t *t
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-publication", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleaseintent", recordsPostgresDraftPayload(t, "Intent"))
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 0, draftReleaseUploading)
-	object := draftReleaseObject(draft.DraftID, 0)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 0, draftReleaseUploading)
+	object := draftReleaseTarget(draft.DraftID, 0)
 	// 本地 PUT 已登记写入意图、尚未记录分片：此时删掉上传行，intent 过期清理可能误删去重共用的对象。
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.blob_publication_intents (
@@ -165,9 +168,10 @@ func TestPostgresIntegrationRecordDraftReleaseFencesLatePublicationIntent(t *tes
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-late-intent", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleaselate", recordsPostgresDraftPayload(t, "Late"))
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 0, draftReleaseCreated)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 0, draftReleaseCreated)
 	uploadID := fmt.Sprintf("aup_%s0", draft.DraftID[len("rdf_"):])
 	// PUT 已通过 PrepareUpload、草稿锁已释放，尚未登记写入意图。
 	if _, err := attachmentRepository.PrepareUpload(ctx, attachments.PrepareUploadCommand{
@@ -181,9 +185,10 @@ func TestPostgresIntegrationRecordDraftReleaseFencesLatePublicationIntent(t *tes
 		t.Fatalf("DeleteDraft() error = %v", err)
 	}
 
-	object := draftReleaseObject(draft.DraftID, 0)
+	object := draftReleaseTarget(draft.DraftID, 0)
 	_, err := attachmentRepository.PrepareBlobPublication(ctx, attachments.BlobPublicationPrepareRequest{
 		ProjectID: "default", OwnerKind: attachments.BlobPublicationOwnerUpload, OwnerID: uploadID, OwnerGeneration: 1,
+		NamespaceID: writer.NamespaceID(),
 		Target: attachments.BlobPublicationTarget{
 			Key: object.Key, SHA256: object.SHA256, SizeBytes: object.SizeBytes, BackendKind: attachments.BackendKindLocal,
 		},
@@ -209,9 +214,10 @@ func TestPostgresIntegrationBlobPublicationRefusesNonWritableOwnerWithoutWaiting
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-owner-state", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleasestate", recordsPostgresDraftPayload(t, "State"))
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 0, draftReleaseExpired)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 0, draftReleaseExpired)
 	uploadID := fmt.Sprintf("aup_%s0", draft.DraftID[len("rdf_"):])
 
 	// 模拟永久删除的第一步：先持有 blob_objects 表锁，随后才会删除终态上传行。
@@ -227,9 +233,10 @@ func TestPostgresIntegrationBlobPublicationRefusesNonWritableOwnerWithoutWaiting
 	// 已过期的上传不可再写入：必须立即拒绝，不能拿着上传行锁去等表锁（否则与永久删除成环）。
 	deadline, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	object := draftReleaseObject(draft.DraftID, 0)
+	object := draftReleaseTarget(draft.DraftID, 0)
 	_, err = attachmentRepository.PrepareBlobPublication(deadline, attachments.BlobPublicationPrepareRequest{
 		ProjectID: "default", OwnerKind: attachments.BlobPublicationOwnerUpload, OwnerID: uploadID, OwnerGeneration: 1,
+		NamespaceID: writer.NamespaceID(),
 		Target: attachments.BlobPublicationTarget{
 			Key: object.Key, SHA256: object.SHA256, SizeBytes: object.SizeBytes, BackendKind: attachments.BackendKindLocal,
 		},
@@ -242,22 +249,22 @@ func TestPostgresIntegrationBlobPublicationRefusesNonWritableOwnerWithoutWaiting
 
 func TestPostgresIntegrationRecordDraftPublishReleasesUnreferencedAttachments(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-publish", 2)
-	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
+	draftRepository := newAdmittedCoreDraftRepository(t, runtimePool, fixture.admissionGate)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
-	repository := newRecordsPostgresRepository(t, runtimePool, NewRecordAttachmentRevisionParticipant())
+	writer := newDraftReleaseWriter(t, ctx, fixture)
+	birthFixture := ImportAttachmentGCFixture{Runtime: runtimePool, Gate: fixture.admissionGate}
+	repository := newRevisionMutationAdmittedRepository(t, birthFixture, NewRecordAttachmentRevisionParticipant())
 
 	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleasepublish", recordsPostgresDraftPayload(t, "Publish"))
-	kept := seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 0, draftReleaseAvailable)
-	dropped := seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 1, draftReleaseAvailable)
-	pending := seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 2, draftReleaseUploading)
+	kept := seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 0, draftReleaseAvailable)
+	dropped := seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 1, draftReleaseAvailable)
+	pending := seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 2, draftReleaseUploading)
 	assertDraftReleaseQuota(t, ctx, fixture, 2*draftReleaseSize, draftReleaseSize, 2*draftReleaseSize)
 
-	command := recordsPostgresRevisionCommand(
-		t, recordplatform.OperationKindRecordCreate, "rec_pgreleasepublish", "", 0, 0,
-		recordsPostgresCompleteRevisionInput(t, "Publish with one attachment", kept), "records-release-publish",
-	)
+	command := revisionBirthBatchCommand(t, ctx, birthFixture,
+		recordsPostgresCompleteRevisionInput(t, "Publish with one attachment", kept), "records-release-publish")
 	command.DraftID = draft.DraftID
 	command.DraftETag = draft.ETag
 	committed, err := repository.CommitRevision(ctx, command)
@@ -288,11 +295,12 @@ func TestPostgresIntegrationRecordDraftExpiryReleasesAttachmentsAndSkipsBusyDraf
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-expiry", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	idle := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleaseidle", recordsPostgresDraftPayload(t, "Idle"))
 	busy := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleasebusyexp", recordsPostgresDraftPayload(t, "Busy"))
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, idle.DraftID, 0, draftReleaseQuarantined)
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, busy.DraftID, 1, draftReleaseQuarantined)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, idle.DraftID, 0, draftReleaseQuarantined)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, busy.DraftID, 1, draftReleaseQuarantined)
 	// 只认领 busy 草稿那份：先把 idle 的任务推迟到以后重试。
 	if _, err := fixture.db.Exec(ctx, `
 		update public.attachment_processor_jobs
@@ -340,21 +348,21 @@ func TestPostgresIntegrationRecordDraftExpirySavepointUndoesPartialRelease(t *te
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-savepoint", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	fenced := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleasefence", recordsPostgresDraftPayload(t, "Fenced"))
 	idle := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleasezidle", recordsPostgresDraftPayload(t, "Idle"))
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, fenced.DraftID, 0, draftReleaseUploading)
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, fenced.DraftID, 1, draftReleaseUploading)
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, idle.DraftID, 0, draftReleaseUploading)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, fenced.DraftID, 0, draftReleaseUploading)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, fenced.DraftID, 1, draftReleaseUploading)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, idle.DraftID, 0, draftReleaseUploading)
 	// 上传中但已有分片：释放时要把分片对象登记为 Blob。给第二份分片的对象挂上进行中的 GC 删除，
 	// 让第一份登记成功之后才遇到 busy，验证 savepoint 撤销已经写入的登记。
-	for _, seed := range []struct {
-		draftID string
-		index   int
-	}{{fenced.DraftID, 0}, {fenced.DraftID, 1}, {idle.DraftID, 0}} {
-		seedDraftReleasePart(t, ctx, fixture, seed.draftID, seed.index)
+	first := seedDraftReleasePart(t, ctx, attachmentRepository, writer, fenced.DraftID, 0).Version
+	second := seedDraftReleasePart(t, ctx, attachmentRepository, writer, fenced.DraftID, 1).Version
+	seedDraftReleasePart(t, ctx, attachmentRepository, writer, idle.DraftID, 0)
+	if first.Key > second.Key {
+		first, second = second, first
 	}
-	second := draftReleaseObject(fenced.DraftID, 1)
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.blob_gc_deletions (
 			deletion_id, purge_mode, blob_key, sha256_digest, object_version, size_bytes, backend_kind,
@@ -380,7 +388,7 @@ func TestPostgresIntegrationRecordDraftExpirySavepointUndoesPartialRelease(t *te
 	if err := fixture.db.QueryRow(ctx, `
 		select (select count(*)::int from public.blob_objects where blob_key = $1),
 		       (select count(*)::int from public.record_attachments where draft_id = $2)`,
-		draftReleaseObject(fenced.DraftID, 0).Key, fenced.DraftID).Scan(&firstRegistered, &fencedAttachments); err != nil {
+		first.Key, fenced.DraftID).Scan(&firstRegistered, &fencedAttachments); err != nil {
 		t.Fatalf("read fenced draft state: %v", err)
 	}
 	if firstRegistered != 0 || fencedAttachments != 2 {
@@ -397,9 +405,10 @@ func TestPostgresIntegrationRecordDraftReleaseLocksWorkspacesBeforeJobs(t *testi
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-lock-order", 2)
 	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
 	attachmentRepository := NewPostgresAttachmentRepository(runtimePool)
+	writer := newDraftReleaseWriter(t, ctx, fixture)
 
 	draft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgreleaseorder", recordsPostgresDraftPayload(t, "Order"))
-	seedDraftReleaseUpload(t, ctx, attachmentRepository, draft.DraftID, 0, draftReleaseQuarantined)
+	seedDraftReleaseUpload(t, ctx, attachmentRepository, writer, draft.DraftID, 0, draftReleaseQuarantined)
 	jobID := fmt.Sprintf("apj_%s0", draft.DraftID[len("rdf_"):])
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.content_processor_workspaces (
@@ -419,13 +428,25 @@ func TestPostgresIntegrationRecordDraftReleaseLocksWorkspacesBeforeJobs(t *testi
 		select 1 from public.content_processor_workspaces where workspace_id = 'cpw_pgreleaseorder' for update`); err != nil {
 		t.Fatalf("hold workspace row: %v", err)
 	}
+	var holderPID int
+	if err := holder.QueryRow(ctx, `select pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatalf("read workspace holder backend: %v", err)
+	}
+	waiterPool := fixture.openDirectRuntimePool(t, ctx, "record-draft-attachment-lock-waiter", 1)
+	waiterRepository := newRecordsPostgresDraftRepository(waiterPool)
+	var waiterPID int
+	if err := waiterPool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&waiterPID); err != nil {
+		t.Fatalf("read draft release backend: %v", err)
+	}
+	raceCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	outcome := make(chan error, 1)
 	go func() {
-		outcome <- draftRepository.DeleteDraft(context.Background(), records.DraftDeleteCommand{
+		outcome <- waiterRepository.DeleteDraft(raceCtx, records.DraftDeleteCommand{
 			DraftID: draft.DraftID, AuthorID: draft.AuthorID, Reason: records.DraftDeleteDiscarded,
 		})
 	}()
-	waitForRecordsPostgresLockWaiter(t, ctx, fixture.db, "%from public.content_processor_workspaces%for update of workspace%")
+	waitForPostgresBlockingPID(t, raceCtx, fixture.db, waiterPID, holderPID)
 	// 释放事务此刻在等工作区，还没碰任务行：重放一侧能立即锁到任务行，不会成环。
 	if _, err := holder.Exec(ctx, `
 		select 1 from public.attachment_processor_jobs where processor_job_id = $1 for update nowait`, jobID); err != nil {
@@ -434,7 +455,7 @@ func TestPostgresIntegrationRecordDraftReleaseLocksWorkspacesBeforeJobs(t *testi
 	if err := holder.Rollback(ctx); err != nil {
 		t.Fatalf("release workspace holder: %v", err)
 	}
-	if err := <-outcome; err != nil {
+	if err := waitForRecordPlatformResult(t, outcome, "draft release after workspace lock"); err != nil {
 		t.Fatalf("DeleteDraft() after workspace holder released error = %v", err)
 	}
 	assertDraftReleaseRowsGone(t, ctx, fixture, draft.DraftID)
@@ -452,29 +473,51 @@ func expireRecordsPostgresDraft(t *testing.T, ctx context.Context, fixture recor
 	}
 }
 
-// seedDraftReleasePart 给上传中的草稿附件补一份已写入的分片，模拟本地 PUT 已完成、尚未 complete。
-func seedDraftReleasePart(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, draftID string, index int) {
+// seedDraftReleasePart writes a real managed part without completing its upload.
+func seedDraftReleasePart(t *testing.T, ctx context.Context, repository *PostgresAttachmentRepository, writer attachments.BlobWriter, draftID string, index int) attachments.WrittenBlob {
 	t.Helper()
-	object := draftReleaseObject(draftID, index)
-	if _, err := fixture.db.Exec(ctx, `
-		insert into public.attachment_upload_parts (upload_id, part_number, size_bytes, sha256_digest, object_version)
-		values ($1, 1, $2, $3, $4)`,
-		fmt.Sprintf("aup_%s%d", draftID[len("rdf_"):], index), object.SizeBytes, object.SHA256[:], object.VersionID); err != nil {
-		t.Fatalf("seed upload part for %s/%d: %v", draftID, index, err)
+	reserve := draftReleaseReservation(draftID, index)
+	preparation, err := repository.PrepareUpload(ctx, attachments.PrepareUploadCommand{ProjectID: reserve.ProjectID, UploadID: reserve.UploadID, AuthorID: reserve.AuthorID})
+	if err != nil {
+		t.Fatal(err)
 	}
+	reserve.ExpiresAt = preparation.ExpiresAt
+	return putManagedAttachmentUpload(t, ctx, repository, writer, reserve, draftReleaseContent(draftID, index))
 }
 
 func draftReleaseAttachmentID(draftID string, index int) string {
 	return fmt.Sprintf("att_%s%d", draftID[len("rdf_"):], index)
 }
 
-func draftReleaseObject(draftID string, index int) attachments.ObjectVersion {
+func draftReleaseContent(draftID string, index int) []byte {
 	digest := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", draftID, index)))
-	return attachments.ObjectVersion{
-		Key:       "sha256/" + hex.EncodeToString(digest[:]),
-		VersionID: "local-v1-" + hex.EncodeToString(digest[:]),
-		SHA256:    digest,
-		SizeBytes: draftReleaseSize,
+	return []byte(hex.EncodeToString(digest[:])[:draftReleaseSize])
+}
+
+func draftReleaseTarget(draftID string, index int) attachments.BlobPublicationTarget {
+	digest := sha256.Sum256(draftReleaseContent(draftID, index))
+	return attachments.BlobPublicationTarget{Key: "sha256/" + hex.EncodeToString(digest[:]), SHA256: digest, SizeBytes: draftReleaseSize, BackendKind: attachments.BackendKindLocal}
+}
+
+func newDraftReleaseWriter(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture) attachments.BlobWriter {
+	t.Helper()
+	blob, err := newPostgresLocalBlobStore(t, ctx, fixture, filepath.Join(t.TempDir(), "blob-root"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := attachments.NewManagedBlobWriter(blob, attachments.BackendKindLocal, NewPostgresLocalBlobRepository(fixture.openDirectRuntimePool(t, ctx, "draft-release-writer", 2), nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writer
+}
+
+func draftReleaseReservation(draftID string, index int) attachments.ReserveUploadCommand {
+	return attachments.ReserveUploadCommand{
+		ProjectID: "default", UploadID: fmt.Sprintf("aup_%s%d", draftID[len("rdf_"):], index),
+		AttachmentID: draftReleaseAttachmentID(draftID, index), DraftID: draftID, AuthorID: recordsPostgresDraftAuthorID,
+		DisplayName: fmt.Sprintf("release-%d.txt", index), MediaType: "text/plain", TransportKind: attachments.TransportKindLocal,
+		DeclaredSizeBytes: draftReleaseSize, ExpiresAt: time.Now().UTC().Add(time.Hour), Limits: attachments.DefaultLimits(),
 	}
 }
 
@@ -483,50 +526,30 @@ func seedDraftReleaseUpload(
 	t *testing.T,
 	ctx context.Context,
 	repository *PostgresAttachmentRepository,
+	writer attachments.BlobWriter,
 	draftID string,
 	index int,
 	state draftReleaseUploadState,
 ) string {
 	t.Helper()
 	attachmentID := draftReleaseAttachmentID(draftID, index)
-	reserve := attachments.ReserveUploadCommand{
-		ProjectID:         "default",
-		UploadID:          fmt.Sprintf("aup_%s%d", draftID[len("rdf_"):], index),
-		AttachmentID:      attachmentID,
-		DraftID:           draftID,
-		AuthorID:          recordsPostgresDraftAuthorID,
-		DisplayName:       fmt.Sprintf("release-%d.txt", index),
-		MediaType:         "text/plain",
-		TransportKind:     attachments.TransportKindLocal,
-		DeclaredSizeBytes: draftReleaseSize,
-		ExpiresAt:         time.Now().UTC().Add(time.Hour),
-		Limits:            attachments.DefaultLimits(),
-	}
+	reserve := draftReleaseReservation(draftID, index)
 	if _, err := repository.ReserveUpload(ctx, reserve); err != nil {
 		t.Fatalf("ReserveUpload(%s) error = %v", attachmentID, err)
 	}
 	mutation := attachments.UploadMutationCommand{ProjectID: "default", UploadID: reserve.UploadID, AuthorID: reserve.AuthorID}
-	object := draftReleaseObject(draftID, index)
-	var fingerprint [sha256.Size]byte
-	fingerprint[0] = byte(index + 1)
 	switch state {
 	case draftReleaseCreated:
 	case draftReleaseUploading:
 		if _, err := repository.StartUpload(ctx, mutation); err != nil {
 			t.Fatalf("StartUpload(%s) error = %v", attachmentID, err)
 		}
-	case draftReleaseQuarantined:
-		completeAttachmentIntegrationUpload(t, ctx, repository, reserve, object, fingerprint, fmt.Sprintf("apj_%s%d", draftID[len("rdf_"):], index))
-	case draftReleaseAvailable:
-		completeAttachmentIntegrationUpload(t, ctx, repository, reserve, object, fingerprint, fmt.Sprintf("apj_%s%d", draftID[len("rdf_"):], index))
-		if _, err := repository.AdmitUpload(ctx, attachments.AdmitUploadCommand{
-			ProjectID: "default", UploadID: reserve.UploadID, AuthorID: reserve.AuthorID, Limits: reserve.Limits,
-			Blob: attachments.BlobObject{
-				Key: object.Key, SHA256: object.SHA256, ObjectVersion: object.VersionID,
-				SizeBytes: object.SizeBytes, BackendKind: attachments.BackendKindLocal,
-			},
-		}); err != nil {
-			t.Fatalf("AdmitUpload(%s) error = %v", attachmentID, err)
+	case draftReleaseQuarantined, draftReleaseAvailable:
+		content := draftReleaseContent(draftID, index)
+		written := putManagedAttachmentUpload(t, ctx, repository, writer, reserve, content)
+		enqueueManagedAttachmentUpload(t, ctx, repository, reserve, written, fmt.Sprintf("apj_%s%d", draftID[len("rdf_"):], index))
+		if state == draftReleaseAvailable {
+			completeManagedAttachmentProcessor(t, ctx, repository, writer, reserve.UploadID, content, reserve.Limits)
 		}
 	case draftReleaseRejected, draftReleaseExpired:
 		target := attachments.UploadStateRejected

@@ -9,9 +9,30 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/recordplatform"
 )
+
+func TestDeploymentMembershipAdmissionGateRejectsSourceGenerationFailure(t *testing.T) {
+	t.Parallel()
+	tx := &fakeRecordPlatformTx{
+		exec: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, errors.New("private source generation failure")
+		},
+		queryRow: func(context.Context, string, ...any) pgx.Row {
+			t.Fatal("failed source admission reached membership authorization")
+			return nil
+		},
+	}
+	err := mustDeploymentMembershipAdmissionGate(t).Admit(context.Background(), tx)
+	if !errors.Is(err, ErrRecordPlatformAdmissionUnavailable) {
+		t.Fatalf("Admit() error = %v, want admission unavailable", err)
+	}
+	if strings.Contains(err.Error(), "private") {
+		t.Fatalf("Admit() leaked source authority details: %v", err)
+	}
+}
 
 func TestNewDeploymentMembershipAdmissionGateRejectsInvalidIdentity(t *testing.T) {
 	t.Parallel()
@@ -133,9 +154,6 @@ func TestDeploymentMembershipAdmissionGateRejectsMissingStaleWrongAndUnactivated
 			if err := gate.Admit(context.Background(), tx); !errors.Is(err, ErrRecordPlatformAdmissionUnavailable) {
 				t.Fatalf("Admit() error = %v, want ErrRecordPlatformAdmissionUnavailable", err)
 			}
-			if tx.execCount != 0 {
-				t.Fatalf("Admit() execCount = %d, want 0 writes", tx.execCount)
-			}
 		})
 	}
 }
@@ -160,25 +178,6 @@ func TestDeploymentMembershipAdmissionGateAdmitsMatchingMembershipAndActivatedCo
 	gate := mustDeploymentMembershipAdmissionGate(t)
 	if err := gate.Admit(context.Background(), tx); err != nil {
 		t.Fatalf("Admit() error = %v", err)
-	}
-	if tx.execCount != 0 {
-		t.Fatalf("Admit() execCount = %d, want read-only", tx.execCount)
-	}
-	if len(tx.querySQL) != 2 {
-		t.Fatalf("Admit() queries = %#v, want membership then contract", tx.querySQL)
-	}
-	if !strings.Contains(tx.querySQL[0], "from public.deployment_membership") ||
-		!strings.Contains(tx.querySQL[0], "heartbeat_expires_at > transaction_timestamp()") {
-		t.Fatalf("membership SQL = %s, want database-time heartbeat predicate", tx.querySQL[0])
-	}
-	if !strings.Contains(tx.querySQL[1], "from public.deployment_contract_state") {
-		t.Fatalf("contract SQL = %s", tx.querySQL[1])
-	}
-	if got, ok := tx.queryArgs[0][0].(string); !ok || got != identity.InstanceID {
-		t.Fatalf("membership query args = %#v, want bound instance", tx.queryArgs[0])
-	}
-	if got, ok := tx.queryArgs[1][0].(string); !ok || got != string(identity.ProjectID) {
-		t.Fatalf("contract query args = %#v, want bound project", tx.queryArgs[1])
 	}
 }
 

@@ -3,17 +3,19 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
+	"reflect"
 	"testing"
 
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
 )
 
-func TestPostgresIntegrationRecordPortabilityDeletionPurgesOwnedRowsKeepsTombstonesAndReplays(t *testing.T) {
+func TestPostgresIntegrationRecordPortabilityDeletionRejectsMissingOwnerWithoutChangingRows(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	purged := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_portdelete", "Purged portability parent")
-	survivor := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_portkeep", "Survivor portability parent")
+	fixture := newAdmittedCoreRecordFixture(t, ctx)
+	purged := seedRecordWithoutSearchProjection(t, ctx, fixture, "Purged portability parent")
+	survivor := seedRecordWithoutSearchProjection(t, ctx, fixture, "Survivor portability parent")
 	digest := testStoreRecordPlatformDigest(0x58)
 
 	seedPortabilityExport(t, ctx, fixture, "rej_portdelete", "rxa_portdelete", purged.RecordID, purged.RevisionID, digest, "published")
@@ -39,13 +41,11 @@ func TestPostgresIntegrationRecordPortabilityDeletionPurgesOwnedRowsKeepsTombsto
 		t.Fatalf("seed shared survivor mapping: %v", err)
 	}
 
-	operation := recorddeletion.DeletionOperation{
-		OperationID: "rpo_portdelete", ReservationID: "drs_portdelete",
+	// Legacy inventory rows are sufficient for a preview, never purge authority.
+	operation := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV2, OperationID: "rpo_portdelete", ReservationID: "drs_portdelete",
 		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: purged.RecordID},
 		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging,
-		FenceEpoch: 7, LedgerSequence: 11, LedgerEntryHash: sha256.Sum256([]byte("portability deletion ledger")),
-	}
-	seedAttachmentDeletionOperation(t, ctx, fixture, operation, purged.RevisionID)
+		FenceEpoch: 7}
 	repository := NewPostgresRecordDeletionRepository(
 		fixture.openDirectRuntimePool(t, ctx, "record-portability-deletion", 2),
 		allowRecordPlatformAdmissionGate,
@@ -62,29 +62,22 @@ func TestPostgresIntegrationRecordPortabilityDeletionPurgesOwnedRowsKeepsTombsto
 	if err != nil {
 		t.Fatalf("PreviewPortabilityDeletion() error = %v", err)
 	}
-	if len(preview.SurvivingCopies) != 1 ||
-		preview.SurvivingCopies[0].Kind != recorddeletion.SurvivingCopyKindDeliveredExport ||
-		preview.SurvivingCopies[0].CopyCount != 1 {
+	if !reflect.DeepEqual(preview.SurvivingCopies, []recorddeletion.AdapterSurvivingCopy{
+		recorddeletion.KnownAdapterSurvivingCopy(recorddeletion.SurvivingCopyKindDeliveredExport, 1),
+	}) {
 		t.Fatalf("PreviewPortabilityDeletion().SurvivingCopies = %#v", preview.SurvivingCopies)
 	}
 
 	surfaceDigest := recorddeletion.RecordPortabilitySurfaceDigest()
-	receipt, err := repository.PurgeRecordPortability(ctx, operation, surfaceDigest)
-	if err != nil {
-		t.Fatalf("PurgeRecordPortability() error = %v", err)
-	}
-	if receipt.RemovedRowCount == 0 {
-		t.Fatal("PurgeRecordPortability() removed no owned rows")
-	}
-	if err := repository.VerifyRecordPortabilityPurge(ctx, operation, surfaceDigest, receipt); err != nil {
-		t.Fatalf("VerifyRecordPortabilityPurge() error = %v", err)
-	}
-	replay, err := repository.PurgeRecordPortability(ctx, operation, surfaceDigest)
-	if err != nil || replay != receipt {
-		t.Fatalf("PurgeRecordPortability(replay) = %#v, %v, want %#v", replay, err, receipt)
+	target := recorddeletion.PurgeTarget{Operation: operation}
+	for attempt := 0; attempt < 2; attempt++ {
+		receipt, err := repository.PurgeRecordPortability(ctx, target, surfaceDigest)
+		if !errors.Is(err, recorddeletion.ErrDeletionSafetyUnavailable) || receipt != (recorddeletion.AdapterPurgeReceipt{}) {
+			t.Fatalf("PurgeRecordPortability(no owner) = %#v, %v", receipt, err)
+		}
 	}
 
-	var purgedJobs, survivingJobs, origins, tombstones, exclusiveJobs, sharedJobs, sharedMappings int64
+	var purgedJobs, survivingJobs, origins, tombstones, exclusiveJobs, sharedJobs, sharedMappings, receipts int64
 	if err := fixture.db.QueryRow(ctx, `
 		select
 		  (select count(*) from public.record_export_jobs where record_id = $1),
@@ -94,15 +87,16 @@ func TestPostgresIntegrationRecordPortabilityDeletionPurgesOwnedRowsKeepsTombsto
 		  (select count(*) from public.record_import_jobs where import_job_id = 'rij_portexcl'),
 		  (select count(*) from public.record_import_jobs where import_job_id = 'rij_portshare'),
 		  (select count(*) from public.record_import_entity_mappings
-		    where import_plan_id = 'rip_portshare' and target_id = $2)`,
-		purged.RecordID, survivor.RecordID,
-	).Scan(&purgedJobs, &survivingJobs, &origins, &tombstones, &exclusiveJobs, &sharedJobs, &sharedMappings); err != nil {
-		t.Fatalf("count remaining portability rows: %v", err)
+		    where import_plan_id = 'rip_portshare' and target_id = $2),
+		  (select count(*) from public.record_portability_purge_receipts where operation_id = $3)`,
+		purged.RecordID, survivor.RecordID, operation.OperationID,
+	).Scan(&purgedJobs, &survivingJobs, &origins, &tombstones, &exclusiveJobs, &sharedJobs, &sharedMappings, &receipts); err != nil {
+		t.Fatalf("count unchanged portability rows: %v", err)
 	}
-	if purgedJobs != 0 || survivingJobs != 1 || origins != 0 || tombstones != 1 ||
-		exclusiveJobs != 0 || sharedJobs != 1 || sharedMappings != 1 {
-		t.Fatalf("remaining rows jobs=%d/%d origins=%d tombstones=%d exclusive=%d shared=%d mappings=%d",
-			purgedJobs, survivingJobs, origins, tombstones, exclusiveJobs, sharedJobs, sharedMappings)
+	if purgedJobs != 1 || survivingJobs != 1 || origins != 1 || tombstones != 1 ||
+		exclusiveJobs != 1 || sharedJobs != 1 || sharedMappings != 1 || receipts != 0 {
+		t.Fatalf("unauthorized purge changed jobs=%d/%d origins=%d tombstones=%d exclusive=%d shared=%d mappings=%d receipts=%d",
+			purgedJobs, survivingJobs, origins, tombstones, exclusiveJobs, sharedJobs, sharedMappings, receipts)
 	}
 }
 

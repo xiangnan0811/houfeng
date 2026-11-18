@@ -130,6 +130,7 @@ type comparisonResolvedItemDTO struct {
 	RevisionContext evidence.RevisionContext   `json:"revision_context"`
 	RecordID        string                     `json:"record_id,omitempty"`
 	RevisionID      string                     `json:"revision_id,omitempty"`
+	SourceRecordID  string                     `json:"source_record_id"`
 	SubjectKind     string                     `json:"subject_kind,omitempty"`
 	SubjectID       string                     `json:"subject_id,omitempty"`
 	Revision        *comparisonRevisionMetaDTO `json:"revision"`
@@ -260,7 +261,8 @@ func newComparisonEvaluateResponse(result evidence.ComparisonEvaluateOutput) com
 			Kind: item.Kind.Kind, SchemaVersion: item.Kind.SchemaVersion,
 			RevisionContext: item.RevisionContext,
 			RecordID:        item.RecordID, RevisionID: item.RevisionID,
-			SubjectKind: item.SubjectKind, SubjectID: item.SubjectID,
+			SourceRecordID: item.SourceRecordID,
+			SubjectKind:    item.SubjectKind, SubjectID: item.SubjectID,
 		}
 		if item.Revision != nil && item.RevisionContext == evidence.RevisionContextBound {
 			revision := &comparisonRevisionMetaDTO{

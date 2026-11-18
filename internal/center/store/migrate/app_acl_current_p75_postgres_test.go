@@ -36,7 +36,7 @@ func testPostgresIntegrationAppACLCurrentP75Fresh(t *testing.T) {
 	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 	migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
-	manifest, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	manifest, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("fresh C76 convergence: %v", err)
 	}
@@ -49,10 +49,10 @@ func testPostgresIntegrationAppACLCurrentP75Fresh(t *testing.T) {
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
-	if len(before.Ledger) != 81 || before.Ledger[len(before.Ledger)-1].Name != appACLCurrentP80Migration {
-		t.Fatalf("fresh current ledger = %#v, want 81 sources ending in 0080", before.Ledger)
+	if len(before.Ledger) != 82 || before.Ledger[len(before.Ledger)-1].Name != recordDeletionSuccessorMigration {
+		t.Fatalf("fresh current ledger = %#v, want 82 sources ending in 0081", before.Ledger)
 	}
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("fresh C76 repeat: %v", err)
 	}
@@ -76,7 +76,7 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C75 to C76 convergence: %v", err)
 	}
@@ -93,7 +93,7 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 		t.Fatalf("current successor must append exactly one manifest: %#v", after.Manifest)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
 		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
@@ -119,7 +119,7 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 		t.Fatalf("C77 object inventory changed beyond the family-state view and product tables")
 	}
 	assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB))
-	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil {
 		t.Fatalf("C76 repeat: %v", err)
 	}
@@ -137,7 +137,7 @@ func testPostgresIntegrationAppACLCurrentP75ExtraPermission(t *testing.T, drift 
 	migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
 	profile := appACLCurrentReleasedPostgresProfile(t, appACLCurrentP75Migration)
 	seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
-	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole); err != nil {
+	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 		t.Fatalf("C75 to C76 convergence before drift: %v", err)
 	}
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
@@ -165,7 +165,7 @@ func testPostgresIntegrationAppACLCurrentP75ExtraPermission(t *testing.T, drift 
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil {
 		t.Fatal("runtime admission accepted extra family-state permission")
 	}
-	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole); err == nil {
+	if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err == nil {
 		t.Fatal("convergence repaired or accepted extra family-state permission")
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)

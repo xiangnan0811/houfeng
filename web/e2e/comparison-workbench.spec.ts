@@ -205,6 +205,14 @@ test('横向比较工作台 keyboard can select, switch kinds, save, then revoke
   page,
 }) => {
   api.useProfile(comparisonWorkbenchProfile({ mode: 'candidates', includeSave: true }))
+  await page.route('**/api/records/allocations', async (route) => {
+    const body = route.request().postDataJSON() as { purpose: string; request_digest: string }
+    await route.fulfill({ status: 201, json: {
+      allocation_id: `rqa_${'1'.repeat(32)}`, reservation_id: `rba_${'2'.repeat(32)}`,
+      record_id: 'rec2_00000000000000000000000000000001', purpose: body.purpose,
+      request_digest: body.request_digest, generation: 0, idempotency_key: route.request().headers()['idempotency-key'],
+    } })
+  })
   await page.goto(CANDIDATE_HREF)
 
   const confirm = page.getByRole('button', { name: '确认候选并比较' })
@@ -235,7 +243,7 @@ test('横向比较工作台 keyboard can select, switch kinds, save, then revoke
   await save.focus()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('status').filter({ hasText: '比较记录已保存' })).toBeVisible()
-  await expect(page.getByRole('link', { name: '查看比较记录' })).toHaveAttribute('href', '/records/rec_cmpsaved01')
+  await expect(page.getByRole('link', { name: '查看比较记录' })).toHaveAttribute('href', '/records/rec2_00000000000000000000000000000001')
   expect(api.requestCount('POST', '/api/records')).toBe(1)
 
   api.useProfile(comparisonWorkbenchProfile({ mode: 'revoked' }))

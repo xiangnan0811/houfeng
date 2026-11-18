@@ -1,14 +1,12 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
-	"sort"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -36,6 +34,23 @@ func (repository *PostgresEvidenceRepository) EvidenceDeletionHealth(
 		return recorddeletion.AdapterHealthSnapshot{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	health, err := evidenceDeletionHealthInTransaction(ctx, tx)
+	if err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, fmt.Errorf("commit evidence deletion health: %w", err)
+	}
+	return health, nil
+}
+
+func evidenceDeletionHealthInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+) (recorddeletion.AdapterHealthSnapshot, error) {
+	if ctx == nil || tx == nil {
+		return recorddeletion.AdapterHealthSnapshot{}, evidence.ErrInvalidDeletionAdapter
+	}
 	surfaces := recorddeletion.RecordEvidenceSurfaceNames()
 	names := make([]string, len(surfaces))
 	for index, surface := range surfaces {
@@ -54,12 +69,15 @@ func (repository *PostgresEvidenceRepository) EvidenceDeletionHealth(
 	if count != int64(len(names)) {
 		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
 	}
+	if err := requireClientComparisonPurgeFunctions(ctx, tx, "public.record_evidence_purge_v2(bytea)", "public.record_evidence_purge_verify_v2(bytea)"); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
+	if err := requireClientComparisonPurgeFunctions(ctx, tx, "public.record_evidence_purge_prepare_v2(bytea)", "public.record_evidence_purge_payload_v2(bytea)"); err != nil {
+		return recorddeletion.AdapterHealthSnapshot{}, err
+	}
 	health, err := recorddeletion.NewAdapterHealthSnapshot(true, 1, digestEvidenceDeletionStrings(evidenceDeletionHealthDigestDomainV1, names...))
 	if err != nil {
 		return recorddeletion.AdapterHealthSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return recorddeletion.AdapterHealthSnapshot{}, fmt.Errorf("commit evidence deletion health: %w", err)
 	}
 	return health, nil
 }
@@ -71,14 +89,34 @@ func (repository *PostgresEvidenceRepository) PreviewEvidenceDeletion(
 	if ctx == nil || target.Validate() != nil {
 		return recorddeletion.AdapterPreviewSnapshot{}, evidence.ErrInvalidDeletionAdapter
 	}
-	tx, err := repository.startAdmittedTransaction(ctx)
-	if err != nil {
+	if repository == nil || repository.platform == nil {
+		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	var preview recorddeletion.AdapterPreviewSnapshot
+	err := repository.platform.runRecordPlatformTransaction(ctx, pgx.TxOptions{
+		IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly,
+	}, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		var err error
+		preview, err = previewEvidenceDeletionInTransaction(ctx, transaction.tx, target)
+		return err
+	})
+	return preview, err
+}
+
+func previewEvidenceDeletionInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	target recorddeletion.PreviewTarget,
+) (recorddeletion.AdapterPreviewSnapshot, error) {
+	if ctx == nil || tx == nil || target.Validate() != nil {
+		return recorddeletion.AdapterPreviewSnapshot{}, evidence.ErrInvalidDeletionAdapter
+	}
+	if err := verifyRecordEvidencePayloadsInTransaction(ctx, tx, target.Object.ObjectID); err != nil {
 		return recorddeletion.AdapterPreviewSnapshot{}, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	var dependencyMaterial, impactMaterial []byte
 	var survivingCopies int64
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		with root as materialized (
 			select record.record_id
 			from public.records as record
@@ -151,15 +189,12 @@ func (repository *PostgresEvidenceRepository) PreviewEvidenceDeletion(
 		SurvivingCopies:  []recorddeletion.AdapterSurvivingCopy{},
 	}
 	if survivingCopies > 0 {
-		preview.SurvivingCopies = append(preview.SurvivingCopies, recorddeletion.AdapterSurvivingCopy{
-			Kind: recorddeletion.SurvivingCopyKindOtherRecord, CopyCount: uint64(survivingCopies),
-		})
+		preview.SurvivingCopies = append(preview.SurvivingCopies, recorddeletion.KnownAdapterSurvivingCopy(
+			recorddeletion.SurvivingCopyKindOtherRecord, uint64(survivingCopies),
+		))
 	}
 	if err := preview.Validate(); err != nil {
 		return recorddeletion.AdapterPreviewSnapshot{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return recorddeletion.AdapterPreviewSnapshot{}, fmt.Errorf("commit evidence deletion preview: %w", err)
 	}
 	return preview, nil
 }
@@ -168,139 +203,139 @@ func (repository *PostgresEvidenceRepository) PurgeRecordEvidence(
 	ctx context.Context,
 	command evidence.EvidenceDeletionCommand,
 ) (recorddeletion.AdapterPurgeReceipt, error) {
-	if ctx == nil || command.Validate() != nil || command.Operation.LedgerSequence > math.MaxInt64 ||
-		uint64(command.Operation.FenceEpoch) > math.MaxInt64 {
+	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, evidence.ErrInvalidDeletionAdapter
 	}
-	tx, err := repository.startAdmittedTransaction(ctx)
-	if err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := validateLockedEvidencePurgeOperation(ctx, tx, command.Operation); err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, err
-	}
-	if existing, found, err := loadEvidencePurgeReceipt(ctx, tx, command); err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, err
-	} else if found {
-		if err := tx.Commit(ctx); err != nil {
-			return recorddeletion.AdapterPurgeReceipt{}, fmt.Errorf("commit record evidence purge replay read: %w", err)
-		}
-		if err := repository.VerifyRecordEvidencePurge(ctx, command, existing); err != nil {
-			return recorddeletion.AdapterPurgeReceipt{}, err
-		}
-		return existing, nil
-	}
-	rows, err := tx.Query(ctx, `
-		select snapshot_id, payload_digest
-		from public.evidence_snapshots
-		where record_id = $1
-		order by snapshot_id`, command.Operation.Object.ObjectID)
-	if err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, fmt.Errorf("lock record evidence snapshots: %w", err)
-	}
-	snapshotIDs := make([]string, 0)
-	payloadDigests := make([][]byte, 0)
-	for rows.Next() {
-		var snapshotID string
-		var digest []byte
-		if err := rows.Scan(&snapshotID, &digest); err != nil || !evidence.ValidSnapshotID(snapshotID) || len(digest) != sha256.Size {
-			rows.Close()
-			return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		snapshotIDs = append(snapshotIDs, snapshotID)
-		payloadDigests = append(payloadDigests, append([]byte(nil), digest...))
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return recorddeletion.AdapterPurgeReceipt{}, fmt.Errorf("iterate record evidence snapshots: %w", err)
-	}
-	rows.Close()
-	sort.Strings(snapshotIDs)
-	for _, statement := range []struct {
-		sql  string
-		args []any
-	}{
-		{`delete from public.record_revision_evidence where record_id = $1`, []any{command.Operation.Object.ObjectID}},
-		{`delete from public.evidence_capture_intents where record_id = $1`, []any{command.Operation.Object.ObjectID}},
-		{`delete from public.evidence_copy_lineage where snapshot_id = any($1::text[])`, []any{snapshotIDs}},
-		{`delete from public.evidence_snapshots where record_id = $1`, []any{command.Operation.Object.ObjectID}},
-		{`delete from public.evidence_payloads as payload
-		  where payload.payload_digest = any($1::bytea[])
-		    and not exists (select 1 from public.evidence_snapshots as snapshot where snapshot.payload_digest = payload.payload_digest)`, []any{payloadDigests}},
-	} {
-		result, err := tx.Exec(ctx, statement.sql, statement.args...)
+	var receipt recorddeletion.AdapterPurgeReceipt
+	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		body, err := deletionAdapterEnvelope(ctx, transaction.tx, command.PurgeTarget, command.SurfaceDigest)
 		if err != nil {
-			return recorddeletion.AdapterPurgeReceipt{}, fmt.Errorf("purge record evidence: %w", err)
+			return err
 		}
-		if result.RowsAffected() < 0 {
-			return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
+		// The prepare command authenticates the caller and holds the common and
+		// evidence locks until this transaction ends. PostgreSQL cannot decode
+		// this gzip format: the trusted worker validates the actual persisted
+		// bytes here, then the restricted purge rechecks authority and performs
+		// the effects, absence checks and receipt under the same locks.
+		if err := verifyPreparedEvidenceDeletionPayloads(ctx, transaction.tx, body, command.Operation.ContractVersion); err != nil {
+			return err
 		}
-	}
-	// The immutable 0054 receipt schema intentionally contains no row-count
-	// column. Keep the adapter receipt deterministic and replayable by using a
-	// content-free zero count rather than returning a first-attempt-only count
-	// that could not be reconstructed after an ambiguous commit.
-	const receiptRemovedRows = uint64(0)
-	var completedAt time.Time
-	receiptDigest := evidenceDeletionReceiptDigest(command, receiptRemovedRows)
-	err = tx.QueryRow(ctx, `
-		insert into public.evidence_purge_receipts (
-			operation_id, surface_kind, receipt_digest, completed_at
-		) values ($1, 'record_evidence', $2, transaction_timestamp())
-		returning completed_at`,
-		command.Operation.OperationID, receiptDigest[:],
-	).Scan(&completedAt)
+		query := `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_evidence_purge_v1($1)`
+		if command.Operation.ContractVersion == recorddeletion.DeletionContractV2 {
+			query = `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_evidence_purge_v2($1)`
+		}
+		receipt, err = runLegacyAdapterPurge(ctx, transaction.tx, query, body,
+			recorddeletion.AdapterNameRecordEvidence, command.PurgeTarget, command.SurfaceDigest)
+		if err == nil && (receipt.RemovedRowCount != 0 || receipt.ReceiptDigest != evidenceDeletionReceiptDigest(command, 0)) {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+		return err
+	})
 	if err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, fmt.Errorf("insert evidence purge receipt: %w", err)
-	}
-	if completedAt.IsZero() {
-		return recorddeletion.AdapterPurgeReceipt{}, recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	completedAt = completedAt.UTC()
-	if err := tx.Commit(ctx); err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, fmt.Errorf("commit record evidence purge: %w", err)
-	}
-	receipt := recorddeletion.AdapterPurgeReceipt{
-		AdapterName: recorddeletion.AdapterNameRecordEvidence, OperationID: command.Operation.OperationID,
-		SurfaceDigest: command.SurfaceDigest, ReceiptDigest: receiptDigest,
-		RemovedRowCount: receiptRemovedRows, VerifiedAbsentAt: completedAt,
-	}
-	if err := repository.VerifyRecordEvidencePurge(ctx, command, receipt); err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
 	return receipt, nil
 }
 
-func loadEvidencePurgeReceipt(
-	ctx context.Context,
-	tx pgx.Tx,
-	command evidence.EvidenceDeletionCommand,
-) (recorddeletion.AdapterPurgeReceipt, bool, error) {
-	var rawDigest []byte
-	var completedAt time.Time
-	err := tx.QueryRow(ctx, `
-		select receipt_digest, completed_at
-		from public.evidence_purge_receipts
-		where operation_id = $1 and surface_kind = 'record_evidence'`,
-		command.Operation.OperationID,
-	).Scan(&rawDigest, &completedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, nil
+// The prepare result contains metadata only. Fetch and validate each authorized
+// payload as a scalar so PostgreSQL does not materialize the complete evidence
+// inventory (including content) in a set-returning function's temporary store.
+func verifyPreparedEvidenceDeletionPayloads(ctx context.Context, tx pgx.Tx, authority []byte, version recorddeletion.DeletionContractVersion) error {
+	prepareQuery := `select * from public.record_evidence_purge_prepare_v1($1)`
+	payloadQuery := `select public.record_evidence_purge_payload_v1($1)`
+	if version == recorddeletion.DeletionContractV2 {
+		prepareQuery = `select * from public.record_evidence_purge_prepare_v2($1)`
+		payloadQuery = `select public.record_evidence_purge_payload_v2($1)`
 	}
+	rows, err := tx.Query(ctx, prepareQuery, authority)
 	if err != nil {
-		return recorddeletion.AdapterPurgeReceipt{}, false, fmt.Errorf("load evidence purge receipt: %w", err)
+		return fmt.Errorf("prepare restricted evidence purge: %w", err)
 	}
-	completedAt = completedAt.UTC()
-	receipt := recorddeletion.AdapterPurgeReceipt{
-		AdapterName: recorddeletion.AdapterNameRecordEvidence, OperationID: command.Operation.OperationID,
-		SurfaceDigest: command.SurfaceDigest, ReceiptDigest: evidenceDeletionReceiptDigest(command, 0),
-		RemovedRowCount: 0, VerifiedAbsentAt: completedAt,
+	defer rows.Close()
+	type payloadMetadata struct {
+		snapshotID     string
+		digest         [sha256.Size]byte
+		canonicalSize  int64
+		compressedSize int64
 	}
-	if len(rawDigest) != sha256.Size || completedAt.IsZero() || !equalEvidenceDigest(rawDigest, receipt.ReceiptDigest) {
-		return recorddeletion.AdapterPurgeReceipt{}, false, recorddeletion.ErrDeletionSafetyUnavailable
+	var payloads []payloadMetadata
+	for rows.Next() {
+		var snapshotID string
+		var rawDigest, rawHash []byte
+		var logicalSize int64
+		var encoding *string
+		var canonicalSize, compressedSize *int64
+		if err := rows.Scan(&snapshotID, &rawDigest, &rawHash, &logicalSize, &encoding, &canonicalSize, &compressedSize); err != nil ||
+			!evidence.ValidSnapshotID(snapshotID) || len(rawDigest) != sha256.Size || !bytes.Equal(rawHash, rawDigest) ||
+			encoding == nil || *encoding != EvidencePayloadEncodingCanonicalJSONGzipV1 || canonicalSize == nil ||
+			compressedSize == nil || *canonicalSize != logicalSize {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+		item := payloadMetadata{snapshotID: snapshotID, canonicalSize: *canonicalSize, compressedSize: *compressedSize}
+		copy(item.digest[:], rawDigest)
+		payloads = append(payloads, item)
 	}
-	return receipt, true, nil
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate restricted evidence metadata: %w", err)
+	}
+	rows.Close()
+	for _, item := range payloads {
+		body, err := encodeRecordPurgeCommand(struct {
+			Authority  []byte `json:"authority"`
+			SnapshotID string `json:"snapshot_id"`
+		}{authority, item.snapshotID})
+		if err != nil {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+		var compressed []byte
+		if err := tx.QueryRow(ctx, payloadQuery, body).Scan(&compressed); err != nil {
+			return fmt.Errorf("read restricted evidence payload: %w", err)
+		}
+		if _, err := decodeEvidencePayloadBytes(compressed, item.canonicalSize, item.compressedSize, item.digest); err != nil {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+	}
+	return nil
+}
+
+// A digest in a snapshot row is not proof that its compressed payload contains
+// that canonical evidence. Refuse preview and purge receipts if any owned
+// payload is missing, malformed, or decodes to a different digest.
+func verifyRecordEvidencePayloadsInTransaction(ctx context.Context, tx pgx.Tx, recordID string) error {
+	rows, err := tx.Query(ctx, `select snapshot.payload_digest,snapshot.canonical_hash,snapshot.logical_size_bytes,
+		payload.payload_encoding,payload.canonical_size_bytes,payload.compressed_size_bytes,payload.compressed_payload
+		from public.evidence_snapshots snapshot
+		left join public.evidence_payloads payload on payload.payload_digest=snapshot.payload_digest
+		where snapshot.record_id=$1 order by snapshot.snapshot_id`, recordID)
+	if err != nil {
+		return fmt.Errorf("read evidence deletion payloads: %w", err)
+	}
+	return verifyEvidenceDeletionPayloadRows(rows)
+}
+
+func verifyEvidenceDeletionPayloadRows(rows pgx.Rows) error {
+	defer rows.Close()
+	for rows.Next() {
+		var rawDigest, rawHash, compressed []byte
+		var logicalSize int64
+		var encoding *string
+		var canonicalSize, compressedSize *int64
+		if err := rows.Scan(&rawDigest, &rawHash, &logicalSize, &encoding, &canonicalSize, &compressedSize, &compressed); err != nil ||
+			len(rawDigest) != sha256.Size || !bytes.Equal(rawHash, rawDigest) || encoding == nil ||
+			*encoding != EvidencePayloadEncodingCanonicalJSONGzipV1 || canonicalSize == nil || compressedSize == nil ||
+			*canonicalSize != logicalSize {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+		var digest [sha256.Size]byte
+		copy(digest[:], rawDigest)
+		if _, err := decodeEvidencePayloadBytes(compressed, *canonicalSize, *compressedSize, digest); err != nil {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate evidence deletion payloads: %w", err)
+	}
+	return nil
 }
 
 func (repository *PostgresEvidenceRepository) VerifyRecordEvidencePurge(
@@ -308,85 +343,29 @@ func (repository *PostgresEvidenceRepository) VerifyRecordEvidencePurge(
 	command evidence.EvidenceDeletionCommand,
 	receipt recorddeletion.AdapterPurgeReceipt,
 ) error {
-	if ctx == nil || command.Validate() != nil || receipt.AdapterName != recorddeletion.AdapterNameRecordEvidence ||
+	if ctx == nil || repository == nil || repository.platform == nil || command.Validate() != nil ||
+		receipt.AdapterName != recorddeletion.AdapterNameRecordEvidence ||
 		receipt.OperationID != command.Operation.OperationID || receipt.SurfaceDigest != command.SurfaceDigest ||
 		receipt.VerifiedAbsentAt.IsZero() || receipt.RemovedRowCount != 0 ||
 		receipt.ReceiptDigest != evidenceDeletionReceiptDigest(command, receipt.RemovedRowCount) {
 		return evidence.ErrInvalidDeletionAdapter
 	}
-	tx, err := repository.startAdmittedTransaction(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := validateLockedEvidencePurgeOperation(ctx, tx, command.Operation); err != nil {
-		return err
-	}
-	var persistedDigest []byte
-	var persistedAt time.Time
-	if err := tx.QueryRow(ctx, `
-		select receipt_digest, completed_at
-		from public.evidence_purge_receipts
-		where operation_id = $1 and surface_kind = 'record_evidence'`,
-		command.Operation.OperationID,
-	).Scan(&persistedDigest, &persistedAt); err != nil {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	if len(persistedDigest) != sha256.Size || !persistedAt.Equal(receipt.VerifiedAbsentAt) ||
-		!equalEvidenceDigest(persistedDigest, receipt.ReceiptDigest) {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	var refs, intents, snapshots, ownedLineage int64
-	if err := tx.QueryRow(ctx, `
-		select
-		  (select count(*) from public.record_revision_evidence where record_id = $1),
-		  (select count(*) from public.evidence_capture_intents where record_id = $1),
-		  (select count(*) from public.evidence_snapshots where record_id = $1),
-		  (select count(*) from public.evidence_copy_lineage as lineage
-		     join public.evidence_snapshots as snapshot on snapshot.snapshot_id = lineage.snapshot_id
-		    where snapshot.record_id = $1)`, command.Operation.Object.ObjectID,
-	).Scan(&refs, &intents, &snapshots, &ownedLineage); err != nil {
-		return fmt.Errorf("verify record evidence purge: %w", err)
-	}
-	if refs != 0 || intents != 0 || snapshots != 0 || ownedLineage != 0 {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit record evidence purge verification: %w", err)
-	}
-	return nil
-}
-
-func validateLockedEvidencePurgeOperation(
-	ctx context.Context,
-	tx pgx.Tx,
-	operation recorddeletion.DeletionOperation,
-) error {
-	var state, reason, objectID, projectID string
-	var sequence, fenceEpoch int64
-	var entryHash []byte
-	err := tx.QueryRow(ctx, `
-		select operation.operation_state, operation.reason_code,
-		       operation.ledger_sequence, operation.ledger_entry_hash,
-		       reservation.object_id, reservation.project_id, reservation.fence_epoch
-		from public.record_purge_operations as operation
-		join public.deletion_reservations as reservation on reservation.reservation_id = operation.reservation_id
-		where operation.operation_id = $1
-		  and operation.reservation_id = $2
-		  and operation.project_id = $3
-		  and reservation.project_id = $3
-		  and reservation.object_kind = 'record'
-		  and reservation.object_id = $4
-		for update of operation, reservation`,
-		operation.OperationID, operation.ReservationID, operation.Object.ProjectID, operation.Object.ObjectID,
-	).Scan(&state, &reason, &sequence, &entryHash, &objectID, &projectID, &fenceEpoch)
-	if err != nil || state != string(recorddeletion.DeletionStateOnlinePurging) ||
-		reason != string(operation.ReasonCode) || sequence != int64(operation.LedgerSequence) ||
-		len(entryHash) != sha256.Size || objectID != operation.Object.ObjectID || projectID != operation.Object.ProjectID ||
-		fenceEpoch != int64(operation.FenceEpoch) || !equalEvidenceDigest(entryHash, operation.LedgerEntryHash) {
-		return recorddeletion.ErrDeletionSafetyUnavailable
-	}
-	return nil
+	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		body, err := deletionAdapterEnvelope(ctx, transaction.tx, command.PurgeTarget, command.SurfaceDigest)
+		if err != nil {
+			return err
+		}
+		query := `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_evidence_purge_verify_v1($1)`
+		if command.Operation.ContractVersion == recorddeletion.DeletionContractV2 {
+			query = `select removed_surface_digest, receipt_digest, removed_row_count, verified_absent_at from public.record_evidence_purge_verify_v2($1)`
+		}
+		actual, err := runLegacyAdapterPurge(ctx, transaction.tx, query, body,
+			recorddeletion.AdapterNameRecordEvidence, command.PurgeTarget, command.SurfaceDigest)
+		if err != nil {
+			return err
+		}
+		return matchClientComparisonPurgeReceipt(receipt, actual)
+	})
 }
 
 func evidenceDeletionReceiptDigest(

@@ -142,6 +142,87 @@ func TestPortabilityCreateRejectsInventoryDriftWithoutStaging(t *testing.T) {
 	}
 }
 
+func TestPortabilityCreateDoesNotStageAfterWriterFenceDenial(t *testing.T) {
+	t.Parallel()
+	service, jobs := mustPortabilityService(t, portabilityHarness{enabled: true, document: records.ExportDocument{
+		RecordID: "rec_exportfenced", RevisionID: "rrv_exportfenced", Title: "Fenced",
+		BodyMarkdown: "content\n", AuthorizationEpoch: 1, LockVersion: 1,
+	}})
+	actor := portabilityTestActor(t)
+	preview, err := service.Preview(context.Background(), PreviewRequest{
+		Actor: actor, IdempotencyKey: "export-fenced", RecordID: "rec_exportfenced",
+		ExportKind: ExportKindMarkdown, ExportMode: ExportModeSafe,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.jobs = fencedExportJobs{JobRepository: jobs}
+	writer := &countedExportWriter{BlobWriter: service.staging.writer}
+	service.staging.writer = writer
+	_, err = service.Create(context.Background(), CreateRequest{
+		Actor: actor, PreviewID: preview.PreviewID, PreviewToken: preview.PreviewToken, InventoryDigest: preview.InventoryDigest,
+	})
+	if !errors.Is(err, ErrExportUnavailable) || writer.calls != 0 || jobs.artifactCount() != 0 {
+		t.Fatalf("Create after fence = %v; physical writes=%d artifacts=%d", err, writer.calls, jobs.artifactCount())
+	}
+	job, err := jobs.LoadExportJob(context.Background(), preview.PreviewID)
+	if err != nil || job.JobState != store.RecordExportJobStatePreviewed {
+		t.Fatalf("fenced job = %#v, %v", job, err)
+	}
+}
+
+func TestPortabilityCreateRecordsFailedStagingOutcome(t *testing.T) {
+	t.Parallel()
+	service, jobs := mustPortabilityService(t, portabilityHarness{enabled: true, document: records.ExportDocument{
+		RecordID: "rec_exportfailed", RevisionID: "rrv_exportfailed", Title: "Failed",
+		BodyMarkdown: "content\n", AuthorizationEpoch: 1, LockVersion: 1,
+	}})
+	actor := portabilityTestActor(t)
+	preview, err := service.Preview(context.Background(), PreviewRequest{
+		Actor: actor, IdempotencyKey: "export-failed", RecordID: "rec_exportfailed",
+		ExportKind: ExportKindMarkdown, ExportMode: ExportModeSafe,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &failingExportWriter{BlobWriter: service.staging.writer}
+	service.staging.writer = writer
+	_, err = service.Create(context.Background(), CreateRequest{
+		Actor: actor, PreviewID: preview.PreviewID, PreviewToken: preview.PreviewToken, InventoryDigest: preview.InventoryDigest,
+	})
+	job, loadErr := jobs.LoadExportJob(context.Background(), preview.PreviewID)
+	if !errors.Is(err, ErrExportUnavailable) || writer.calls != 1 || loadErr != nil ||
+		job.JobState != store.RecordExportJobStateFailed || job.FailureCode != "staging_failed" || jobs.artifactCount() != 0 {
+		t.Fatalf("failed stage = %v; calls=%d job=%#v load=%v artifacts=%d", err, writer.calls, job, loadErr, jobs.artifactCount())
+	}
+}
+
+type failingExportWriter struct {
+	attachments.BlobWriter
+	calls int
+}
+
+func (writer *failingExportWriter) Put(context.Context, attachments.WriteRequest, io.Reader) (attachments.WrittenBlob, error) {
+	writer.calls++
+	return attachments.WrittenBlob{}, errors.New("staging failed")
+}
+
+type fencedExportJobs struct{ JobRepository }
+
+func (jobs fencedExportJobs) AdvanceExportJob(context.Context, store.AdvanceRecordExportJobInput) error {
+	return records.ErrRecordDeletionReserved
+}
+
+type countedExportWriter struct {
+	attachments.BlobWriter
+	calls int
+}
+
+func (writer *countedExportWriter) Put(ctx context.Context, request attachments.WriteRequest, body io.Reader) (attachments.WrittenBlob, error) {
+	writer.calls++
+	return writer.BlobWriter.Put(ctx, request, body)
+}
+
 func TestPortabilityComparisonExportBytesEqualKindExportAndOmitForbiddenFields(t *testing.T) {
 	t.Parallel()
 
@@ -423,10 +504,8 @@ type portabilityHarness struct {
 
 func mustPortabilityService(t *testing.T, harness portabilityHarness) (*Service, *memoryJobRepository) {
 	t.Helper()
-	blob, err := attachments.NewLocalBlobStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewLocalBlobStore() error = %v", err)
-	}
+	blob := newPortabilityMemoryBlob()
+	writer := &portabilityMemoryWriter{blob: blob, namespace: portabilityTestNamespace}
 	docs := harness.documents
 	if docs == nil {
 		docs = &documentStub{document: harness.document}
@@ -434,19 +513,20 @@ func mustPortabilityService(t *testing.T, harness portabilityHarness) (*Service,
 	jobs := newMemoryJobRepository()
 	harness.jobs = jobs
 	options := Options{
-		Enabled:         harness.enabled,
-		BackendKind:     "local",
-		Documents:       docs,
-		Jobs:            jobs,
-		Evidence:        &evidenceStub{deny: harness.evidence, snapshot: harness.snapshot},
-		Snapshots:       &snapshotStub{snapshot: harness.snapshot},
-		Comparison:      harness.comparison,
-		Subjects:        mustTestImportSubjectRegistry(t),
-		Attachments:     harness.attachments,
-		AttachmentBlobs: blob,
-		ImportBlobGC:    zeroHistoryImportBlobGCObserver{},
-		Staging:         NewLeasedBlobStore(blob),
-		Now:             func() time.Time { return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC) },
+		Enabled:          harness.enabled,
+		BackendKind:      "local",
+		Documents:        docs,
+		Jobs:             jobs,
+		Evidence:         &evidenceStub{deny: harness.evidence, snapshot: harness.snapshot},
+		Snapshots:        &snapshotStub{snapshot: harness.snapshot},
+		Comparison:       harness.comparison,
+		Subjects:         mustTestImportSubjectRegistry(t),
+		Attachments:      harness.attachments,
+		AttachmentBlobs:  blob,
+		AttachmentWriter: writer,
+		ImportBlobGC:     zeroHistoryImportBlobGCObserver{},
+		Staging:          NewLeasedBlobStore(blob, writer),
+		Now:              func() time.Time { return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC) },
 	}
 	if !harness.omitPDF {
 		options.PDF = NewIsolatedDocumentPDFRenderer("")
@@ -576,7 +656,7 @@ func (repository *memoryJobRepository) ClaimExportJob(
 ) (store.RecordExportJob, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
-	if existingID, ok := repository.byKey[input.ActorID+"/"+input.IdempotencyKey]; ok {
+	if existingID, ok := repository.byKey[input.Actor.UserID+"/"+input.IdempotencyKey]; ok {
 		existing := repository.jobs[existingID]
 		if existing.RequestFingerprint != input.RequestFingerprint || existing.InventoryDigest != input.InventoryDigest {
 			return store.RecordExportJob{}, store.ErrRecordExportJobConflict
@@ -585,8 +665,9 @@ func (repository *memoryJobRepository) ClaimExportJob(
 	}
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	job := store.RecordExportJob{
+		ProjectID:          "default",
 		ExportJobID:        "rej_" + hex.EncodeToString(input.RequestFingerprint[:8]),
-		ActorID:            input.ActorID,
+		ActorID:            input.Actor.UserID,
 		IdempotencyKey:     input.IdempotencyKey,
 		ExportKind:         input.ExportKind,
 		ExportMode:         input.ExportMode,
@@ -602,22 +683,22 @@ func (repository *memoryJobRepository) ClaimExportJob(
 		UpdatedAt:          now,
 	}
 	repository.jobs[job.ExportJobID] = job
-	repository.byKey[input.ActorID+"/"+input.IdempotencyKey] = job.ExportJobID
+	repository.byKey[input.Actor.UserID+"/"+input.IdempotencyKey] = job.ExportJobID
 	return job, nil
 }
 
 func (repository *memoryJobRepository) AdvanceExportJob(_ context.Context, input store.AdvanceRecordExportJobInput) error {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
-	job, ok := repository.jobs[input.ExportJobID]
-	if !ok || job.LockVersion != input.LockVersion {
+	job, ok := repository.jobs[input.ExpectedJob.ExportJobID]
+	if !ok || job.LockVersion != input.ExpectedJob.LockVersion || job.JobState != input.ExpectedJob.JobState ||
+		job.ActorID != input.Actor.UserID || job.RecordID != input.ExpectedJob.RecordID {
 		return store.ErrRecordExportJobCASConflict
 	}
 	job.JobState = input.JobState
 	job.FailureCode = input.FailureCode
-	job.ExpiresAt = input.ExpiresAt
 	job.LockVersion++
-	repository.jobs[input.ExportJobID] = job
+	repository.jobs[input.ExpectedJob.ExportJobID] = job
 	return nil
 }
 
@@ -638,16 +719,19 @@ func (repository *memoryJobRepository) PublishExportArtifact(
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	artifact := store.RecordExportArtifact{
-		ArtifactID:   "rxa_memory1",
-		ExportJobID:  input.ExportJobID,
-		ArtifactKind: input.ArtifactKind,
-		ContentType:  input.ContentType,
-		BackendKind:  input.BackendKind,
-		BlobKey:      input.BlobKey,
-		SHA256:       input.SHA256,
-		ByteSize:     input.ByteSize,
-		ExpiresAt:    input.ExpiresAt,
-		CreatedAt:    time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC),
+		ArtifactID:      "rxa_memory1",
+		ExportJobID:     input.ExportJobID,
+		ArtifactKind:    input.ArtifactKind,
+		ContentType:     input.ContentType,
+		BackendKind:     input.BackendKind,
+		BlobKey:         input.BlobKey,
+		ObjectVersionID: input.ObjectVersionID,
+		NamespaceID:     input.NamespaceID,
+		ObligationID:    input.ObligationID,
+		SHA256:          input.SHA256,
+		ByteSize:        input.ByteSize,
+		ExpiresAt:       input.ExpiresAt,
+		CreatedAt:       time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC),
 	}
 	repository.artifacts[input.ExportJobID] = artifact
 	return artifact, nil
@@ -799,14 +883,12 @@ func (zeroHistoryImportBlobGCObserver) ObserveImportBlobGC(_ context.Context, di
 
 func TestPortabilityAttachmentImportObserverDependency(t *testing.T) {
 	t.Parallel()
-	blob, err := attachments.NewLocalBlobStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	blob := newPortabilityMemoryBlob()
+	writer := &portabilityMemoryWriter{blob: blob, namespace: portabilityTestNamespace}
 	options := Options{
 		Enabled: true, BackendKind: "local", Documents: &documentStub{},
-		Jobs: newMemoryJobRepository(), Staging: NewLeasedBlobStore(blob),
-		AttachmentBlobs: blob,
+		Jobs: newMemoryJobRepository(), Staging: NewLeasedBlobStore(blob, writer),
+		AttachmentBlobs: blob, AttachmentWriter: writer,
 	}
 	if _, err := NewService(options); !errors.Is(err, ErrExportUnavailable) {
 		t.Fatalf("attachment Blob without observer = %v", err)

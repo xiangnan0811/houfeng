@@ -37,11 +37,15 @@ func TestRecordDeletionsHandlerPreviewsWithTrustedActorAndAllowlistedToken(t *te
 				Summary: recorddeletion.PreviewSummary{
 					OnlinePurgeScopes: recorddeletion.RequiredAdapterNames(),
 					SurvivingCopies: []recorddeletion.SurvivingCopySummary{
-						{
-							Scope:     recorddeletion.AdapterNameRecordAttachments,
-							Kind:      recorddeletion.SurvivingCopyKindOtherRecord,
-							CopyCount: 2,
-						},
+						recorddeletion.KnownSurvivingCopySummary(
+							recorddeletion.AdapterNameRecordAttachments,
+							recorddeletion.SurvivingCopyKindOtherRecord,
+							2,
+						),
+						recorddeletion.UnknownSurvivingCopySummary(
+							recorddeletion.AdapterNameRecordMarkdownClient,
+							recorddeletion.SurvivingCopyKindOfflineBrowserBuffer,
+						),
 					},
 					ManagedBackup: recorddeletion.ManagedBackupSummary{
 						RetainedCopyCount:    1,
@@ -96,12 +100,15 @@ func TestRecordDeletionsHandlerPreviewsWithTrustedActorAndAllowlistedToken(t *te
 			"record_comparison",
 			"record_collaboration",
 			"record_portability",
-		}) || !reflect.DeepEqual(response.SurvivingCopies, []recordDeletionSurvivingCopyResponse{{
-		Scope: "record_attachments", Kind: "other_record", CopyCount: 2,
-	}}) || response.ManagedBackup.RetainedCopyCount != 1 ||
+		}) || response.ManagedBackup.RetainedCopyCount != 1 ||
 		response.ManagedBackup.MaximumRetentionDays != 30 || response.ManagedBackup.LatestExpiresAt == nil ||
 		!response.ManagedBackup.LatestExpiresAt.Equal(backupExpiresAt) {
 		t.Fatalf("preview response = %#v", response)
+	}
+	if raw := mustRecordDeletionJSONField(t, recorder.Body.Bytes(), "surviving_copies"); string(raw) !=
+		`[{"scope":"record_attachments","kind":"other_record","count_status":"known","copy_count":2},`+
+			`{"scope":"record_markdown_client","kind":"offline_browser_buffer","count_status":"unknown","copy_count":null}]` {
+		t.Fatalf("surviving_copies JSON = %s", raw)
 	}
 	assertRecordDeletionJSONKeys(t, mustRecordDeletionJSONField(t, recorder.Body.Bytes(), "managed_backup"), "latest_expires_at", "maximum_retention_days", "retained_copy_count")
 	for _, forbidden := range []string{
@@ -178,44 +185,74 @@ func TestRecordDeletionsHandlerPreviewSerializesEmptySurvivorsAndNoBackup(t *tes
 func TestRecordDeletionsHandlerRejectsInvalidPreviewSafetySummary(t *testing.T) {
 	t.Parallel()
 
-	actor := mustRecordsHandlerActor(t)
-	token := mustRecordDeletionHandlerToken(t)
-	application := &recordDeletionHandlerApplicationStub{
-		preview: func(context.Context, recorddeletion.PreviewRequest) (recorddeletion.PreviewResult, error) {
-			return recorddeletion.PreviewResult{
-				ReservationID: "drs_httpcontract",
-				Token:         token,
-				ExpiresAt:     time.Date(2026, time.August, 3, 23, 10, 0, 0, time.UTC),
-				Summary: recorddeletion.PreviewSummary{
-					OnlinePurgeScopes: recorddeletion.RequiredAdapterNames(),
-					SurvivingCopies: []recorddeletion.SurvivingCopySummary{
-						{Scope: recorddeletion.AdapterNameRecordAttachments, Kind: recorddeletion.SurvivingCopyKindOtherRecord, CopyCount: 1},
-						{Scope: recorddeletion.AdapterNameRecordCore, Kind: recorddeletion.SurvivingCopyKindOtherRecord, CopyCount: 1},
-					},
-					LedgerHealth: recorddeletion.LedgerHealthHealthy,
+	one := uint64(1)
+	tests := []struct {
+		name   string
+		copies []recorddeletion.SurvivingCopySummary
+	}{
+		{name: "unordered scopes", copies: []recorddeletion.SurvivingCopySummary{
+			recorddeletion.KnownSurvivingCopySummary(recorddeletion.AdapterNameRecordAttachments, recorddeletion.SurvivingCopyKindOtherRecord, 1),
+			recorddeletion.KnownSurvivingCopySummary(recorddeletion.AdapterNameRecordCore, recorddeletion.SurvivingCopyKindOtherRecord, 1),
+		}},
+		{name: "known nil count", copies: []recorddeletion.SurvivingCopySummary{{
+			Scope:       recorddeletion.AdapterNameRecordAttachments,
+			Kind:        recorddeletion.SurvivingCopyKindOtherRecord,
+			CountStatus: recorddeletion.SurvivingCopyCountKnown,
+		}}},
+		{name: "known zero count", copies: []recorddeletion.SurvivingCopySummary{
+			recorddeletion.KnownSurvivingCopySummary(recorddeletion.AdapterNameRecordAttachments, recorddeletion.SurvivingCopyKindOtherRecord, 0),
+		}},
+		{name: "unknown with count", copies: []recorddeletion.SurvivingCopySummary{{
+			Scope:       recorddeletion.AdapterNameRecordMarkdownClient,
+			Kind:        recorddeletion.SurvivingCopyKindOfflineBrowserBuffer,
+			CountStatus: recorddeletion.SurvivingCopyCountUnknown,
+			CopyCount:   &one,
+		}}},
+		{name: "unknown wrong owner", copies: []recorddeletion.SurvivingCopySummary{
+			recorddeletion.UnknownSurvivingCopySummary(recorddeletion.AdapterNameRecordAttachments, recorddeletion.SurvivingCopyKindOfflineBrowserBuffer),
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			actor := mustRecordsHandlerActor(t)
+			token := mustRecordDeletionHandlerToken(t)
+			application := &recordDeletionHandlerApplicationStub{
+				preview: func(context.Context, recorddeletion.PreviewRequest) (recorddeletion.PreviewResult, error) {
+					return recorddeletion.PreviewResult{
+						ReservationID: "drs_httpcontract",
+						Token:         token,
+						ExpiresAt:     time.Date(2026, time.August, 3, 23, 10, 0, 0, time.UTC),
+						Summary: recorddeletion.PreviewSummary{
+							OnlinePurgeScopes: recorddeletion.RequiredAdapterNames(),
+							SurvivingCopies:   tt.copies,
+							LedgerHealth:      recorddeletion.LedgerHealthHealthy,
+						},
+					}, nil
 				},
-			}, nil
-		},
-	}
-	handler := RecordDeletions(application)
-	request := recordDeletionHandlerRequest(
-		t,
-		actor,
-		http.MethodPost,
-		"/api/records/rec_httpcontract/permanent-delete-preview",
-		"",
-	)
-	recorder := httptest.NewRecorder()
+			}
+			handler := RecordDeletions(application)
+			request := recordDeletionHandlerRequest(
+				t,
+				actor,
+				http.MethodPost,
+				"/api/records/rec_httpcontract/permanent-delete-preview",
+				"",
+			)
+			recorder := httptest.NewRecorder()
 
-	handler.ServeHTTP(recorder, request)
+			handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusInternalServerError, recorder.Body.String())
-	}
-	assertRecordDeletionNoStore(t, recorder)
-	assertRecordDeletionError(t, recorder, "internal_error")
-	if strings.Contains(recorder.Body.String(), token.Transport()) {
-		t.Fatalf("invalid preview response leaked token: %s", recorder.Body.String())
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusInternalServerError, recorder.Body.String())
+			}
+			assertRecordDeletionNoStore(t, recorder)
+			assertRecordDeletionError(t, recorder, "internal_error")
+			if strings.Contains(recorder.Body.String(), token.Transport()) {
+				t.Fatalf("invalid preview response leaked token: %s", recorder.Body.String())
+			}
+		})
 	}
 }
 
@@ -588,9 +625,7 @@ func validRecordDeletionExecuteBody() string {
 }
 
 func recordDeletionHandlerOperation(state recorddeletion.DeletionState) recorddeletion.DeletionOperation {
-	operation := recorddeletion.DeletionOperation{
-		OperationID:   "rpo_httpcontract",
-		ReservationID: "drs_httpcontract",
+	operation := recorddeletion.DeletionOperation{ContractVersion: recorddeletion.DeletionContractV1, OperationID: "rpo_httpcontract", ReservationID: "drs_httpcontract",
 		Object: recordplatform.ObjectRef{
 			ProjectID:  string(recordplatform.ProjectIDDefault),
 			ObjectKind: "record",
@@ -598,8 +633,7 @@ func recordDeletionHandlerOperation(state recorddeletion.DeletionState) recordde
 		},
 		ReasonCode: recorddeletion.DeletionReasonUserConfirmed,
 		State:      state,
-		FenceEpoch: 7,
-	}
+		FenceEpoch: 7}
 	switch state {
 	case recorddeletion.DeletionStateWitnessPending,
 		recorddeletion.DeletionStateDeleteRequested,

@@ -4,29 +4,37 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
+	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
 
 func TestPostgresIntegrationRecordEvidenceRevisionParticipantCapturesAndReusesExistingSnapshot(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-evidence-participant", 4)
-	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, NewRecordEvidenceRevisionParticipant())
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture := signed.platform
+	runtimePool := signed.Runtime
+	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant())
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
+	allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-first", recordbirth.PurposeEvidence)
 
 	firstCapture := storePreparedEvidenceCapture(
-		t, "rec_pgevidence", "evs_pgevidencefirst", "evi_111111111111111111111111", now,
+		t, allocation.RecordID, "evs_pgevidencefirst", "evi_111111111111111111111111", now,
 	)
-	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, firstCapture)
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, firstCapture, allocation.AllocationID)
 	firstPreparation := storeEvidenceRevisionPreparation(
 		t, firstCapture.RecordID(), []evidence.PreparedCapture{firstCapture}, nil, []string{firstCapture.SnapshotID()},
 	)
@@ -34,6 +42,7 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantCapturesAndReusesEx
 		t, recordplatform.OperationKindRecordCreate, firstCapture.RecordID(), "", 0, 0,
 		"First evidence revision", "record-evidence-first", firstPreparation,
 	)
+	firstCommand = prepareRevisionBirthCommand(t, ctx, signed, allocation, firstCommand)
 	first, err := recordRepository.CommitRevision(ctx, firstCommand)
 	if err != nil {
 		t.Fatalf("CommitRevision(first capture) error = %v", err)
@@ -106,17 +115,18 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantCapturesAndReusesEx
 
 func TestPostgresIntegrationRecordEvidenceRevisionParticipantNormalizesOffsetIntentBeforeConsumption(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-evidence-offset-intent", 4)
-	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, NewRecordEvidenceRevisionParticipant())
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture := signed.platform
+	runtimePool := signed.Runtime
+	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant())
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
+	allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-offset-intent", recordbirth.PurposeEvidence)
 	capture := storePreparedEvidenceCapture(
-		t, "rec_pgevidenceoffset", "evs_pgevidenceoffset", "evi_999999999999999999999999", now,
+		t, allocation.RecordID, "evs_pgevidenceoffset", "evi_999999999999999999999999", now,
 	)
-	if _, err := evidenceRepository.PersistPayload(ctx, capture.Snapshot()); err != nil {
-		t.Fatalf("PersistPayload() error = %v", err)
-	}
 	intent := capture.Intent()
 	preview := capture.Preview()
 	offset := time.FixedZone("capture-offset", 5*60*60+30*60)
@@ -131,10 +141,11 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantNormalizesOffsetInt
 	preview.ObservedAt = preview.ObservedAt.In(offset)
 	preview.PreviewedAt = preview.PreviewedAt.In(offset)
 	preview.ValidUntil = preview.ValidUntil.In(offset)
-	if err := evidenceRepository.PersistCaptureIntent(
-		ctx, capture.RecordID(), capture.SnapshotID(), intent, preview,
-	); err != nil {
+	if err := persistEvidenceCaptureIntentFixture(ctx, evidenceRepository, capture.RecordID(), capture.SnapshotID(), intent, preview, allocation.AllocationID); err != nil {
 		t.Fatalf("PersistCaptureIntent(offset values) error = %v", err)
+	}
+	if _, err := persistEvidencePayloadFixture(ctx, evidenceRepository, capture.Snapshot(), evidenceCaptureFixtureRoute(capture, allocation.AllocationID)); err != nil {
+		t.Fatalf("PersistPayload() error = %v", err)
 	}
 	preparation := storeEvidenceRevisionPreparation(
 		t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
@@ -143,6 +154,7 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantNormalizesOffsetInt
 		t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 		"Offset intent evidence revision", "record-evidence-offset-intent", preparation,
 	)
+	command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
 
 	if _, err := recordRepository.CommitRevision(ctx, command); err != nil {
 		t.Fatalf("CommitRevision(offset intent) error = %v", err)
@@ -152,14 +164,18 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantNormalizesOffsetInt
 
 func TestPostgresIntegrationRecordEvidenceRevisionParticipantRollbackRestoresIntent(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-evidence-rollback", 4)
-	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture := signed.platform
+	runtimePool := signed.Runtime
+	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
+	allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-rollback", recordbirth.PurposeEvidence)
 	capture := storePreparedEvidenceCapture(
-		t, "rec_pgevidencerollback", "evs_pgevidencerollback", "evi_333333333333333333333333", now,
+		t, allocation.RecordID, "evs_pgevidencerollback", "evi_333333333333333333333333", now,
 	)
-	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture)
+	persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture, allocation.AllocationID)
 	preparation := storeEvidenceRevisionPreparation(
 		t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
 	)
@@ -167,16 +183,18 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantRollbackRestoresInt
 		t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 		"Evidence rollback", "record-evidence-rollback", preparation,
 	)
+	command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
 	afterEvidenceErr := errors.New("later participant failed")
 	failingParticipant := &storeRevisionParticipantStub{
 		name: "zz_after_evidence",
+		resources: func(context.Context, pgx.Tx, records.RevisionCommitCommand) (records.RevisionMutationResources, error) {
+			return records.RevisionMutationResources{}, nil
+		},
 		apply: func(context.Context, pgx.Tx, records.RevisionCommitted) error {
 			return afterEvidenceErr
 		},
 	}
-	recordRepository := newRecordsPostgresRepository(
-		t, runtimePool, NewRecordEvidenceRevisionParticipant(), failingParticipant,
-	)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant(), failingParticipant)
 
 	if result, err := recordRepository.CommitRevision(ctx, command); !errors.Is(err, afterEvidenceErr) {
 		t.Fatalf("CommitRevision(later failure) = (%#v, %v), want later participant failure", result, err)
@@ -184,7 +202,7 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantRollbackRestoresInt
 	assertRecordEvidenceParticipantCounts(t, ctx, fixture, capture.RecordID(), 0, 0, 0, 1)
 	assertEvidencePayloadExists(t, ctx, fixture, capture.Snapshot().Hash(), true)
 
-	retryRepository := newRecordsPostgresRepository(t, runtimePool, NewRecordEvidenceRevisionParticipant())
+	retryRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant())
 	if _, err := retryRepository.CommitRevision(ctx, command); err != nil {
 		t.Fatalf("CommitRevision(after rollback restored intent) error = %v", err)
 	}
@@ -193,18 +211,23 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantRollbackRestoresInt
 
 func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailClosed(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordsPostgresFixture(t, ctx)
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-evidence-intent-failures", 6)
-	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, allowRecordPlatformAdmissionGate)
-	recordRepository := newRecordsPostgresRepository(t, runtimePool, NewRecordEvidenceRevisionParticipant())
+	signed := NewImportAttachmentGCBackendFixture(t, ctx, attachments.BackendKindLocal, false)
+	seedRevisionMutationDiscoveryUsers(t, ctx, signed)
+	evidenceBirthTestSource(t, ctx, signed.platform.db)
+	fixture := signed.platform
+	runtimePool := signed.Runtime
+	evidenceRepository := NewPostgresEvidenceRepository(runtimePool, signed.Gate, nil)
+	recordRepository := newRevisionMutationAdmittedRepository(t, signed, NewRecordEvidenceRevisionParticipant())
 	now := recordEvidenceParticipantDatabaseNow(t, ctx, fixture)
 
 	t.Run("missing", func(t *testing.T) {
+		allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-missing", recordbirth.PurposeEvidence)
 		capture := storePreparedEvidenceCapture(
-			t, "rec_pgevidencemissing", "evs_pgevidencemissing", "evi_444444444444444444444444", now,
+			t, allocation.RecordID, "evs_pgevidencemissing", "evi_444444444444444444444444", now,
 		)
-		if _, err := evidenceRepository.PersistPayload(ctx, capture.Snapshot()); err != nil {
-			t.Fatalf("PersistPayload() error = %v", err)
+		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture, allocation.AllocationID)
+		if _, err := runtimePool.Exec(ctx, `delete from public.evidence_capture_intents where intent_id=$1`, capture.Intent().ID); err != nil {
+			t.Fatalf("remove capture intent: %v", err)
 		}
 		preparation := storeEvidenceRevisionPreparation(
 			t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
@@ -213,6 +236,7 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 			t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 			"Missing evidence intent", "record-evidence-missing", preparation,
 		)
+		command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
 		if result, err := recordRepository.CommitRevision(ctx, command); !errors.Is(err, ErrEvidencePersistenceConflict) {
 			t.Fatalf("CommitRevision(missing intent) = (%#v, %v), want conflict", result, err)
 		}
@@ -221,11 +245,15 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 	})
 
 	t.Run("expired", func(t *testing.T) {
+		allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-expired", recordbirth.PurposeEvidence)
 		capture := storePreparedEvidenceCapture(
-			t, "rec_pgevidenceexpired", "evs_pgevidenceexpired", "evi_555555555555555555555555",
-			now.Add(-evidence.CaptureIntentTTL-time.Minute),
+			t, allocation.RecordID, "evs_pgevidenceexpired", "evi_555555555555555555555555",
+			now,
 		)
-		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture)
+		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture, allocation.AllocationID)
+		if _, err := fixture.db.Exec(ctx, `update public.evidence_capture_intents set created_at=transaction_timestamp()-interval '16 minutes', valid_until=transaction_timestamp()-interval '1 minute' where intent_id=$1`, capture.Intent().ID); err != nil {
+			t.Fatalf("expire capture intent: %v", err)
+		}
 		preparation := storeEvidenceRevisionPreparation(
 			t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
 		)
@@ -233,6 +261,7 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 			t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 			"Expired evidence intent", "record-evidence-expired", preparation,
 		)
+		command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
 		if result, err := recordRepository.CommitRevision(ctx, command); !errors.Is(err, ErrEvidencePersistenceConflict) {
 			t.Fatalf("CommitRevision(expired intent) = (%#v, %v), want conflict", result, err)
 		}
@@ -240,10 +269,11 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 	})
 
 	t.Run("persisted drift", func(t *testing.T) {
+		allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-drift", recordbirth.PurposeEvidence)
 		capture := storePreparedEvidenceCapture(
-			t, "rec_pgevidencedrift", "evs_pgevidencedrift", "evi_888888888888888888888888", now,
+			t, allocation.RecordID, "evs_pgevidencedrift", "evi_888888888888888888888888", now,
 		)
-		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture)
+		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture, allocation.AllocationID)
 		if _, err := fixture.db.Exec(ctx, `
 			update public.evidence_capture_intents
 			set source_digest = decode(repeat('ff', 32), 'hex')
@@ -257,6 +287,7 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 			t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 			"Drifted evidence intent", "record-evidence-drift", preparation,
 		)
+		command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
 		if result, err := recordRepository.CommitRevision(ctx, command); !errors.Is(err, ErrEvidencePersistenceConflict) {
 			t.Fatalf("CommitRevision(drifted intent) = (%#v, %v), want conflict", result, err)
 		}
@@ -265,10 +296,11 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 	})
 
 	t.Run("replayed", func(t *testing.T) {
+		allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-first-use", recordbirth.PurposeEvidence)
 		capture := storePreparedEvidenceCapture(
-			t, "rec_pgevidencereplayed", "evs_pgevidencereplayed", "evi_666666666666666666666666", now,
+			t, allocation.RecordID, "evs_pgevidencereplayed", "evi_666666666666666666666666", now,
 		)
-		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture)
+		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture, allocation.AllocationID)
 		preparation := storeEvidenceRevisionPreparation(
 			t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
 		)
@@ -276,6 +308,7 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 			t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 			"First intent use", "record-evidence-first-use", preparation,
 		)
+		firstCommand = prepareRevisionBirthCommand(t, ctx, signed, allocation, firstCommand)
 		first, err := recordRepository.CommitRevision(ctx, firstCommand)
 		if err != nil {
 			t.Fatalf("CommitRevision(first use) error = %v", err)
@@ -291,10 +324,11 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 	})
 
 	t.Run("double consumed in one transaction", func(t *testing.T) {
+		allocation := reserveRevisionBirth(t, ctx, signed, storeEvidenceParticipantActor(t), "record-evidence-double", recordbirth.PurposeEvidence)
 		capture := storePreparedEvidenceCapture(
-			t, "rec_pgevidencedouble", "evs_pgevidencedouble", "evi_777777777777777777777777", now,
+			t, allocation.RecordID, "evs_pgevidencedouble", "evi_777777777777777777777777", now,
 		)
-		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture)
+		persistRecordEvidenceParticipantPayloadAndIntent(t, ctx, evidenceRepository, capture, allocation.AllocationID)
 		preparation := storeEvidenceRevisionPreparation(
 			t, capture.RecordID(), []evidence.PreparedCapture{capture}, nil, []string{capture.SnapshotID()},
 		)
@@ -302,7 +336,8 @@ func TestPostgresIntegrationRecordEvidenceRevisionParticipantIntentFailuresFailC
 			t, recordplatform.OperationKindRecordCreate, capture.RecordID(), "", 0, 0,
 			"Double intent consume", "record-evidence-double", preparation,
 		)
-		doubleRepository := newRecordsPostgresRepository(t, runtimePool, doubleRecordEvidenceParticipant{
+		command = prepareRevisionBirthCommand(t, ctx, signed, allocation, command)
+		doubleRepository := newRevisionMutationAdmittedRepository(t, signed, doubleRecordEvidenceParticipant{
 			delegate: NewRecordEvidenceRevisionParticipant(),
 		})
 		if result, err := doubleRepository.CommitRevision(ctx, command); !errors.Is(err, ErrEvidencePersistenceConflict) {
@@ -317,6 +352,10 @@ type doubleRecordEvidenceParticipant struct {
 }
 
 func (doubleRecordEvidenceParticipant) Name() string { return "evidence_double_apply" }
+
+func (participant doubleRecordEvidenceParticipant) MutationResources(ctx context.Context, tx pgx.Tx, command records.RevisionCommitCommand) (records.RevisionMutationResources, error) {
+	return participant.delegate.MutationResources(ctx, tx, command)
+}
 
 func (participant doubleRecordEvidenceParticipant) ApplyRevision(
 	ctx context.Context,
@@ -355,22 +394,26 @@ func recordEvidenceParticipantCommand(
 	return command
 }
 
-func persistRecordEvidenceParticipantPayloadAndIntent(
-	t *testing.T,
-	ctx context.Context,
-	repository *PostgresEvidenceRepository,
-	capture evidence.PreparedCapture,
-) {
-	t.Helper()
-	if _, err := repository.PersistPayload(ctx, capture.Snapshot()); err != nil {
-		t.Fatalf("PersistPayload() error = %v", err)
+func evidenceCaptureFixtureRoute(capture evidence.PreparedCapture, allocationID string) evidencePayloadCommandRoute {
+	actor := recordauth.ActorScope{UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault}
+	return evidencePayloadCommandRoute{
+		Route: "capture", ActorID: actor.UserID, ActorScopeDigest: fmt.Sprintf("%x", actor.CanonicalHash()),
+		AllocationID: allocationID, RecordID: capture.RecordID(), SnapshotID: capture.SnapshotID(), IntentID: capture.Intent().ID,
 	}
-	intent := capture.Intent()
-	preview := capture.Preview()
-	if err := repository.PersistCaptureIntent(
-		ctx, capture.RecordID(), capture.SnapshotID(), intent, preview,
-	); err != nil {
+}
+
+func persistRecordEvidenceParticipantPayloadAndIntent(t *testing.T, ctx context.Context,
+	repository *PostgresEvidenceRepository, capture evidence.PreparedCapture, allocationIDs ...string) {
+	t.Helper()
+	allocationID := ""
+	if len(allocationIDs) != 0 {
+		allocationID = allocationIDs[0]
+	}
+	if err := persistEvidenceCaptureIntentFixture(ctx, repository, capture.RecordID(), capture.SnapshotID(), capture.Intent(), capture.Preview(), allocationID); err != nil {
 		t.Fatalf("PersistCaptureIntent() error = %v", err)
+	}
+	if _, err := persistEvidencePayloadFixture(ctx, repository, capture.Snapshot(), evidenceCaptureFixtureRoute(capture, allocationID)); err != nil {
+		t.Fatalf("PersistPayload() error = %v", err)
 	}
 }
 

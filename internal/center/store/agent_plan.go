@@ -56,6 +56,10 @@ const selectAgentPlanAssignmentsSQL = `
 		and t.lifecycle_status = 'active'
 		and t.run_status = any($1)
 		and t.execution_monitoring_instance_labels && $2
+		and not exists (select 1 from public.source_retirement_barriers b
+			where b.project_id='default' and b.source_kind='target' and b.source_id=t.target_id)
+		and not exists (select 1 from public.source_retirement_coverage_unknown u
+			where u.project_id='default' and u.source_kind='target' and u.source_id=t.target_id)
 	order by t.target_id, p.probe_item_id`
 
 type agentPlanQueryer interface {
@@ -64,7 +68,7 @@ type agentPlanQueryer interface {
 }
 
 type PostgresAgentPlanRepository struct {
-	db agentPlanQueryer
+	beginTx func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
 type agentPlanSettingsSnapshot struct {
@@ -76,16 +80,38 @@ type agentPlanSettingsSnapshot struct {
 }
 
 func NewPostgresAgentPlanRepository(db *pgxpool.Pool) *PostgresAgentPlanRepository {
-	return &PostgresAgentPlanRepository{db: db}
+	return &PostgresAgentPlanRepository{beginTx: db.BeginTx}
 }
 
 var _ agentplan.Repository = (*PostgresAgentPlanRepository)(nil)
 
 func (r *PostgresAgentPlanRepository) BuildSyncPlan(ctx context.Context, monitoringInstanceID string) (agentplan.SyncPlan, error) {
-	return buildSyncPlan(ctx, r.db, monitoringInstanceID)
+	if r.beginTx == nil {
+		return agentplan.SyncPlan{}, errors.New("agent plan repository requires transaction support")
+	}
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return agentplan.SyncPlan{}, fmt.Errorf("begin sync plan transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return agentplan.SyncPlan{}, err
+	}
+	plan, err := buildSyncPlan(ctx, tx, monitoringInstanceID)
+	if err != nil {
+		return agentplan.SyncPlan{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return agentplan.SyncPlan{}, fmt.Errorf("commit sync plan transaction: %w", err)
+	}
+	return plan, nil
 }
 
 func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, monitoringInstanceID string) (agentplan.SyncPlan, error) {
+	// Both standalone plan reads and sync hold admission and shared graph here.
+	if err := assertMonitoringSourceWritable(ctx, queryer, monitoringInstanceID); err != nil {
+		return agentplan.SyncPlan{}, err
+	}
 	var (
 		labels                     []string
 		lifecycleStatus            string

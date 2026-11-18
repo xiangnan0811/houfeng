@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/assetdomains"
@@ -240,6 +242,69 @@ func TestVPSCreateIdempotencyLostResponsePostgres(t *testing.T) {
 			t.Fatalf("monitoring link rows = %d, want 1", linkCount)
 		}
 	})
+}
+
+func TestCreateAssetServiceIdempotentGraphLockCancellationLeavesNoEffectsPostgres(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := openTemporarySubscriptionIdempotencyPostgresSchema(t, ctx)
+	vps := createVPSStateRepairDependencyStatusVPS(t, ctx, pool, "service graph lock cancellation")
+	input := assetservices.CreateInput{
+		VPSID: vps.VPSID, Name: "Blocked service", ServiceType: assetservices.ServiceTypeAPI,
+		Status: assetservices.ServiceStatusActive,
+	}
+	const key = "service-graph-cancellation"
+
+	holder, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		t.Fatalf("begin graph holder error type = %T", err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	if err := lockAssetGraph(ctx, holder); err != nil {
+		t.Fatalf("hold graph lock error type = %T", err)
+	}
+
+	repository := NewPostgresAssetServiceRepository(pool)
+	requestCtx, cancelRequest := context.WithCancel(ctx)
+	defer cancelRequest()
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := repository.CreateAssetServiceIdempotent(requestCtx, input, key)
+		result <- err
+	}()
+	if err := waitForBlockedLifecycleSessions(ctx, pool, 1); err != nil {
+		t.Fatalf("service create graph wait error type = %T", err)
+	}
+	cancelRequest()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("blocked service create error type = %T, want context cancellation", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("blocked service create did not stop before the test deadline")
+	}
+	var services, receipts, associations int
+	if err := pool.QueryRow(ctx, `select
+		(select count(*) from asset_services where name = $1),
+		(select count(*) from asset_service_create_idempotency where idempotency_key = $2),
+		(select count(*) from asset_service_associations where vps_id = $3)`,
+		input.Name, key, vps.VPSID).Scan(&services, &receipts, &associations); err != nil {
+		t.Fatalf("read canceled create effects error type = %T", err)
+	}
+	if services != 0 || receipts != 0 || associations != 0 {
+		t.Fatalf("canceled create effects remain: services=%t receipts=%t associations=%t", services != 0, receipts != 0, associations != 0)
+	}
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatalf("release graph lock error type = %T", err)
+	}
+	created, replayed, err := repository.CreateAssetServiceIdempotent(ctx, input, key)
+	if err != nil || replayed || created.ServiceID == "" {
+		t.Fatalf("create after canceled lock: error type = %T, replayed = %t, missing ID = %t", err, replayed, created.ServiceID == "")
+	}
+	assertIdempotentRowCounts(t, ctx, pool,
+		`select count(*) from asset_services where name = $1`, input.Name,
+		`select count(*) from asset_service_create_idempotency where idempotency_key = $1`, key)
 }
 
 func assertIdempotentRowCounts(

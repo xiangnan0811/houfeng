@@ -20,6 +20,9 @@ func recordTrustedLiveSignal(ctx context.Context, tx syncBatchTx, batch syncing.
 	if batch.LiveSignal == nil {
 		return false, nil
 	}
+	if err := assertMonitoringSourceWritable(ctx, tx, batch.MonitoringInstanceID); err != nil {
+		return false, err
+	}
 	// Archive safety compares against the same database clock. Process wall
 	// time may differ from PostgreSQL and must never make a fresh signal stale.
 	err := tx.QueryRow(ctx, `update agent_replay_states set live_sequence_high=$2

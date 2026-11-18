@@ -162,7 +162,7 @@ func testPostgresIntegrationAgentReplayFresh(t *testing.T) {
 	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 	db := fixture.openRolePool(t, ctx, fixture.migratorRole)
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
-	manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil || manifest.ManifestRevision != 1 {
 		t.Fatalf("fresh C80 convergence = %#v/%v", manifest, err)
 	}
@@ -174,11 +174,11 @@ func testPostgresIntegrationAgentReplayFresh(t *testing.T) {
 	assertAppACLCurrentReplayRuntime(t, ctx, runtimeDB)
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)
-	if len(before.Ledger) != 81 || before.Ledger[80].Name != appACLCurrentP80Migration {
-		t.Fatalf("fresh C80 ledger must contain 81 sources ending 0080: %#v", before.Ledger)
+	if len(before.Ledger) != 82 || before.Ledger[81].Name != recordDeletionSuccessorMigration {
+		t.Fatalf("fresh current ledger must contain 82 sources ending 0081: %#v", before.Ledger)
 	}
 	facts := readAppACLCurrentReplayFacts(t, ctx, db)
-	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil || repeated.ManifestDigest != manifest.ManifestDigest || !reflect.DeepEqual(before, readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)) || readAppACLCurrentReplayFacts(t, ctx, db) != facts {
 		t.Fatalf("fresh C80 repeat mutated durable state: %v", err)
 	}
@@ -200,13 +200,13 @@ func testPostgresIntegrationAgentReplayUpgrade(t *testing.T, chained bool) {
 	assertAppACLCurrentReplayTables(t, ctx, db, false)
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-	manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil || manifest.ManifestRevision != previous.ManifestRevision+1 || manifest.PreviousManifestDigest != previous.ManifestDigest {
 		t.Fatalf("C79 to C80 exact successor = %#v/%v", manifest, err)
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)
 	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
-	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP80Migration)
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP80Migration, recordDeletionSuccessorMigration)
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatal("C80 did not append exactly one manifest")
 	}
@@ -222,7 +222,7 @@ func testPostgresIntegrationAgentReplayUpgrade(t *testing.T, chained bool) {
 		t.Fatal(err)
 	}
 	assertAppACLCurrentReplayRuntime(t, ctx, runtimeDB)
-	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	if err != nil || repeated.ManifestDigest != manifest.ManifestDigest || !reflect.DeepEqual(after, readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)) || readAppACLCurrentReplayFacts(t, ctx, db) != facts {
 		t.Fatalf("C80 repeat changed durable state: %v", err)
 	}
@@ -341,7 +341,7 @@ func testPostgresIntegrationAgentReplayRollback(t *testing.T, cutpoint string) {
 			return manifest, injected
 		}
 	}
-	_, err := convergeAppACLCurrentWithDependencies(ctx, db.BeginTx, fixture.runtimeRole, fixture.adminRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
+	_, err := convergeAppACLCurrentWithDependencies(ctx, db.BeginTx, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole, migrations.FS, appACLCurrentMigrationFragments, dependencies)
 	if !reached || !errors.Is(err, injected) {
 		t.Fatalf("C80 %s cutpoint not reached: %t/%v", cutpoint, reached, err)
 	}
@@ -355,7 +355,7 @@ func testPostgresIntegrationAgentReplayRollback(t *testing.T, cutpoint string) {
 	}
 	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
 	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
-	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err != nil {
+	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 		t.Fatal(err)
 	}
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
@@ -371,7 +371,7 @@ func testPostgresIntegrationAgentReplayDrift(t *testing.T, current bool, drift s
 	seedAppACLCurrentC79(t, ctx, fixture, db, false)
 	seedAppACLCurrentReplayFacts(t, ctx, db, true)
 	if current {
-		if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err != nil {
+		if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -415,7 +415,7 @@ func testPostgresIntegrationAgentReplayDrift(t *testing.T, current bool, drift s
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil {
 		t.Fatal("admitted predecessor or drifted current ACL")
 	}
-	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole); err == nil {
+	if _, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole); err == nil {
 		t.Fatal("convergence accepted/repaired unapproved ACL drift")
 	}
 	if !reflect.DeepEqual(before, readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)) || facts != readAppACLCurrentReplayFacts(t, ctx, db) {
@@ -435,7 +435,7 @@ func testPostgresIntegrationAgentReplayDropDependency(t *testing.T) {
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)
-	_, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+	_, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole, fixture.deletionWorkerRole)
 	requirePostgresSQLState(t, err, "2BP01")
 	assertAppACLCurrentReplayTables(t, ctx, db, false)
 	if !reflect.DeepEqual(before, readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)) {
@@ -448,6 +448,7 @@ func testPostgresIntegrationAgentReplayDropDependency(t *testing.T) {
 // have no replay-state table and are returned untouched.
 func appACLCurrentCatalogBeforeReplay(t *testing.T, before, after AppACLEffectiveCatalogSnapshotR1) AppACLEffectiveCatalogSnapshotR1 {
 	t.Helper()
+	after = appACLCurrentCatalogBeforeDeletion(t, before, after)
 	isNew := func(class AppACLObjectClass, schema, identity string) bool {
 		return schema == "public" && ((class == AppACLObjectClassTable && (identity == "agent_replay_states" || identity == "agent_batch_receipts")) ||
 			(class == AppACLObjectClassFunction && (identity == "enforce_agent_replay_state()" || identity == "enforce_agent_batch_receipt()")))

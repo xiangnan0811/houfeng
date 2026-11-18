@@ -1462,6 +1462,7 @@ type appACLConvergencePostgresFixture struct {
 	bootstrapOwner string
 	runtime        string
 	admin          string
+	deletionWorker string
 	migrator       string
 	rolePasswords  map[string]string
 }
@@ -1471,16 +1472,17 @@ func newAppACLConvergencePostgresFixture(t *testing.T, ctx context.Context) appA
 	db := openTemporaryPostgresDatabase(t, ctx)
 	roles := appACLEffectiveCatalogTestRoleNames()
 	fixture := appACLConvergencePostgresFixture{
-		db:            db,
-		runtime:       roles.centerRuntime,
-		admin:         roles.platformAdmin,
-		migrator:      roles.migrator,
-		rolePasswords: make(map[string]string, 3),
+		db:             db,
+		runtime:        roles.centerRuntime,
+		admin:          roles.platformAdmin,
+		deletionWorker: "houfeng_deletion_worker_" + roles.suffix,
+		migrator:       roles.migrator,
+		rolePasswords:  make(map[string]string, 4),
 	}
 	if err := db.QueryRow(ctx, `select pg_catalog.current_database(), current_user`).Scan(&fixture.databaseName, &fixture.bootstrapOwner); err != nil {
 		t.Fatalf("read fresh convergence database identity: %v", err)
 	}
-	for _, role := range []string{fixture.runtime, fixture.admin, fixture.migrator} {
+	for _, role := range []string{fixture.runtime, fixture.admin, fixture.deletionWorker, fixture.migrator} {
 		password := appACLEffectiveCatalogTemporaryPassword(t)
 		fixture.rolePasswords[role] = password
 		quotedRole := quotePostgresIdentifier(role)

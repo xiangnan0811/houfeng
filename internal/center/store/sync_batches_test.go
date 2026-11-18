@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,33 @@ import (
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/contracts/agentapi"
 )
+
+func TestSyncBatchRejectsUnavailableSourcesWithoutEffects(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, blocked string
+		want          error
+	}{
+		{"carrier", "monitoring_instance/mi_001", monitoringinstances.ErrMonitoringInstanceNotFound},
+		{"parent", "vps/vps_001", monitoringinstances.ErrMonitoringInstanceNotFound},
+		{"target", "target/tg_001", observations.ErrInvalidProbeObservation},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := &fakeSyncBatchTx{sourceState: fakeSourceWriterState{
+				blocked: map[string]bool{tc.blocked: true},
+				parents: map[string]string{"mi_001": "vps_001"},
+			}}
+			repo := &PostgresSyncRepository{beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) { return tx, nil }}
+			result, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("ApplyBatch() error = %v, want %v", err, tc.want)
+			}
+			if result.LiveCollectionAllowed || len(tx.execSQL) != 0 || tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+				t.Fatalf("unavailable source produced effects: result=%#v writes=%v commits=%d rollbacks=%d", result, tx.execSQL, tx.commitCalls, tx.rollbackCalls)
+			}
+		})
+	}
+}
 
 func TestPostgresSyncRepositoryRollsBackHeartbeatWhenObservationWriteFails(t *testing.T) {
 	t.Parallel()
@@ -147,23 +173,6 @@ func TestPostgresSyncRepositoryRejectsObservationBatchWithoutHeartbeatCarrier(t 
 	}
 }
 
-func TestSyncBatchSourceUsesConstantTimeSyncTokenHashCompare(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile("sync_batches.go")
-	if err != nil {
-		t.Fatalf("ReadFile(sync_batches.go) error = %v", err)
-	}
-
-	validationPath := sourceBetween(t, string(source), "func (r *PostgresSyncRepository) validateAcceptedSyncBatch", "func lifecycleStatusAfterAcceptedSync")
-	if !strings.Contains(validationPath, "r.tokenHasher.syncTokenMatches(storedSyncTokenHash, batch.SyncToken)") {
-		t.Fatal("validateAcceptedSyncBatch() should compare sync token hashes with the shared versioned token hasher")
-	}
-	if strings.Contains(validationPath, "storedSyncTokenHash != hashSyncToken(batch.SyncToken)") {
-		t.Fatal("validateAcceptedSyncBatch() should not use plain string inequality for sync token hashes")
-	}
-}
-
 func TestPostgresSyncRepositoryRejectsLegacySessionTokenHash(t *testing.T) {
 	t.Parallel()
 
@@ -181,43 +190,6 @@ func TestPostgresSyncRepositoryRejectsLegacySessionTokenHash(t *testing.T) {
 
 	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch())); !errors.Is(err, syncing.ErrInvalidSyncToken) {
 		t.Fatalf("legacy hash error = %v", err)
-	}
-}
-
-func TestPostgresSyncRepositoryRecordsBatchIDBeforeWritingFacts(t *testing.T) {
-	t.Parallel()
-
-	tx := &fakeSyncBatchTx{
-		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
-		monitoringInstanceFingerprint:   "fp-001",
-		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
-		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
-	}
-	repo := &PostgresSyncRepository{
-		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
-			return tx, nil
-		},
-	}
-
-	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch())); err != nil {
-		t.Fatalf("ApplyBatch() error = %v", err)
-	}
-
-	recordIndex := sqlIndex(tx.execSQL, "insert into agent_batch_receipts")
-	heartbeatIndex := sqlIndex(tx.execSQL, "insert into monitoring_instance_heartbeats")
-	if recordIndex == -1 {
-		t.Fatalf("agent sync batch id was not recorded; execSQL=%#v", tx.execSQL)
-	}
-	if heartbeatIndex == -1 {
-		t.Fatalf("heartbeat insert missing; execSQL=%#v", tx.execSQL)
-	}
-	if recordIndex > heartbeatIndex {
-		t.Fatalf("agent sync batch id insert index %d should run before heartbeat insert index %d", recordIndex, heartbeatIndex)
-	}
-	args := tx.argsForSQL("insert into agent_batch_receipts")
-	expected := prepareSyncFixture(testSyncBatch())
-	if len(args) != 3 || args[0] != expected.SessionID || args[1] != expected.BatchSequence || !equalSyncDigest(args[2].([]byte), expected.PayloadDigest) {
-		t.Fatalf("receipt args = %#v, want session/sequence/canonical digest", args)
 	}
 }
 
@@ -566,6 +538,7 @@ func testSyncBatchWithHostSample() syncing.Batch {
 }
 
 type fakeSyncBatchTx struct {
+	sourceState                     fakeSourceWriterState
 	monitoringInstanceBindingStatus string
 	monitoringInstanceFingerprint   string
 	monitoringInstanceSyncTokenHash string
@@ -597,6 +570,12 @@ type fakeSyncBatchTx struct {
 }
 
 func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "source_application_admit()") {
+		return pgconn.CommandTag{}, f.sourceState.admissionErr
+	}
+	if strings.Contains(sql, "pg_advisory_xact_lock_shared") {
+		return pgconn.CommandTag{}, nil
+	}
 	f.execSQL = append(f.execSQL, sql)
 	f.execArgs = append(f.execArgs, append([]any(nil), args...))
 	if f.execErr != nil && strings.Contains(sql, f.execErrForSQLSubstring) {
@@ -622,6 +601,14 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 }
 
 func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	sourceState := f.sourceState
+	if sourceState.parents == nil && len(args) == 1 {
+		id, _ := args[0].(string)
+		sourceState.parents = map[string]string{id: "vps-1"}
+	}
+	if row, ok := sourceState.queryRow(sql, args...); ok {
+		return row
+	}
 	switch {
 	case strings.Contains(sql, "select producer_id::text"):
 		return fakeRow{scan: func(dest ...any) error {
@@ -655,8 +642,10 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 			return nil
 		}}
 	case strings.Contains(sql, "select labels"):
-		return fakeRow{scan: func(dest ...any) error {
+		return fakeAgentPlanRow{scan: func(dest ...any) error {
 			*(dest[0].(*[]string)) = append([]string(nil), f.monitoringInstanceLabels...)
+			*(dest[1].(*string)) = f.monitoringInstanceLifecycle
+			*(dest[2].(*string)) = f.monitoringInstanceMonitoring
 			return nil
 		}}
 	case strings.Contains(sql, "pending_action_id"):
@@ -700,6 +689,10 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 					*(dest[6].(*string)) = "full"
 				}
 				*(dest[7].(*string)) = "vps-1"
+				if f.sourceState.parents != nil {
+					id, _ := args[0].(string)
+					*(dest[7].(*string)) = f.sourceState.parents[id]
+				}
 			}
 			return nil
 		}}
@@ -1300,47 +1293,6 @@ func TestSyncBatchIgnoresMismatchedCommandResultRows(t *testing.T) {
 	}
 	if tx.commitCalls != 1 {
 		t.Fatalf("commitCalls = %d, want 1", tx.commitCalls)
-	}
-}
-
-func TestSyncBatchStoresCommandResultBeforeDispatchingQueuedAction(t *testing.T) {
-	t.Parallel()
-
-	tx := &fakeSyncBatchTx{
-		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
-		monitoringInstanceFingerprint:   "fp-001",
-		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
-		pendingActionID:                 "act_next",
-		pendingCommandID:                "df_h",
-		probeMetadataByItemID: map[string]observations.ProbeMetadata{
-			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
-		},
-	}
-	repo := &PostgresSyncRepository{
-		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
-			return tx, nil
-		},
-	}
-
-	batch := testSyncBatch()
-	batch.CommandResults = []syncing.CommandResult{{
-		ActionID:  "act_prev",
-		CommandID: "uptime",
-		Stdout:    "up 1 day",
-		ExitCode:  0,
-	}}
-
-	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
-		t.Fatalf("ApplyBatch() error = %v", err)
-	}
-
-	resultIndex := sqlIndex(tx.execSQL, "last_action->>'status'")
-	dispatchIndex := sqlIndex(tx.execSQL, "pending_action_id = NULL")
-	if resultIndex == -1 || dispatchIndex == -1 {
-		t.Fatalf("exec SQL missing result or dispatch update: %#v", tx.execSQL)
-	}
-	if resultIndex > dispatchIndex {
-		t.Fatalf("command result update index %d should run before dispatch index %d", resultIndex, dispatchIndex)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordidentity"
 )
 
 const previewDigestDomainV1 = "houfeng.evidence.capture-preview.v1"
@@ -33,10 +34,11 @@ var (
 )
 
 type CapturePreviewRequest struct {
-	Actor      ActorScope
-	RecordID   string
-	SnapshotID string
-	Selection  Selection
+	Actor        ActorScope
+	AllocationID string
+	RecordID     string
+	SnapshotID   string
+	Selection    Selection
 }
 
 type CapturePreviewResult struct {
@@ -73,8 +75,18 @@ type SnapshotReadState struct {
 	SourceAvailable     bool
 }
 
+type CaptureIntentPersistence struct {
+	Actor         ActorScope
+	AllocationID  string
+	RecordID      string
+	SnapshotID    string
+	Intent        Intent
+	Preview       Preview
+	Authorization AuthorizationScope
+}
+
 type CaptureIntentStore interface {
-	PersistCaptureIntent(context.Context, string, string, Intent, Preview) error
+	PersistCaptureIntent(context.Context, CaptureIntentPersistence) error
 }
 
 type SnapshotReadSource interface {
@@ -190,7 +202,7 @@ func (service *Service) CapturePreview(
 ) (CapturePreviewResult, error) {
 	if ctx == nil || service == nil || len(service.registry.kinds) == 0 ||
 		nilRevisionPreparationDependency(service.intents) ||
-		!validClosedPreparedID(request.RecordID, "rec_") || !ValidSnapshotID(request.SnapshotID) ||
+		!recordidentity.IsValid(request.RecordID) || !ValidSnapshotID(request.SnapshotID) ||
 		request.Selection.Key.Kind == "" || request.Selection.Key.SchemaVersion == 0 {
 		return CapturePreviewResult{}, ErrInvalidCapturePreviewRequest
 	}
@@ -235,7 +247,14 @@ func (service *Service) CapturePreview(
 	if preview.QuotaOutcome.Status == QuotaExceeded || preview.QuotaOutcome.Status == QuotaUnavailable {
 		return result, nil
 	}
-	if err := service.intents.PersistCaptureIntent(ctx, request.RecordID, request.SnapshotID, intent, preview); err != nil {
+	authorization, err := kind.Authorize(ctx, actor.Clone(), cloneSelection(selection))
+	if err != nil {
+		return CapturePreviewResult{}, err
+	}
+	if err := service.intents.PersistCaptureIntent(ctx, CaptureIntentPersistence{
+		Actor: actor.Clone(), AllocationID: request.AllocationID, RecordID: request.RecordID, SnapshotID: request.SnapshotID,
+		Intent: intent, Preview: clonePreview(preview), Authorization: authorization,
+	}); err != nil {
 		return CapturePreviewResult{}, err
 	}
 	return result, nil
@@ -257,7 +276,7 @@ func (service *Service) ReadSnapshot(
 	if err != nil {
 		return ReadSnapshotResult{}, err
 	}
-	if state.SnapshotID != request.SnapshotID || !validClosedPreparedID(state.RecordID, "rec_") ||
+	if state.SnapshotID != request.SnapshotID || !recordidentity.IsValid(state.RecordID) ||
 		state.RecordScope.Version != recordauth.ResourceScopeVersionV1 || state.RecordScope.ProjectID != actor.ProjectID {
 		return ReadSnapshotResult{}, ErrInvalidSnapshotReadState
 	}

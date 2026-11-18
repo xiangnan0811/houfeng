@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +11,7 @@ import (
 
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordbirth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -21,126 +22,65 @@ func TestSaveComparisonRecordHTTPRejectsForgedExpiredStaleAndClientItems(t *test
 	tests := []struct {
 		name     string
 		save     recordComparisonSaveService
-		body     string
+		token    string
+		items    bool
 		want     int
 		wantCode string
 	}{
-		{
-			name:     "capability off",
-			save:     nil,
-			body:     comparisonSaveBody(draft, "cmp1.off.payload.mac"),
-			want:     http.StatusNotFound,
-			wantCode: "resource_not_found",
-		},
-		{
-			name:     "forged",
-			save:     recordComparisonSaveStub{err: evidence.ErrComparisonIntentInvalid},
-			body:     comparisonSaveBody(draft, "cmp1.forged.payload.mac"),
-			want:     http.StatusUnprocessableEntity,
-			wantCode: "comparison_intent_invalid",
-		},
-		{
-			name:     "expired",
-			save:     recordComparisonSaveStub{err: evidence.ErrComparisonIntentExpired},
-			body:     comparisonSaveBody(draft, "cmp1.expired.payload.mac"),
-			want:     http.StatusUnprocessableEntity,
-			wantCode: "comparison_intent_expired",
-		},
-		{
-			name:     "stale",
-			save:     recordComparisonSaveStub{err: evidence.ErrComparisonIntentStale},
-			body:     comparisonSaveBody(draft, "cmp1.stale.payload.mac"),
-			want:     http.StatusUnprocessableEntity,
-			wantCode: "comparison_intent_stale",
-		},
-		{
-			name:     "client evidence items",
-			save:     recordComparisonSaveStub{},
-			body:     `{"record_id":"rec_comparisonsave","draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"comparison_intent":"cmp1.x.y.z","evidence_items":[{"existing_snapshot_id":"evs_httpcontract"}]}`,
-			want:     http.StatusBadRequest,
-			wantCode: "invalid_request",
-		},
+		{name: "capability off", token: "cmp1.off.payload.mac", want: http.StatusNotFound, wantCode: "resource_not_found"},
+		{name: "forged", save: recordComparisonSaveStub{err: evidence.ErrComparisonIntentInvalid}, token: "cmp1.forged.payload.mac", want: http.StatusUnprocessableEntity, wantCode: "comparison_intent_invalid"},
+		{name: "expired", save: recordComparisonSaveStub{err: evidence.ErrComparisonIntentExpired}, token: "cmp1.expired.payload.mac", want: http.StatusUnprocessableEntity, wantCode: "comparison_intent_expired"},
+		{name: "stale", save: recordComparisonSaveStub{err: evidence.ErrComparisonIntentStale}, token: "cmp1.stale.payload.mac", want: http.StatusUnprocessableEntity, wantCode: "comparison_intent_stale"},
+		{name: "client evidence items", save: recordComparisonSaveStub{}, token: "cmp1.x.y.z", items: true, want: http.StatusBadRequest, wantCode: "invalid_request"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			options, _ := newHandlerBirthFixture(t)
+			options.ComparisonSave = tt.save
 			handler := RecordsWithOptions(&recordsHandlerApplicationStub{
-				preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) {
-					return draft, nil
-				},
+				preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) { return draft, nil },
 				createRecord: func(context.Context, records.RecordCreateRequest) (records.RevisionCommitResult, error) {
 					t.Fatal("CreateRecord must not run on rejected comparison save")
 					return records.RevisionCommitResult{}, nil
 				},
-			}, RecordHandlerOptions{ComparisonSave: tt.save})
-			request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", tt.body)
-			request.Header.Set("Idempotency-Key", "comparison-save-"+tt.name)
+			}, options)
+			allocation := mustHandlerAllocation(t, handler, actor, recordbirth.PurposeComparison, "comparison-allocation")
+			body := comparisonSaveBody(t, allocation, draft, tt.token)
+			if tt.items {
+				body = body[:len(body)-1] + `,"evidence_items":[{"existing_snapshot_id":"evs_httpcontract"}]}`
+			}
+			request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
+			request.Header.Set("Idempotency-Key", "comparison-save-test")
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, request)
-			if recorder.Code != tt.want {
-				t.Fatalf("status = %d body=%s, want %d", recorder.Code, recorder.Body.String(), tt.want)
-			}
-			var payload recordErrorResponse
-			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil || payload.Code != tt.wantCode {
-				t.Fatalf("error payload = %#v (%v), want %q", payload, err, tt.wantCode)
-			}
+			assertRecordsHandlerError(t, recorder, tt.want, tt.wantCode)
 		})
 	}
 }
 
-func TestSaveComparisonRecordHTTPReplaysExpiredIntentOnlyWhenKeyCompleted(t *testing.T) {
+func TestSaveComparisonRecordHTTPExpiredIntentCannotCreateWithoutCompletedResult(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
 	draft := mustRecordsHandlerDraft(t, actor, "", "")
-	plan := mustHandlerComparisonSavePlan(t, "rec_comparisonsave")
-	tests := []struct {
-		name      string
-		completed bool
-		want      int
-		wantCode  string
-		create    bool
-	}{
-		{name: "new key", completed: false, want: http.StatusUnprocessableEntity, wantCode: "comparison_intent_expired"},
-		{name: "same key replay", completed: true, want: http.StatusCreated, create: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			created := false
+	for _, completedHint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("completed_hint_%t", completedHint), func(t *testing.T) {
+			options, _ := newHandlerBirthFixture(t)
+			options.ComparisonSave = recordComparisonSaveStub{err: evidence.ErrComparisonIntentExpired}
+			options.CompletedIdempotency = func(context.Context, recordauth.ActorScope, recordplatform.OperationKind, string) (bool, error) {
+				return completedHint, nil
+			}
 			handler := RecordsWithOptions(&recordsHandlerApplicationStub{
-				preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) {
-					return draft, nil
-				},
+				preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) { return draft, nil },
 				createRecord: func(context.Context, records.RecordCreateRequest) (records.RevisionCommitResult, error) {
-					created = true
-					if !tt.create {
-						t.Fatal("CreateRecord must not run for a new expired comparison save")
-					}
-					return records.RevisionCommitResult{
-						RecordID: "rec_comparisonsave", RevisionID: "rrv_comparisonsave", RevisionNo: 1,
-						LockVersion: 1, AuthorizationEpoch: 1, Lifecycle: records.LifecycleActive,
-						Created: true, CommittedAt: time.Date(2026, time.August, 20, 10, 0, 0, 0, time.UTC),
-					}, nil
+					t.Fatal("an idempotency hint is not proof of a completed result")
+					return records.RevisionCommitResult{}, nil
 				},
-			}, RecordHandlerOptions{
-				ComparisonSave: recordComparisonSaveStub{plan: plan, err: evidence.ErrComparisonIntentExpired},
-				CompletedIdempotency: func(context.Context, recordauth.ActorScope, recordplatform.OperationKind, string) (bool, error) {
-					return tt.completed, nil
-				},
-			})
-			request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", comparisonSaveBody(draft, "cmp1.expired.payload.mac"))
-			request.Header.Set("Idempotency-Key", "comparison-save-"+tt.name)
+			}, options)
+			allocation := mustHandlerAllocation(t, handler, actor, recordbirth.PurposeComparison, "expired-comparison-allocation")
+			request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", comparisonSaveBody(t, allocation, draft, "cmp1.expired.payload.mac"))
+			request.Header.Set("Idempotency-Key", "expired-comparison-publication")
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, request)
-			if recorder.Code != tt.want {
-				t.Fatalf("status = %d body=%s, want %d", recorder.Code, recorder.Body.String(), tt.want)
-			}
-			if tt.wantCode != "" {
-				var payload recordErrorResponse
-				if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil || payload.Code != tt.wantCode {
-					t.Fatalf("error payload = %#v (%v), want %q", payload, err, tt.wantCode)
-				}
-			}
-			if created != tt.create {
-				t.Fatalf("CreateRecord called = %v, want %v", created, tt.create)
-			}
+			assertRecordsHandlerError(t, recorder, http.StatusUnprocessableEntity, "comparison_intent_expired")
 		})
 	}
 }
@@ -148,12 +88,13 @@ func TestSaveComparisonRecordHTTPReplaysExpiredIntentOnlyWhenKeyCompleted(t *tes
 func TestSaveComparisonRecordHTTPPreparesCopiedEvidenceFromIntent(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
 	draft := mustRecordsHandlerDraft(t, actor, "", "")
-	plan := mustHandlerComparisonSavePlan(t, "rec_comparisonsave")
+	options, _ := newHandlerBirthFixture(t)
+	allocation := mustHandlerAllocation(t, RecordsWithOptions(&recordsHandlerApplicationStub{}, options), actor, recordbirth.PurposeComparison, "valid-comparison-allocation")
+	plan := mustHandlerComparisonSavePlan(t, allocation.RecordID)
+	options.ComparisonSave = recordComparisonSaveStub{plan: plan}
 	var got records.RecordCreateRequest
 	handler := RecordsWithOptions(&recordsHandlerApplicationStub{
-		preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) {
-			return draft, nil
-		},
+		preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) { return draft, nil },
 		createRecord: func(_ context.Context, request records.RecordCreateRequest) (records.RevisionCommitResult, error) {
 			got = request
 			return records.RevisionCommitResult{
@@ -162,15 +103,15 @@ func TestSaveComparisonRecordHTTPPreparesCopiedEvidenceFromIntent(t *testing.T) 
 				Created: true, CommittedAt: time.Date(2026, time.August, 20, 10, 0, 0, 0, time.UTC),
 			}, nil
 		},
-	}, RecordHandlerOptions{ComparisonSave: recordComparisonSaveStub{plan: plan}})
-	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", comparisonSaveBody(draft, "cmp1.valid.payload.mac"))
+	}, options)
+	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", comparisonSaveBody(t, allocation, draft, "cmp1.valid.payload.mac"))
 	request.Header.Set("Idempotency-Key", "comparison-save-valid")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s, want 201", recorder.Code, recorder.Body.String())
 	}
-	if got.RecordID != "rec_comparisonsave" || !reflectDeepEqual(got.EvidencePreparation.SnapshotIDs(), planSnapshotIDs(plan)) {
+	if got.RecordID != allocation.RecordID || !reflectDeepEqual(got.EvidencePreparation.SnapshotIDs(), planSnapshotIDs(plan)) {
 		t.Fatalf("CreateRecord preparation = %#v", got.EvidencePreparation.SnapshotIDs())
 	}
 	if len(got.EvidencePreparation.ComparisonSave().Copies) != 1 ||
@@ -179,8 +120,9 @@ func TestSaveComparisonRecordHTTPPreparesCopiedEvidenceFromIntent(t *testing.T) 
 	}
 }
 
-func comparisonSaveBody(draft records.Draft, token string) string {
-	return `{"record_id":"rec_comparisonsave","draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"comparison_intent":"` + token + `"}`
+func comparisonSaveBody(t *testing.T, allocation recordAllocationResponse, draft records.Draft, token string) string {
+	t.Helper()
+	return `{"record_id":` + strconvQuote(allocation.RecordID) + `,"allocation":` + handlerAllocationJSON(t, allocation) + `,"draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"comparison_intent":` + strconvQuote(token) + `}`
 }
 
 type recordComparisonSaveStub struct {

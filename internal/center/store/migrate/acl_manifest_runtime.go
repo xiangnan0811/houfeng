@@ -75,6 +75,9 @@ func verifyAppACLManifestRuntimeSnapshotWithMigrationSetV1(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
+	if envelope.Version != AppACLPrivilegeSetV1 {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest privilege set is not the frozen r1 v1 body")
+	}
 	compiledPrivilegeSet, err := CompileAppACLPrivilegeSetR1(snapshot.DatabaseName, envelope.PrivilegeSet.RoleBindings)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("compile frozen r1 app ACL privilege set: %w", err)
@@ -82,7 +85,7 @@ func verifyAppACLManifestRuntimeSnapshotWithMigrationSetV1(
 	if !bytes.Equal(envelope.Latest.CanonicalPrivilegeSet, compiledPrivilegeSet) {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest privilege set does not match frozen r1 compiler output")
 	}
-	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope); err != nil {
+	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope, AppACLSubjectCenterRuntime); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
 	if !bytes.Equal(envelope.Latest.CanonicalMigrationSet, embeddedMigrationSet) {
@@ -102,6 +105,7 @@ func verifyAppACLManifestRuntimeSnapshotWithMigrationSetV1(
 type appACLManifestRuntimeEnvelope struct {
 	Latest       AppACLManifestPersistedV1
 	PrivilegeSet AppACLPrivilegeSet
+	Version      AppACLPrivilegeSetVersion
 }
 
 func validateAppACLManifestRuntimeEnvelope(
@@ -118,39 +122,57 @@ func validateAppACLManifestRuntimeEnvelope(
 	}
 
 	latest := snapshot.Manifests[len(snapshot.Manifests)-1]
-	privilegeSet, err := ParseCanonicalPrivilegeSetBodyV1(latest.CanonicalPrivilegeSet)
+	privilegeSet, version, err := parseCanonicalPrivilegeSetBodyAnyVersion(latest.CanonicalPrivilegeSet)
 	if err != nil {
 		return appACLManifestRuntimeEnvelope{}, fmt.Errorf("parse latest app ACL manifest privilege set: %w", err)
 	}
-	return appACLManifestRuntimeEnvelope{Latest: latest, PrivilegeSet: privilegeSet}, nil
+	return appACLManifestRuntimeEnvelope{Latest: latest, PrivilegeSet: privilegeSet, Version: version}, nil
 }
 
+// validateAppACLManifestRuntimeRoles binds the direct database identity to
+// exactly one expected semantic subject of the latest manifest. A runtime
+// login is never admitted as the deletion worker, nor the reverse.
 func validateAppACLManifestRuntimeRoles(
 	snapshot AppACLManifestRuntimeSnapshotV1,
 	envelope appACLManifestRuntimeEnvelope,
+	expectedSubject AppACLSubject,
 ) error {
-	var runtimeRole, adminRole string
+	expectedRole := ""
 	for _, binding := range envelope.PrivilegeSet.RoleBindings {
-		switch binding.Subject {
-		case AppACLSubjectCenterRuntime:
-			runtimeRole = binding.CatalogRole
-		case AppACLSubjectPlatformAdmin:
-			adminRole = binding.CatalogRole
+		if envelope.Latest.MigratorCatalogRole == binding.CatalogRole {
+			return fmt.Errorf("latest app ACL manifest migrator catalog role reuses an application role")
+		}
+		if binding.Subject == expectedSubject {
+			expectedRole = binding.CatalogRole
 		}
 	}
-	if envelope.Latest.MigratorCatalogRole == runtimeRole || envelope.Latest.MigratorCatalogRole == adminRole {
-		return fmt.Errorf("latest app ACL manifest migrator catalog role reuses an application role")
+	if expectedRole == "" {
+		return fmt.Errorf("latest app ACL manifest has no %s binding", appACLSubjectLabel(expectedSubject))
 	}
-	if snapshot.CurrentUser != runtimeRole {
-		return fmt.Errorf("current user %q does not match latest app ACL manifest center runtime binding", snapshot.CurrentUser)
+	if snapshot.CurrentUser != expectedRole {
+		return fmt.Errorf("current user %q does not match latest app ACL manifest %s binding", snapshot.CurrentUser, appACLSubjectLabel(expectedSubject))
 	}
 	return nil
+}
+
+func appACLSubjectLabel(subject AppACLSubject) string {
+	switch subject {
+	case AppACLSubjectCenterRuntime:
+		return "center runtime"
+	case AppACLSubjectPlatformAdmin:
+		return "platform admin"
+	case AppACLSubjectRecordDeletionWorker:
+		return "record deletion worker"
+	default:
+		return string(subject)
+	}
 }
 
 func verifyAppACLCurrentManifestRuntimeSnapshot(
 	snapshot AppACLManifestRuntimeSnapshotV1,
 	source appACLCurrentSourceContract,
 	transitions []appACLCurrentTransition,
+	expectedSubject AppACLSubject,
 ) (AppACLManifestPersistedV1, appACLEffectiveCatalogContract, error) {
 	if snapshot.Head == nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
@@ -161,7 +183,14 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
-	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope); err != nil {
+	if appACLCurrentSourceRequiresDeletionWorker(source) && envelope.Version != AppACLPrivilegeSetV2 {
+		// A v1 latest manifest can only be a registered predecessor of a
+		// source that introduces the mandatory worker binding.
+		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
+			"registered APP predecessor requires successor convergence before runtime admission",
+		)
+	}
+	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope, expectedSubject); err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
 
@@ -174,7 +203,7 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, fmt.Errorf("compile current app ACL runtime catalog contract: %w", err)
 	}
-	compiledPrivileges, err := CanonicalPrivilegeSetBodyV1(contract.RoleBindings, contract.Privileges)
+	compiledPrivileges, err := canonicalPrivilegeSetBodyForBindings(contract.RoleBindings, contract.Privileges)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, fmt.Errorf("compile current app ACL runtime privilege set: %w", err)
 	}
