@@ -44,7 +44,7 @@ func ordinaryOriginalObserver(ctx context.Context, request ordinaryUpgradeReques
 
 // Capture a complete predecessor and target while holding the exclusive guard.
 // No raw credential or private authority material is put into the intent.
-func ordinaryCaptureUpgradeIntent(ctx context.Context, request ordinaryUpgradeRequest, dirs *ordinaryOperationDirectories, image ordinaryImageTarget, identities []ordinarySecretIdentity, passwords ComposeInitPasswords, commitment string) (ordinaryUpgradeIntent, error) {
+func ordinaryCaptureUpgradeIntent(ctx context.Context, request ordinaryUpgradeRequest, dirs *ordinaryOperationDirectories, image ordinaryImageTarget, identities []ordinarySecretIdentity, passwords ComposeInitPasswords, commitment string, previous *ordinaryReadyPredecessor) (ordinaryUpgradeIntent, error) {
 	var intent ordinaryUpgradeIntent
 	requestBody, err := json.Marshal(request)
 	if err != nil || dirs == nil || len(identities) != len(ordinarySecretNames) {
@@ -76,6 +76,16 @@ func ordinaryCaptureUpgradeIntent(ctx context.Context, request ordinaryUpgradeRe
 	if err := ordinaryCaptureLaunchPredecessor(ctx, observer, request.WorkingDirectory, &predecessor); err != nil {
 		return intent, ordinaryUpgradePhase("launch-predecessor", err)
 	}
+	if previous != nil {
+		if predecessor.CatalogClass != ordinaryPredecessorC81 || !predecessor.RegistryOpened ||
+			image.Contract.SourceIdentitySHA256 != previous.intent.Target.C81Identity ||
+			!bytes.Equal(predecessor.CenterLaunch, previous.intent.Target.CenterLaunch) || !bytes.Equal(predecessor.ProcessorLaunch, previous.intent.Target.ProcessorLaunch) {
+			return intent, ordinaryUpgradePhase("ready-predecessor-launch", errOrdinaryUpgrade)
+		}
+		if err := ordinaryVerifyReadyPredecessor(ctx, observer, physical, journal, previous.intent); err != nil {
+			return intent, ordinaryUpgradePhase("ready-predecessor", err)
+		}
+	}
 	if err := observer.Close(ctx); err != nil {
 		return intent, ordinaryUpgradePhase("predecessor-observer-close", errOrdinaryUpgrade)
 	}
@@ -102,16 +112,27 @@ func ordinaryCaptureUpgradeIntent(ctx context.Context, request ordinaryUpgradeRe
 		Predecessor: predecessor, Fence: journal,
 		Target: ordinaryTargetIntent{AdminSHA256: hex.EncodeToString(image.AdminSHA256[:]), CenterSHA256: hex.EncodeToString(image.CenterSHA256[:]), ProcessorSHA256: hex.EncodeToString(image.ProcessorSHA256[:]), ContractSHA256: ordinaryDigestHex(contract), ContractWire: contract, C81Identity: image.Contract.SourceIdentitySHA256, ActivationCommand: activation, RotationCommand: rotation, CenterLaunch: pair.centerBytes, ProcessorLaunch: pair.processorBytes},
 	}
+	if previous != nil {
+		intent.Version = 4
+		intent.Previous = &previous.link
+	}
 	if err := ordinaryStageComposeOverride(dirs.dirs[len(dirs.dirs)-1].fd, request, recipe.OverrideSHA256); err != nil {
 		return ordinaryUpgradeIntent{}, ordinaryUpgradePhase("compose-recipe", err)
 	}
 	policyCtx, cancelPolicy := context.WithTimeout(ctx, 30*time.Second)
-	policy, namespaceRecipe, err := ordinaryCaptureDatabaseRestart(policyCtx, request, recipe, commitment)
+	policy, services, err := ordinaryCaptureDatabaseRestart(policyCtx, request, recipe, commitment)
+	if err == nil && previous != nil {
+		if err := ordinaryVerifySuccessorStorage(policyCtx, journal, services); err != nil {
+			cancelPolicy()
+			return ordinaryUpgradeIntent{}, ordinaryUpgradePhase("predecessor-storage", err)
+		}
+	}
 	cancelPolicy()
 	database, found := ordinaryIntentDatabase(intent)
 	if err != nil || !found || database.Restart != policy {
 		return ordinaryUpgradeIntent{}, ordinaryUpgradePhase("database-restart-recipe", errOrdinaryUpgrade)
 	}
+	namespaceRecipe := services.Namespace
 	baseline, err := ordinaryCaptureNamespaceBaseline(namespaceRecipe)
 	if err != nil {
 		return ordinaryUpgradeIntent{}, ordinaryUpgradePhase("namespace-preflight", err)

@@ -53,6 +53,30 @@ func TestPostgresIntegrationEffectiveSettingsRuntimeRole(t *testing.T) {
 		t.Fatal("runtime role ownership-column write did not persist")
 	}
 
+	t.Run("live heartbeat policy round trip and rollback compatibility", func(t *testing.T) {
+		for _, days := range []int{7, 0} {
+			if _, err := repo.MutateSettings(ctx, func(current centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+				current.RetentionPolicy.LiveHeartbeatDays = days
+				return current, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			record, err := repo.GetSettings(ctx)
+			if err != nil || record.RetentionPolicy.LiveHeartbeatDays != days {
+				t.Fatalf("read after saving %d: %+v, err = %v", days, record.RetentionPolicy, err)
+			}
+			var present bool
+			if err := runtimePool.QueryRow(ctx, `
+				select retention_policy ? 'live_heartbeat_days'
+				from center_settings where settings_id = $1`, centersettings.SingletonID).Scan(&present); err != nil {
+				t.Fatal(err)
+			}
+			if present != (days != 0) {
+				t.Fatalf("JSONB key present = %v after saving %d", present, days)
+			}
+		}
+	})
+
 	if _, err := runtimePool.Exec(ctx, `create table public.effective_settings_runtime_ddl_probe (id integer primary key)`); err == nil {
 		t.Fatal("runtime role unexpectedly performed DDL")
 	} else {

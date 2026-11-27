@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"houfeng/internal/center/recordbirth"
 )
 
 // RunOrdinaryComposeUpgrade runs the host-owned cold controller for one exact
@@ -36,19 +38,29 @@ func RunOrdinaryComposeUpgrade(ctx context.Context, requestFile string) error {
 			return ordinaryUpgradePhase("bootstrap", err)
 		}
 		state, err := ordinaryObserveDisposition(guardRoot)
-		if err != nil || (state.State != "CLEAN" && state.OperationID != request.OperationID) {
+		if err != nil || (state.State == "ACTIVE" && state.OperationID != request.OperationID) {
 			return ordinaryUpgradePhase("disposition", errOrdinaryUpgrade)
 		}
+		successor := state.State == "COMMITTED_READY_FOR_RESTART" && state.OperationID != request.OperationID
+		initializing := state.State == "CLEAN" || successor
 		if err := ordinaryPrepareControllerRoots(request, state.State == "CLEAN"); err != nil {
 			return ordinaryUpgradePhase("controller-roots", err)
 		}
-		dirs, err := ordinaryOpenOperationDirectories(request.WorkingDirectory, request.OperationID, state.State == "CLEAN")
-		if err != nil {
-			return ordinaryUpgradePhase("operation-directories", err)
+		var dirs *ordinaryOperationDirectories
+		defer func() {
+			if dirs != nil {
+				dirs.Close()
+			}
+		}()
+		var operationDir int
+		if !successor {
+			dirs, err = ordinaryOpenOperationDirectories(request.WorkingDirectory, request.OperationID, initializing)
+			if err != nil {
+				return ordinaryUpgradePhase("operation-directories", err)
+			}
+			operationDir = dirs.dirs[len(dirs.dirs)-1].fd
 		}
-		defer dirs.Close()
-		operationDir := dirs.dirs[len(dirs.dirs)-1].fd
-		if state.State != "CLEAN" {
+		if !initializing {
 			joinCtx, cancelJoin := context.WithTimeout(ctx, 30*time.Second)
 			err := ordinaryJoinRecordedParticipants(joinCtx, operationDir, request.OperationID, state.IntentSHA256, guardRoot)
 			if err != nil && joinCtx.Err() != nil {
@@ -68,6 +80,31 @@ func RunOrdinaryComposeUpgrade(ctx context.Context, requestFile string) error {
 			if err != nil || current != state {
 				return ordinaryUpgradePhase("disposition", errOrdinaryUpgrade)
 			}
+			var previous *ordinaryReadyPredecessor
+			if successor {
+				prior, err := ordinaryLoadReadyPredecessor(request, current)
+				if err != nil {
+					return ordinaryUpgradePhase("ready-predecessor", err)
+				}
+				previous = &prior
+				// READY readers pin the ordinary-operations parent. Creating
+				// its next child changes its link count, so do so only under EX.
+				dirs, err = ordinaryOpenOperationDirectories(request.WorkingDirectory, request.OperationID, true)
+				if err != nil {
+					return ordinaryUpgradePhase("operation-directories", err)
+				}
+				operationDir = dirs.dirs[len(dirs.dirs)-1].fd
+			}
+			body, exists, err := ordinaryReadOperationFile(operationDir, "intent.json")
+			if err != nil {
+				return ordinaryUpgradePhase("intent", err)
+			}
+			if exists && successor {
+				var pending ordinaryUpgradeIntent
+				if fenceDecode(body, &pending) != nil || pending.Previous == nil || *pending.Previous != previous.link || pending.Request != request {
+					return ordinaryUpgradePhase("intent", errOrdinaryUpgrade)
+				}
+			}
 			expectedOverride, err := ordinaryComposeOverride(request)
 			if err != nil {
 				return ordinaryUpgradePhase("compose-recipe", err)
@@ -84,7 +121,7 @@ func RunOrdinaryComposeUpgrade(ctx context.Context, requestFile string) error {
 			if err != nil {
 				return ordinaryUpgradePhase("compose-recipe", err)
 			}
-			commitment, err := ordinaryEnsureSecretCommitments(request, identities, initialRecipe.Environment.SHA256, current.State == "CLEAN")
+			commitment, err := ordinaryEnsureSecretCommitments(request, identities, initialRecipe.Environment.SHA256, initializing)
 			if errors.Is(err, errOrdinaryEnvironmentCommitment) {
 				return ordinaryUpgradePhase("compose-recipe", errOrdinaryUpgrade)
 			}
@@ -100,12 +137,16 @@ func RunOrdinaryComposeUpgrade(ctx context.Context, requestFile string) error {
 			if err != nil {
 				return ordinaryUpgradePhase("image-prepare", err)
 			}
-			body, exists, err := ordinaryReadOperationFile(operationDir, "intent.json")
-			if err != nil {
-				return ordinaryUpgradePhase("intent", err)
+			if successor {
+				// A same-C81 image can still have the released v3-only admin.
+				// Bind v4 admission to the exact controller executing here.
+				controller, err := recordbirth.DigestExecutable("/proc/self/exe")
+				if err != nil || controller != image.AdminSHA256 {
+					return ordinaryUpgradePhase("successor-target", errOrdinaryUpgrade)
+				}
 			}
-			if current.State == "CLEAN" {
-				captured, err := ordinaryCaptureUpgradeIntent(ctx, request, dirs, image, identities, passwords, commitment)
+			if initializing {
+				captured, err := ordinaryCaptureUpgradeIntent(ctx, request, dirs, image, identities, passwords, commitment, previous)
 				if err != nil {
 					return ordinaryUpgradePhase("predecessor-capture", err)
 				}
@@ -155,12 +196,12 @@ func RunOrdinaryComposeUpgrade(ctx context.Context, requestFile string) error {
 					_ = unix.Close(dir.fd)
 				}
 			}()
-			activated, _, err := ordinaryActivateIntent(guardDirs, guardFD, operationDir, request.OperationID)
+			activated, phase, err := ordinaryActivateIntent(guardDirs, guardFD, operationDir, request.OperationID, current)
 			activatedBody, encodeErr := json.Marshal(activated)
 			if err != nil || encodeErr != nil || !bytes.Equal(activatedBody, stored) {
 				return ordinaryUpgradePhase("activate", errOrdinaryUpgrade)
 			}
-			if current.State == "COMMITTED_READY_FOR_RESTART" {
+			if phase == "COMMITTED_READY_FOR_RESTART" {
 				if _, present, err := ordinaryReadReady(operationDir, intent, intentDigest); err != nil || !present {
 					return ordinaryUpgradePhase("ready", errOrdinaryUpgrade)
 				}

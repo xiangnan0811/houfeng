@@ -12,12 +12,21 @@ const DefaultWorkerInterval = time.Hour
 type Policy struct {
 	RawLayerDays       int
 	AggregateLayerDays int
+	LiveHeartbeatDays  int
+}
+
+func (p Policy) EffectiveLiveHeartbeatDays() int {
+	if p.LiveHeartbeatDays == 0 {
+		return p.RawLayerDays
+	}
+	return p.LiveHeartbeatDays
 }
 
 type Result struct {
 	MonitoringInstanceAggregateRows     int64
 	TargetAggregateRows                 int64
 	DeletedHeartbeats                   int64
+	DeletedLiveHeartbeatsEarly          int64
 	DeletedHostSamples                  int64
 	DeletedProbeObservations            int64
 	DeletedMonitoringInstanceAggregates int64
@@ -42,5 +51,6 @@ func PolicyFromSettings(record centersettings.CenterSettings) (Policy, error) {
 	return Policy{
 		RawLayerDays:       validated.RetentionPolicy.RawLayerDays,
 		AggregateLayerDays: validated.RetentionPolicy.AggregateLayerDays,
+		LiveHeartbeatDays:  validated.RetentionPolicy.LiveHeartbeatDays,
 	}, nil
 }

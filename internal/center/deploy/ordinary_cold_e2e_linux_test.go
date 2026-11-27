@@ -226,6 +226,7 @@ type ordinaryColdFixture struct {
 	client                                                                            *http.Client
 	oldCenterHash, targetCenterHash, targetAdminHash, targetProcessorHash             [32]byte
 	overlay, proxyNetwork                                                             string
+	previousOperation                                                                 string
 }
 
 func coldCommand(t *testing.T, ctx context.Context, args ...string) []byte {
@@ -1493,6 +1494,9 @@ func (f *ordinaryColdFixture) coldCutState(stage string) bool {
 		return disposition == "CLEAN" && !coldExists(intentPath) && coldExists(filepath.Join(op, "compose-override.yaml"))
 	case "active":
 		return disposition == "CLEAN" && coldExists(intentPath)
+	case "successor-active":
+		state, err := ordinaryObserveDisposition(filepath.Join(f.work, "maintenance", "ordinary"))
+		return err == nil && state.State == "COMMITTED_READY_FOR_RESTART" && state.OperationID == f.previousOperation && coldExists(intentPath)
 	case "fence":
 		return disposition == "ACTIVE" && coldExists(intentPath) && !coldExists(journal)
 	case "participant":
@@ -1572,16 +1576,22 @@ func (f *ordinaryColdFixture) coldPrepareCutDirectories(t *testing.T) {
 		if err := ordinaryBootstrapGuard(f.work); err != nil {
 			return err
 		}
-		dirs, err := ordinaryOpenOperationDirectories(f.work, f.operation, true)
-		if err != nil {
-			return err
+		prepare := func() error {
+			dirs, err := ordinaryOpenOperationDirectories(f.work, f.operation, true)
+			if err != nil {
+				return err
+			}
+			defer dirs.Close()
+			fd, err := fenceJournalDir(dirs.fenceConfigPath)
+			if err != nil {
+				return err
+			}
+			return unix.Close(fd)
 		}
-		defer dirs.Close()
-		fd, err := fenceJournalDir(dirs.fenceConfigPath)
-		if err != nil {
-			return err
+		if f.previousOperation != "" {
+			return WithOrdinaryComposeGuard(f.ctx, filepath.Join(f.work, "maintenance", "ordinary"), true, prepare)
 		}
-		return unix.Close(fd)
+		return prepare()
 	})
 	if err != nil {
 		t.Fatalf("product could not prepare crash observation directories: %v", err)
@@ -1607,8 +1617,10 @@ func (f *ordinaryColdFixture) coldPrepareCutDirectories(t *testing.T) {
 			t.Fatal("prepared crash directories contain unexpected state")
 		}
 	}
-	if coldDisposition(filepath.Join(f.work, "maintenance", "ordinary", "disposition.json")) != "CLEAN" {
-		t.Fatal("prepared crash guard is not CLEAN")
+	state, err := ordinaryObserveDisposition(filepath.Join(f.work, "maintenance", "ordinary"))
+	if err != nil || (f.previousOperation == "" && state.State != "CLEAN") ||
+		(f.previousOperation != "" && (state.State != "COMMITTED_READY_FOR_RESTART" || state.OperationID != f.previousOperation)) {
+		t.Fatal("prepared crash guard did not retain its initial disposition")
 	}
 }
 
@@ -1704,7 +1716,7 @@ func (f *ordinaryColdFixture) coldCutBeforeRetry(t *testing.T, stage string, bef
 	op := filepath.Join(f.work, "maintenance", "ordinary-operations", f.operation)
 	parent := op
 	switch stage {
-	case "active":
+	case "active", "successor-active":
 		parent = filepath.Join(f.work, "maintenance", "ordinary")
 	case "fence":
 		parent = filepath.Join(f.work, ".ordinary-fences", f.operation, "fences")

@@ -942,6 +942,41 @@ describe('SettingsPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('sets and restores the inherited live heartbeat window independently of raw samples', async () => {
+    const withShortWindow = {
+      ...settingsResponseBody,
+      retention_policy: { ...settingsResponseBody.retention_policy, live_heartbeat_days: 7 },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse(withShortWindow))
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+
+    const field = screen.getByLabelText('实时心跳保留天数')
+    expect(field).toHaveValue('')
+    fireEvent.change(field, { target: { value: '31' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('实时心跳天数不能超过原始层天数。')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(field, { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string).retention_policy).toEqual({
+      raw_layer_days: 30, aggregate_layer_days: 365, live_heartbeat_days: 7,
+    })
+    await waitFor(() => expect(screen.queryByText('有未保存的修改')).not.toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('实时心跳保留天数'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string).retention_policy.live_heartbeat_days).toBe(0)
+  })
+
   it('rejects misordered incident thresholds before submitting settings', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
     vi.stubGlobal('fetch', fetchMock)

@@ -118,6 +118,7 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
     retentionPolicy: {
       rawLayerDays: String(settings.retention_policy.raw_layer_days),
       aggregateLayerDays: String(settings.retention_policy.aggregate_layer_days),
+      liveHeartbeatDays: settings.retention_policy.live_heartbeat_days ? String(settings.retention_policy.live_heartbeat_days) : '',
     },
     ipQuality: {
       enabled: settings.ip_quality_settings.enabled,
@@ -162,6 +163,17 @@ function parseRawRetentionDays(value: string) {
   if (days < 30) throw new Error('原始层天数必须至少为 30 天。')
   if (days > 365) throw new Error('原始层天数不能超过 365 天。')
   return days
+}
+
+function buildRetentionPolicy(form: SettingsFormState['retentionPolicy'], current: SettingsRecord['retention_policy']) {
+  const rawDays = parseRawRetentionDays(form.rawLayerDays)
+  const liveDays = form.liveHeartbeatDays.trim() ? parsePositiveInteger(form.liveHeartbeatDays, '实时心跳天数') : 0
+  if (liveDays > rawDays) throw new Error('实时心跳天数不能超过原始层天数。')
+  return {
+    raw_layer_days: rawDays,
+    aggregate_layer_days: parsePositiveInteger(form.aggregateLayerDays, '聚合层天数'),
+    ...(liveDays || current.live_heartbeat_days !== undefined ? { live_heartbeat_days: liveDays } : {}),
+  }
 }
 
 function parsePositiveNumber(value: string, label: string) {
@@ -338,10 +350,7 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
     probe_frequency_defaults: { tcp: form.probeFrequencyDefaults.tcp, http: form.probeFrequencyDefaults.http, tls: form.probeFrequencyDefaults.tls },
     incident_defaults: incidentDefaults,
     override_rules: compiled.rules,
-    retention_policy: {
-      raw_layer_days: parseRawRetentionDays(form.retentionPolicy.rawLayerDays),
-      aggregate_layer_days: parsePositiveInteger(form.retentionPolicy.aggregateLayerDays, '聚合层天数'),
-    },
+    retention_policy: buildRetentionPolicy(form.retentionPolicy, cur.retention_policy),
     ip_quality_settings: buildIPQualitySettings(form, cur),
   }
   if (telegram) update.telegram = telegram

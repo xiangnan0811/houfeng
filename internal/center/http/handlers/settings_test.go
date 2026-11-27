@@ -376,6 +376,47 @@ func TestSettingsHandlerMapsRepositoryAndValidationFailures(t *testing.T) {
 	}
 }
 
+func TestSettingsHandlerLiveHeartbeatRetentionPreservesLegacySaves(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		submitted *int
+		want      int
+		status    int
+	}{
+		{name: "omitted", want: 14, status: http.StatusOK},
+		{name: "shorten", submitted: new(7), want: 7, status: http.StatusOK},
+		{name: "inherit", submitted: new(0), status: http.StatusOK},
+		{name: "longer than raw", submitted: new(31), status: http.StatusBadRequest},
+		{name: "negative", submitted: new(-1), status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := centersettings.FreshInstallDefaults()
+			current.RetentionPolicy.LiveHeartbeatDays = 14
+			repo := &fakeSettingsRepository{getSettingsResult: current}
+			handler := handlers.Settings(repo, nil, centersettings.DeploymentDefaults{})
+			policy := map[string]any{"raw_layer_days": 30, "aggregate_layer_days": 365}
+			if tc.submitted != nil {
+				policy["live_heartbeat_days"] = *tc.submitted
+			}
+			response := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{"retention_policy": policy}))
+			if response.Code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", response.Code, tc.status, response.Body.String())
+			}
+			if tc.status == http.StatusOK {
+				var decoded struct {
+					RetentionPolicy centersettings.RetentionPolicy `json:"retention_policy"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+					t.Fatal(err)
+				}
+				if decoded.RetentionPolicy.LiveHeartbeatDays != tc.want || repo.mutateInput.RetentionPolicy.LiveHeartbeatDays != tc.want {
+					t.Fatalf("stored = %+v, returned = %+v, want %d", repo.mutateInput.RetentionPolicy, decoded.RetentionPolicy, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestSettingsHandlerRejectsRemovedRetentionControlsAndMethods(t *testing.T) {
 	deployment := testDeployment()
 	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), deployment: deployment}

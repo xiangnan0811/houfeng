@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -11,13 +13,110 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/retention"
 	storemigrate "houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/contracts/agentapi"
 )
 
 const retentionTestInsertHostSQL = `insert into host_samples (monitoring_instance_id,observed_at,received_at,cpu_usage_pct,load_1,load_5,load_15,mem_used_pct,mem_available_bytes,swap_used_pct,disk_used_pct,inode_used_pct,net_in_bytes_per_sec,net_out_bytes_per_sec,cpu_iowait_pct,cpu_steal_pct,disk_read_bytes_per_sec,disk_write_bytes_per_sec,disk_busy_pct,uptime_seconds,sync_batch_id) values ($1,$2,$2,$3,1,1,1,20,1,0,10,10,0,0,0,0,0,0,0,1,'retention_test')`
+
+func TestPostgresIntegrationRetentionConcurrentIncidentProjection(t *testing.T) {
+	for _, mode := range []string{"post_sync", "periodic_sweep"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			fixture := newRecordsPostgresFixture(t, ctx)
+			runtime := fixture.openDirectRuntimePool(t, ctx, "retention-incidents-"+mode, 6)
+			prefix := "retention_" + mode
+			seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			snapshots := incidents.NewPostgresSnapshotReader(runtime)
+			incidentService := incidents.NewService(
+				NewPostgresMonitoringInstanceRepository(runtime), NewPostgresTargetRepository(runtime),
+				snapshots, NewPostgresIncidentRepository(runtime), &syncInterleavingNotifier{}, logger,
+				time.Hour, time.Hour,
+			)
+			syncRepo := NewPostgresSyncRepository(runtime)
+			acceptedAt := syncInterleavingT2.Add(time.Second)
+			syncRepo.now = func() time.Time { return acceptedAt }
+			live, backfill := syncInterleavingBatches(prefix)
+			live.IPQualityReports, backfill.IPQualityReports = nil, nil
+			live.Observations.HostSamples[0].DiskUsedPct = 20
+			for i := range live.Observations.ProbeObservations {
+				probe := &live.Observations.ProbeObservations[i]
+				probe.ResultKind, probe.ErrorCode, probe.ErrorSummary = agentapi.ProbeResultSuccess, "", ""
+			}
+			ingestOnly := syncing.NewService(syncRepo, nil)
+			initial := backfill
+			if mode == "periodic_sweep" {
+				// Isolate the target FK. The sweep also projects the host, but
+				// this fixture only has probe data to roll up before cleanup.
+				initial = live
+				initial.Observations.HostSamples = nil
+			}
+			requireSyncInterleavingSuccess(t, ctx, ingestOnly, initial, syncing.ResultDispositionRecorded)
+
+			parentVersions := func() (string, string, error) {
+				var host, target string
+				err := runtime.QueryRow(ctx, `
+					select mi.xmin::text, t.xmin::text
+					from monitoring_instances mi cross join targets t
+					where mi.monitoring_instance_id = $1 and t.target_id = $2`,
+					live.MonitoringInstanceID, "tg_"+prefix).Scan(&host, &target)
+				return host, target, err
+			}
+			hostBefore, targetBefore, err := parentVersions()
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempts := 0
+			repo := &PostgresRetentionRepository{beginTx: func(ctx context.Context, opts pgx.TxOptions) (retentionTx, error) {
+				tx, err := runtime.BeginTx(ctx, opts)
+				if err != nil {
+					return nil, err
+				}
+				attempts++
+				if attempts == 1 {
+					// PostgreSQL establishes the Repeatable Read snapshot at
+					// the first statement, before the real projection commits.
+					if _, err := tx.Exec(ctx, `select 1 from monitoring_instances where monitoring_instance_id = $1`, live.MonitoringInstanceID); err != nil {
+						_ = tx.Rollback(ctx)
+						return nil, err
+					}
+					t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+					if mode == "post_sync" {
+						service := syncing.NewService(syncRepo, incidentService)
+						requireSyncInterleavingSuccess(t, ctx, service, live, syncing.ResultDispositionRecorded)
+					} else if err := incidentService.EvaluatePeriodicState(ctx, acceptedAt.Add(time.Second)); err != nil {
+						t.Fatal(err)
+					}
+					hostAfter, targetAfter, err := parentVersions()
+					if err != nil || hostAfter == hostBefore || targetAfter == targetBefore {
+						t.Fatalf("both parent projections must commit before aggregation: %v", err)
+					}
+				}
+				return tx, nil
+			}}
+			policy := retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}
+			result, err := repo.ApplyRetention(ctx, policy, acceptedAt.AddDate(0, 0, 31))
+			if err != nil || result.Skipped || attempts != 1 {
+				t.Fatalf("retention after %s: attempts = %d, result = %+v, err = %v", mode, attempts, result, err)
+			}
+			wantHostRows, wantProbeRows := int64(1), int64(1)
+			if mode == "periodic_sweep" {
+				wantHostRows, wantProbeRows = 0, 3
+			}
+			if result.MonitoringInstanceAggregateRows != wantHostRows ||
+				result.DeletedHostSamples != wantHostRows ||
+				result.TargetAggregateRows != 1 || result.DeletedProbeObservations != wantProbeRows {
+				t.Fatalf("wrong snapshot coverage or cleanup: %+v", result)
+			}
+		})
+	}
+}
 
 // Interleavings are fixed with transaction events and observed PostgreSQL
 // lock waits (pg_blocking_pids), never with sleeps guessing statement order.

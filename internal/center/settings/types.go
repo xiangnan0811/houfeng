@@ -196,6 +196,7 @@ type IncidentDefaultsOverride struct {
 type RetentionPolicy struct {
 	RawLayerDays       int `json:"raw_layer_days"`
 	AggregateLayerDays int `json:"aggregate_layer_days"`
+	LiveHeartbeatDays  int `json:"live_heartbeat_days,omitempty"`
 }
 
 type SubscriptionExchangeRateProvider string
@@ -836,6 +837,9 @@ func validateRetentionPolicy(input RetentionPolicy) (RetentionPolicy, error) {
 	}
 	if input.AggregateLayerDays <= 0 {
 		return RetentionPolicy{}, invalidSettings("aggregate retention days must be positive")
+	}
+	if input.LiveHeartbeatDays < 0 || input.LiveHeartbeatDays > input.RawLayerDays {
+		return RetentionPolicy{}, invalidSettings("live heartbeat retention days must be zero (inherit) or between 1 and raw retention days")
 	}
 	return input, nil
 }

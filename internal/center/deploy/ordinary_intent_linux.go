@@ -55,6 +55,11 @@ type ordinaryTargetIntent struct {
 	ProcessorLaunch   []byte `json:"processor_launch"`
 }
 
+type ordinaryIntentLink struct {
+	OperationID  string `json:"operation_id"`
+	IntentSHA256 string `json:"intent_sha256"`
+}
+
 type ordinaryUpgradeIntent struct {
 	Version                int                       `json:"version"`
 	Request                ordinaryUpgradeRequest    `json:"request"`
@@ -68,6 +73,7 @@ type ordinaryUpgradeIntent struct {
 	Predecessor            ordinaryPredecessorIntent `json:"predecessor"`
 	Target                 ordinaryTargetIntent      `json:"target"`
 	Fence                  fenceJournal              `json:"fence"`
+	Previous               *ordinaryIntentLink       `json:"previous,omitempty"`
 }
 
 func ordinaryDigestHex(body []byte) string {
@@ -84,7 +90,21 @@ func ordinaryValidateIntent(intent ordinaryUpgradeIntent) error {
 		return errOrdinaryUpgrade
 	}
 	requestBytes = append(requestBytes, '\n')
-	if intent.Version != 3 || ordinaryDigestHex(requestBytes) != intent.RequestSHA256 {
+	if ordinaryDigestHex(requestBytes) != intent.RequestSHA256 {
+		return errOrdinaryUpgrade
+	}
+	switch intent.Version {
+	case 3:
+		if intent.Previous != nil {
+			return errOrdinaryUpgrade
+		}
+	case 4:
+		link := intent.Previous
+		if link == nil || !fenceRID.MatchString(link.OperationID) || link.OperationID == intent.Request.OperationID || !fenceID.MatchString(link.IntentSHA256) ||
+			intent.Predecessor.CatalogClass != ordinaryPredecessorC81 || !intent.Predecessor.RegistryOpened || intent.Predecessor.RegistryRevision <= 0 {
+			return errOrdinaryUpgrade
+		}
+	default:
 		return errOrdinaryUpgrade
 	}
 	if _, err := decodeOrdinaryUpgradeRequest(requestBytes); err != nil || len(intent.Secrets) != 7 {

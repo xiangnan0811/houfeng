@@ -35,6 +35,7 @@ export type SettingsIncidentDefaultsForm = {
 export type SettingsRetentionPolicyForm = {
   rawLayerDays: string
   aggregateLayerDays: string
+  liveHeartbeatDays: string
 }
 
 export type SettingsIPQualityForm = {
