@@ -580,6 +580,14 @@ PostgreSQL is stopped. Include `compose.yaml`, `compose.proxy-network.yaml`,
 Protect the copy as secret material. A database-only, attachment-only,
 authority-only, or live unordered copy is incomplete; restore PostgreSQL and Records authority state together.
 
+For a recovery point immediately before a subsequent ordinary cold upgrade,
+stop the running project services and PostgreSQL while retaining their
+containers. Use the current controller-managed Compose recipe to stop the
+project. After copying the stopped state, start the same containers and check
+the previous target's health before running the upgrade. The successor's
+preflight requires that PostgreSQL container and the previous target's actual
+running processes.
+
 The permanent guard and durable operation state under `maintenance/` are outside
 the rollback unit: retain them and never replace an active disposition with an
 older copy. A copied data tree does not authorize a new-boot, new-host or new
@@ -596,8 +604,9 @@ snapshot orchestration; use a separately reviewed recovery procedure.
 ### Upgrade, rollback, and secret rotation
 
 Take a cold coordinated recovery point and preserve the permanent maintenance
-guard and any operation state before changing an existing installation. Ordinary
-active V1 requires `deploy-ordinary-upgrade`, an explicit root controller on
+guard and any operation state before changing an existing installation. An
+ordinary installation with active V1 or a completed cold upgrade requires
+`deploy-ordinary-upgrade`, an explicit root controller on
 local rootful Docker. The target image must already be present and pinned by
 immutable image ID; the controller extracts and checks its actual static admin,
 Center and processor executables. Stop unsupervised host writers, external restart
@@ -663,6 +672,26 @@ run used an owned nested Docker host, not a real-host installation; arm64 was
 cross-built only, and lost-commit and pre-lock backend cases have component
 coverage only. G2 remains NOT_READY, permanent-deletion HTTP remains CLOSED,
 and this work has not been deployed.
+
+For a subsequent upgrade, extract `/usr/local/bin/houfeng-record-platform-admin`
+from the exact pinned target image and install it on the host as described
+above. Use `docker create --pull never --entrypoint /bin/false` with the immutable
+image ID, then `docker cp` and remove that unused container. Invoke the installed
+controller by its absolute path. Prepare the new release assets and use a
+fresh operation ID and request. Start with the previous target services healthy
+and the same PostgreSQL container, database and admitted storage. The controller
+checks the last READY operation, its actual running executables and its database
+and published launch bindings.
+The supported successor uses the same C81 migration and privilege contract.
+The operator's installed controller and the target image's admin executable
+must be byte-identical to establish support for the successor intent format.
+PostgreSQL can have restarted since the last completed operation. The new
+operation pins the current postmaster and remains bound to it during recovery.
+Once the successor is ACTIVE, only that request can resume the transition.
+Run the controller to change the deployed version.
+If the preflight refuses at `predecessor-storage` with the previous READY
+still in force and no new intent, restore the existing storage settings and
+use a fresh operation ID. Keep the refused operation's records.
 
 In a root shell on the Docker host, first choose a unique stable operation ID
 containing only lowercase letters, digits, `_` or `-`, at most 128 characters.
@@ -1055,6 +1084,14 @@ Application rollback never reverses migrations. Do not drop lifecycle history,
 session evidence or constraints to make an old binary start. Recover forward
 with a matching candidate, or restore a coordinated pre-change recovery point
 through a separately authorized procedure with all writers stopped.
+
+If an explicit live heartbeat window was saved, the stored
+`center_settings.retention_policy` contains `live_heartbeat_days`. Older Center
+binaries reject that key when reading settings. Before an otherwise supported
+application rollback, clear the field and save in a version that supports it.
+Verify that the stored JSON no longer contains the key before switching images.
+Recover deleted heartbeats through an authorized restore of a coordinated backup
+if needed. See the [retention contract](../spec/contracts/retention.md#实时心跳短窗口).
 
 ## Coordinated v2 Agent sync upgrade (C79 → C80)
 

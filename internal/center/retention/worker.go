@@ -79,12 +79,15 @@ func (w *Worker) runOnce(ctx context.Context) {
 	}
 
 	now := w.now().UTC()
+	started := time.Now()
+	rawCutoff := now.AddDate(0, 0, -policy.RawLayerDays)
+	liveCutoff := now.AddDate(0, 0, -policy.EffectiveLiveHeartbeatDays())
 	result, err := w.repo.ApplyRetention(ctx, policy, now)
 	if err != nil {
 		if isContextDone(err) {
 			return
 		}
-		w.logger.Error("apply retention failed", "error", err)
+		w.logger.Error("apply retention failed", "error", err, "elapsed_ms", time.Since(started).Milliseconds())
 		return
 	}
 	if result.Skipped {
@@ -93,9 +96,14 @@ func (w *Worker) runOnce(ctx context.Context) {
 
 	w.logger.Info(
 		"retention pass completed",
+		"elapsed_ms", time.Since(started).Milliseconds(),
+		"raw_observed_before", rawCutoff,
+		"live_heartbeat_observed_before", liveCutoff,
+		"aggregated_utc_before", now.Truncate(24*time.Hour),
 		"monitoring_instance_aggregate_rows", result.MonitoringInstanceAggregateRows,
 		"target_aggregate_rows", result.TargetAggregateRows,
 		"deleted_heartbeats", result.DeletedHeartbeats,
+		"deleted_live_heartbeats_early", result.DeletedLiveHeartbeatsEarly,
 		"deleted_host_samples", result.DeletedHostSamples,
 		"deleted_probe_observations", result.DeletedProbeObservations,
 		"deleted_monitoring_instance_aggregates", result.DeletedMonitoringInstanceAggregates,

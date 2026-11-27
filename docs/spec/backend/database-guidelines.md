@@ -90,6 +90,8 @@
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
    当前 C81 必须经 strict PostgreSQL wrapper 运行 current umbrella 与 `TestPostgresIntegrationAgentReplayMigration`：fresh current C81、独立 C79 genesis/历史 chain、credentials/session/trusted-online/raw/aggregate/business/settings 完整行保持、exact ACL/真实 runtime 操作与拒绝、reject-before/admit-after、repeat、无关权限增删/假 retirement 拒绝，以及 DDL/DCL/manifest 失败回滚（旧表及其旧记录复原、新表不存在）。保留历史 product/collection-scope/cache-expiry 专项的真实前驱证据。`scripts/test-pg16-catalog.sh` 在 PG16 16.0/16.6/16.12 要求 R2、current umbrella 和 replay migration 三个顶级 anchor 全部 RUN/PASS，任意 skip/fail 均拒绝。`scripts/test-business-postgres.sh` 在保留既有 anchors 上增加 `TestPostgresIntegrationAgentReplayWindow`、`TestPostgresIntegrationRetentionConcurrentSync`、`TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets`，不以源码字符串断言或被 skip 的测试替代真实事务/并发证据。
 
+业务 PostgreSQL 门禁也必须实际运行 [保留合同](../contracts/retention.md#验证)的同步后处理、周期巡检、实时心跳窗口和滚动负载用例。
+
 ### 历史 / 审计字段同步
 
 - 如果业务主表新增用户可见合同字段，且该字段会被历史、审计或决策表记录（如订阅价格历史、生命周期动作），同一个迁移必须同步补齐历史表列、backfill、约束与仓库 scan/insert 逻辑。不要只改源表导致后续审计丢失新字段。

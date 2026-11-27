@@ -33,7 +33,7 @@ const (
 	// rows. Three batch-widths therefore contain the first row from at least the
 	// three newest accepted batches. Direct writers that violate the ingress
 	// contract can only delay recovery; they cannot manufacture recovery proof.
-	heartbeatRecoveryCandidateLimit = heartbeatRecoverySuccesses * syncing.MaxBatchItems
+	HeartbeatRecoveryCandidateLimit = heartbeatRecoverySuccesses * syncing.MaxBatchItems
 )
 
 var errNotificationSuppressed = errors.New("incident notification suppressed")
@@ -1597,7 +1597,7 @@ func (r *PostgresSnapshotReader) ListActiveIncidents(ctx context.Context, object
 }
 
 func (r *PostgresSnapshotReader) ListRecentLiveHeartbeatReceipts(ctx context.Context, monitoringInstanceID string, startedAt time.Time) ([]LiveHeartbeatReceipt, error) {
-	rows, err := r.db.Query(ctx, incidentRecentLiveHeartbeatReceiptsSQL, monitoringInstanceID, startedAt, heartbeatRecoveryCandidateLimit)
+	rows, err := r.db.Query(ctx, incidentRecentLiveHeartbeatReceiptsSQL, monitoringInstanceID, startedAt, HeartbeatRecoveryCandidateLimit)
 	if err != nil {
 		return nil, fmt.Errorf("query recent live heartbeat receipts for %q: %w", monitoringInstanceID, err)
 	}

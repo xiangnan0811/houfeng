@@ -863,6 +863,7 @@ export type OverrideRules = {
 export type RetentionPolicy = {
   raw_layer_days: number
   aggregate_layer_days: number
+  live_heartbeat_days?: number
 }
 
 export type SubscriptionCostSettings = {

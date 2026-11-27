@@ -41,7 +41,10 @@ anchors=(
   TestPostgresIntegrationMonitoringMetadataVersionIgnoresSyncAdvances
   TestPostgresIntegrationAgentReplayWindow
   TestPostgresIntegrationRetentionConcurrentSync
+  TestPostgresIntegrationRetentionConcurrentIncidentProjection
   TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets
+  TestPostgresIntegrationRetentionLiveHeartbeatWindow
+  TestPostgresIntegrationRetentionRollingLiveHeartbeatLoad
 )
 selector="^($(IFS='|'; printf '%s' "${anchors[*]}"))$"
 anchors_json=$(printf '%s\n' "${anchors[@]}" | jq -R . | jq -s .)

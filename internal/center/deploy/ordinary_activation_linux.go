@@ -9,7 +9,7 @@ import (
 // ordinaryActivateIntent requires the controller lock and the same ordinary EX
 // held throughout. The intent directory is root-owned and has already been
 // pinned beneath the protected operation root by the caller.
-func ordinaryActivateIntent(dirs []composeLaunchDirectory, guardFD, intentDir int, operationID string) (ordinaryUpgradeIntent, string, error) {
+func ordinaryActivateIntent(dirs []composeLaunchDirectory, guardFD, intentDir int, operationID string, expected ordinaryDisposition) (ordinaryUpgradeIntent, string, error) {
 	var intent ordinaryUpgradeIntent
 	if len(dirs) < 2 || !fenceRID.MatchString(operationID) {
 		return intent, "", errOrdinaryUpgrade
@@ -33,16 +33,20 @@ func ordinaryActivateIntent(dirs []composeLaunchDirectory, guardFD, intentDir in
 	}
 	parent := dirs[len(dirs)-1].fd
 	state, exists, err := ordinaryReadDisposition(parent)
-	if err != nil || !exists || state.BootstrapName != marker.BootstrapName || !ordinaryDispositionMatches(state, dirs, anchor) {
+	if err != nil || !exists || state != expected || state.BootstrapName != marker.BootstrapName || !ordinaryDispositionMatches(state, dirs, anchor) {
 		return ordinaryUpgradeIntent{}, "", errOrdinaryUpgrade
 	}
-	switch state.State {
-	case "CLEAN":
+	switch {
+	case state.State == "CLEAN" && intent.Previous == nil,
+		state.State == "COMMITTED_READY_FOR_RESTART" && intent.Previous != nil &&
+			*intent.Previous == (ordinaryIntentLink{OperationID: state.OperationID, IntentSHA256: state.IntentSHA256}):
+		// Replace READY directly with the successor's ACTIVE disposition under
+		// the same guard. Managers never observe a new CLEAN interval.
 		state.State, state.OperationID, state.IntentSHA256 = "ACTIVE", operationID, digest
 		if err := ordinaryWriteDisposition(dirs, state, false); err != nil {
 			return ordinaryUpgradeIntent{}, "", errOrdinaryUpgrade
 		}
-	case "ACTIVE", "COMMITTED_READY_FOR_RESTART":
+	case state.State == "ACTIVE", state.State == "COMMITTED_READY_FOR_RESTART":
 		if state.OperationID != operationID || state.IntentSHA256 != digest {
 			return ordinaryUpgradeIntent{}, "", errOrdinaryUpgrade
 		}

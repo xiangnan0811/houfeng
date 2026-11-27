@@ -12,21 +12,30 @@ import (
 )
 
 type ordinaryNamespaceRecipe struct {
-	Environment map[string]*string `json:"environment"`
-	Volumes     []struct {
-		Type     string `json:"type"`
-		Source   string `json:"source"`
-		Target   string `json:"target"`
-		ReadOnly bool   `json:"read_only"`
-	} `json:"volumes"`
+	Environment map[string]*string     `json:"environment"`
+	Volumes     []ordinaryRecipeVolume `json:"volumes"`
+}
+
+type ordinaryRecipeVolume struct {
+	Type     string `json:"type"`
+	Source   string `json:"source"`
+	Target   string `json:"target"`
+	ReadOnly bool   `json:"read_only"`
+}
+
+type ordinaryUpgradeServiceRecipes struct {
+	Database  ordinaryRuntimeRecipeService `json:"db"`
+	Namespace ordinaryNamespaceRecipe      `json:"houfeng-local-namespace-init"`
+	Center    ordinaryNamespaceRecipe      `json:"houfeng"`
+	Processor ordinaryNamespaceRecipe      `json:"houfeng-content-processor"`
 }
 
 // The DB service is unaffected by the target-image/secret override. Read the
 // pinned recipe directly before intent publication; never retain config output.
-func ordinaryCaptureDatabaseRestart(ctx context.Context, request ordinaryUpgradeRequest, expected ordinaryComposeRecipe, commitment string) (fenceRestart, ordinaryNamespaceRecipe, error) {
+func ordinaryCaptureDatabaseRestart(ctx context.Context, request ordinaryUpgradeRequest, expected ordinaryComposeRecipe, commitment string) (fenceRestart, ordinaryUpgradeServiceRecipes, error) {
 	before, err := ordinaryCaptureComposeRecipe(request.WorkingDirectory)
 	if err != nil || before.Compose != expected.Compose || before.Environment != expected.Environment || !ordinaryVerifyEnvironmentCommitment(request, commitment, before.Environment.SHA256) || before.ProxyName != expected.ProxyName || before.Proxy != expected.Proxy || !ordinaryComposeOverrideMatches(ordinaryUpgradeIntent{Request: request, Recipe: expected}) {
-		return fenceRestart{}, ordinaryNamespaceRecipe{}, errOrdinaryUpgrade
+		return fenceRestart{}, ordinaryUpgradeServiceRecipes{}, errOrdinaryUpgrade
 	}
 	override := filepath.Join(request.WorkingDirectory, "maintenance", "ordinary-operations", request.OperationID, "compose-override.yaml")
 	args := []string{"--host", "unix:///var/run/docker.sock", "compose", "--project-name", request.Project, "--project-directory", request.WorkingDirectory, "--file", filepath.Join(request.WorkingDirectory, "compose.yaml"), "--file", filepath.Join(request.WorkingDirectory, expected.ProxyName), "--file", override, "config", "--format", "json"}
@@ -37,23 +46,20 @@ func ordinaryCaptureDatabaseRestart(ctx context.Context, request ordinaryUpgrade
 	defer func() { clear(output.Bytes()); clear(stderr.Bytes()) }()
 	command.Stdout, command.Stderr = &output, &stderr
 	if command.Run() != nil || output.overflow || stderr.overflow {
-		return fenceRestart{}, ordinaryNamespaceRecipe{}, errOrdinaryUpgrade
+		return fenceRestart{}, ordinaryUpgradeServiceRecipes{}, errOrdinaryUpgrade
 	}
 	var config struct {
-		Services struct {
-			Database  ordinaryRuntimeRecipeService `json:"db"`
-			Namespace ordinaryNamespaceRecipe      `json:"houfeng-local-namespace-init"`
-		} `json:"services"`
+		Services ordinaryUpgradeServiceRecipes `json:"services"`
 	}
 	if json.Unmarshal(output.Bytes(), &config) != nil {
-		return fenceRestart{}, ordinaryNamespaceRecipe{}, errOrdinaryUpgrade
+		return fenceRestart{}, ordinaryUpgradeServiceRecipes{}, errOrdinaryUpgrade
 	}
 	policy, valid := ordinaryRecipeRestart(config.Services.Database.Restart)
 	after, err := ordinaryCaptureComposeRecipe(request.WorkingDirectory)
 	if err != nil || after.Compose != expected.Compose || after.Environment != expected.Environment || !ordinaryVerifyEnvironmentCommitment(request, commitment, after.Environment.SHA256) || after.ProxyName != expected.ProxyName || after.Proxy != expected.Proxy || !ordinaryComposeOverrideMatches(ordinaryUpgradeIntent{Request: request, Recipe: expected}) || !valid || policy.Name == "no" {
-		return fenceRestart{}, ordinaryNamespaceRecipe{}, errOrdinaryUpgrade
+		return fenceRestart{}, ordinaryUpgradeServiceRecipes{}, errOrdinaryUpgrade
 	}
-	return policy, config.Services.Namespace, nil
+	return policy, config.Services, nil
 }
 
 func ordinaryIntentDatabase(intent ordinaryUpgradeIntent) (fenceContainer, bool) {

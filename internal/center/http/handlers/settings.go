@@ -67,7 +67,7 @@ type settingsUpdateRequest struct {
 	IncidentDefaults         centersettings.IncidentDefaults        `json:"incident_defaults"`
 	IncidentSweepMode        *string                                `json:"incident_sweep_mode,omitempty"`
 	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
-	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
+	RetentionPolicy          retentionPolicyUpdateRequest           `json:"retention_policy"`
 	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
 	IPQualitySettings        *ipQualitySettingsUpdateRequest        `json:"ip_quality_settings,omitempty"`
 }
@@ -83,9 +83,15 @@ type settingsUpdateRequestWire struct {
 	IncidentDefaults         centersettings.IncidentDefaults        `json:"incident_defaults"`
 	IncidentSweepMode        json.RawMessage                        `json:"incident_sweep_mode"`
 	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
-	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
+	RetentionPolicy          retentionPolicyUpdateRequest           `json:"retention_policy"`
 	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
 	IPQualitySettings        json.RawMessage                        `json:"ip_quality_settings"`
+}
+
+type retentionPolicyUpdateRequest struct {
+	RawLayerDays       int  `json:"raw_layer_days"`
+	AggregateLayerDays int  `json:"aggregate_layer_days"`
+	LiveHeartbeatDays  *int `json:"live_heartbeat_days"`
 }
 
 func (request *settingsUpdateRequest) UnmarshalJSON(data []byte) error {
@@ -314,7 +320,11 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 	merged.HostSampleFrequencyTier = input.HostSampleFrequencyTier
 	merged.ProbeFrequencyDefaults = input.ProbeFrequencyDefaults
 	merged.OverrideRules = input.OverrideRules
-	merged.RetentionPolicy = input.RetentionPolicy
+	merged.RetentionPolicy.RawLayerDays = input.RetentionPolicy.RawLayerDays
+	merged.RetentionPolicy.AggregateLayerDays = input.RetentionPolicy.AggregateLayerDays
+	if input.RetentionPolicy.LiveHeartbeatDays != nil {
+		merged.RetentionPolicy.LiveHeartbeatDays = *input.RetentionPolicy.LiveHeartbeatDays
+	}
 	if input.SubscriptionCostSettings != nil {
 		merged.SubscriptionCost = mergeSubscriptionCostSettingsUpdate(current.SubscriptionCost, *input.SubscriptionCostSettings)
 	}

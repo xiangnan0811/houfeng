@@ -48,17 +48,19 @@ type PostgresIncidentRepository struct {
 	query   func(context.Context, string, ...any) (pgx.Rows, error)
 }
 
+// Summary projection changes non-key columns. Serialize it with competing
+// writers while allowing the retention transaction's foreign-key KEY SHARE.
 const incidentMonitoringInstanceRowVersionGuardSQL = `
 	select xmin::text
 	from monitoring_instances
 	where monitoring_instance_id = $1
-	for update`
+	for no key update`
 
 const incidentTargetRowVersionGuardSQL = `
 	select xmin::text
 	from targets
 	where target_id = $1
-	for update`
+	for no key update`
 
 func NewPostgresIncidentRepository(db *pgxpool.Pool) *PostgresIncidentRepository {
 	return &PostgresIncidentRepository{

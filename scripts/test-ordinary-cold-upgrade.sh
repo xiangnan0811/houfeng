@@ -42,9 +42,16 @@ for signature in main.cvd daily.cvd bytecode.cvd; do
     exit 1
   fi
 done
-for image in docker:29-dind postgres:16.12 clamav/clamav:1.4.3; do
+committed_tag=linnea7171/houfeng:v1.28.0
+for image in docker:29-dind postgres:16.12 clamav/clamav:1.4.3 "$committed_tag"; do
   docker image inspect "$image" >/dev/null 2>&1 || { printf 'ordinary cold: required local image missing: %s\n' "$image" >&2; exit 1; }
 done
+committed_image=$(docker image inspect --format '{{.Id}}' "$committed_tag")
+if [[ ! "$committed_image" =~ ^sha256:[0-9a-f]{64}$ ]] || ! docker image inspect --format '{{json .RepoDigests}}' "$committed_tag" |
+  jq -e 'any(.[]; endswith("@sha256:104e49488fa6de333c004515dcd36a9aedde33103714aa35e7cb1559310cf775"))' >/dev/null; then
+  printf 'ordinary cold: expected the published v1.28.0 image\n' >&2
+  exit 1
+fi
 if [[ $(docker image inspect --format '{{.Id}}' docker:29-dind) != sha256:9a5d43f7d029* ]]; then
   printf 'ordinary cold: unexpected docker:29-dind image identity\n' >&2
   exit 1
@@ -226,7 +233,7 @@ if [[ ! "$old_image" =~ ^sha256:[0-9a-f]{64}$ ]] || [[ ! "$new_image" =~ ^sha256
   exit 1
 fi
 CGO_ENABLED=0 GOOS=linux go test -c -o "$workspace/deploy.test" ./internal/center/deploy >"$workspace/build-test.log" 2>&1
-docker save -o "$workspace/images.tar" "$old_tag" "$new_tag" "$old_base_tag" "$new_base_tag" "${released_save[@]}" postgres:16.12 clamav/clamav:1.4.3
+docker save -o "$workspace/images.tar" "$old_tag" "$new_tag" "$old_base_tag" "$new_base_tag" "${released_save[@]}" "$committed_tag" postgres:16.12 clamav/clamav:1.4.3
 volume_created=$(docker volume create --label "com.houfeng.records.runner=$runner" --label "com.houfeng.records.run=$run" --label "com.houfeng.records.owner=$owner" "$volume")
 [ "$volume_created" = "$volume" ] || exit 1
 container_id=$(docker create --name "$name" --privileged --network none --label "com.houfeng.records.runner=$runner" --label "com.houfeng.records.run=$run" --label "com.houfeng.records.owner=$owner" --mount "type=volume,source=$volume,destination=/var/lib/docker" docker:29-dind --feature=containerd-snapshotter=false)
@@ -283,6 +290,10 @@ jq '. + {image_store_mode:"classic",host_image_ids_match:true}' "$workspace/inne
 mv "$workspace/inner-docker-info.next" "$workspace/inner-docker-info.json"
 docker cp "$workspace/inner-docker-info.json" "$container_id:/root/fixture-evidence/inner-docker-info.json"
 printf 'nested Docker storage driver=%s image-store=classic host-image-IDs=matched\n' "$inner_driver"
+if [ "$(docker exec "$container_id" docker image inspect --format '{{.Id}}' "$committed_tag")" != "$committed_image" ]; then
+  printf 'ordinary cold: published predecessor image ID changed during load\n' >&2
+  exit 1
+fi
 fence_image=$(docker exec "$container_id" docker image inspect --format '{{.Id}}' postgres:16.12)
 if [[ ! "$fence_image" =~ ^sha256:[0-9a-f]{64}$ ]]; then printf 'ordinary cold: nested fence image ID is invalid\n' >&2; exit 1; fi
 docker exec "$container_id" sh -ec 'mkdir -p /root/fixture-tmp; chmod 0700 /root/fixture-tmp'
@@ -294,8 +305,8 @@ if ! grep -q '^=== RUN   TestOrdinaryFenceDockerRestoresDatabaseNetworks$' "$wor
 fi
 printf 'PASS ordinary-fence Docker network restoration\n'
 printf 'RUN ordinary-cold e2e\n'
-cold_tests=(HTTPSegment ProxyOverlays InvalidComposeFileRefused WrongC81ChecksumRefused CrashRecovery ForeignOverrideRefused ReleasedPredecessor NamespacePreflightRefusesUnboundTree NamespaceMissingAndEmptyRefused NamespaceMarkerProcessKill NamespaceLocalRowsRefused NamespaceInterruptedInitializerReplay)
-docker exec -e HOUFENG_ORDINARY_COLD_E2E=1 -e "HOUFENG_ORDINARY_COLD_OLD_IMAGE=$old_image" -e "HOUFENG_ORDINARY_COLD_TARGET_IMAGE=$new_image" -e "HOUFENG_ORDINARY_COLD_OLD_BASE_IMAGE=$old_base_image" -e "HOUFENG_ORDINARY_COLD_TARGET_BASE_IMAGE=$new_base_image" -e "HOUFENG_ORDINARY_COLD_RELEASE_IMAGE=$released_image" "$container_id" /usr/local/libexec/houfeng-fixture/deploy.test -test.v -test.count=1 -test.timeout=90m -test.run "^TestOrdinaryCold($(IFS='|'; printf '%s' "${cold_tests[*]}"))\$" >"$workspace/test.log" 2>&1 || { grep -E '^[[:space:]]*(=== RUN|--- PASS:|--- FAIL:)' "$workspace/test.log" || true; printf 'ordinary cold: fixture failed; see private evidence\n' >&2; exit 1; }
+cold_tests=(HTTPSegment ProxyOverlays InvalidComposeFileRefused WrongC81ChecksumRefused CrashRecovery ForeignOverrideRefused ReleasedPredecessor ConsecutiveUpgrades NamespacePreflightRefusesUnboundTree NamespaceMissingAndEmptyRefused NamespaceMarkerProcessKill NamespaceLocalRowsRefused NamespaceInterruptedInitializerReplay)
+docker exec -e HOUFENG_ORDINARY_COLD_E2E=1 -e "HOUFENG_ORDINARY_COLD_OLD_IMAGE=$old_image" -e "HOUFENG_ORDINARY_COLD_TARGET_IMAGE=$new_image" -e "HOUFENG_ORDINARY_COLD_OLD_BASE_IMAGE=$old_base_image" -e "HOUFENG_ORDINARY_COLD_TARGET_BASE_IMAGE=$new_base_image" -e "HOUFENG_ORDINARY_COLD_RELEASE_IMAGE=$released_image" -e "HOUFENG_ORDINARY_COLD_COMMITTED_IMAGE=$committed_image" "$container_id" /usr/local/libexec/houfeng-fixture/deploy.test -test.v -test.count=1 -test.timeout=90m -test.run "^TestOrdinaryCold($(IFS='|'; printf '%s' "${cold_tests[*]}"))\$" >"$workspace/test.log" 2>&1 || { grep -E '^[[:space:]]*(=== RUN|--- PASS:|--- FAIL:)' "$workspace/test.log" || true; printf 'ordinary cold: fixture failed; see private evidence\n' >&2; exit 1; }
 missing=0
 for name in "${cold_tests[@]}"; do
   grep -q "^--- PASS: TestOrdinaryCold$name " "$workspace/test.log" || missing=1

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/retention"
 )
 
@@ -37,11 +38,16 @@ var _ retention.Repository = (*PostgresRetentionRepository)(nil)
 // Waits between whole Repeatable Read attempts; three attempts in total.
 var retentionRetryDelays = [...]time.Duration{50 * time.Millisecond, 100 * time.Millisecond}
 
+// An hourly pass can prune several hours of normal five-second heartbeats
+// per instance, without deleting an entire newly shortened window at once.
+const earlyHeartbeatPruneLimitPerInstance = 4096
+
 // ApplyRetention retries only PostgreSQL serialization failures and
 // deadlocks. Every attempt is rolled back before waiting, reuses the same
 // now/policy, and only the committed attempt's counts are returned.
 func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy retention.Policy, now time.Time) (retention.Result, error) {
-	if policy.RawLayerDays < 30 || policy.RawLayerDays > 365 || policy.AggregateLayerDays <= 0 {
+	if policy.RawLayerDays < 30 || policy.RawLayerDays > 365 || policy.AggregateLayerDays <= 0 ||
+		policy.LiveHeartbeatDays < 0 || policy.LiveHeartbeatDays > policy.RawLayerDays {
 		return retention.Result{}, fmt.Errorf("invalid retention policy")
 	}
 	for attempt := 0; ; attempt++ {
@@ -91,6 +97,15 @@ func (r *PostgresRetentionRepository) applyRetentionAttempt(ctx context.Context,
 	}
 	if result.DeletedHeartbeats, err = execRows(ctx, tx, deleteExpiredHeartbeatsSQL, "delete expired heartbeats", rawCutoff); err != nil {
 		return retention.Result{}, err
+	}
+	if days := policy.EffectiveLiveHeartbeatDays(); days < policy.RawLayerDays {
+		liveCutoff := now.UTC().AddDate(0, 0, -days)
+		result.DeletedLiveHeartbeatsEarly, err = execRows(ctx, tx, pruneLiveHeartbeatsSQL, "prune short-window live heartbeats",
+			liveCutoff, incidents.HeartbeatRecoveryCandidateLimit, earlyHeartbeatPruneLimitPerInstance)
+		if err != nil {
+			return retention.Result{}, err
+		}
+		result.DeletedHeartbeats += result.DeletedLiveHeartbeatsEarly
 	}
 	if result.DeletedHostSamples, err = execRows(ctx, tx, deleteExpiredHostSamplesSQL, "delete expired host samples", rawCutoff); err != nil {
 		return retention.Result{}, err
@@ -302,6 +317,46 @@ const upsertTargetProbeDailyAggregatesSQL = `
 	where not target_probe_daily_aggregates.finalized`
 
 const deleteExpiredHeartbeatsSQL = `delete from monitoring_instance_heartbeats where observed_at < $1`
+
+// After normal expiry, only prune a live row with a full recovery prefix of
+// strictly later receipts whose observation times all reach the candidate's
+// time. Those rows also survive any future raw cutoff that can still see the
+// candidate, even when observation and receipt ordering differ. They also
+// outrank it in the Records subject lookup: observation time first, then
+// live before backfill and later receipts first. Backfilled witnesses are
+// subject only to normal expiry.
+const pruneLiveHeartbeatsSQL = `
+	with candidates as materialized (
+		select candidate.id
+		from monitoring_instances mi
+		cross join lateral (
+			select count(*) as row_count, min(observed_at) as oldest_observed, min(received_at) as oldest_received
+			from (
+				select heartbeat.observed_at, heartbeat.received_at
+				from monitoring_instance_heartbeats heartbeat
+				where heartbeat.monitoring_instance_id = mi.monitoring_instance_id
+					and heartbeat.is_backfilled = false
+				order by heartbeat.received_at desc, heartbeat.id desc
+				limit $2
+			) prefix
+		) recovery
+		cross join lateral (
+			select heartbeat.id
+			from monitoring_instance_heartbeats heartbeat
+			where heartbeat.monitoring_instance_id = mi.monitoring_instance_id
+				and recovery.row_count = $2
+				and heartbeat.observed_at < $1
+				and heartbeat.observed_at <= recovery.oldest_observed
+				and heartbeat.received_at < recovery.oldest_received
+				and heartbeat.is_backfilled = false
+			order by heartbeat.observed_at, heartbeat.id
+			limit $3
+		) candidate
+	)
+	delete from monitoring_instance_heartbeats heartbeat
+	using candidates
+	where heartbeat.id = candidates.id`
+
 const deleteExpiredHostSamplesSQL = `delete from host_samples where observed_at < $1`
 const deleteExpiredProbeObservationsSQL = `delete from probe_observations where observed_at < $1`
 const deleteExpiredMonitoringInstanceAggregatesSQL = `delete from monitoring_instance_host_sample_daily_aggregates where bucket_date < $1::date`

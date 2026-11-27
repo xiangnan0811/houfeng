@@ -248,8 +248,8 @@ func (f *fakeIncidentTx) QueryRow(_ context.Context, sql string, args ...any) pg
 		return row
 	}
 	canonical := canonicalIncidentSQL(sql)
-	if canonical == canonicalIncidentSQL(`select xmin::text from monitoring_instances where monitoring_instance_id = $1 for update`) ||
-		canonical == canonicalIncidentSQL(`select xmin::text from targets where target_id = $1 for update`) {
+	if canonical == canonicalIncidentSQL(incidentMonitoringInstanceRowVersionGuardSQL) ||
+		canonical == canonicalIncidentSQL(incidentTargetRowVersionGuardSQL) {
 		return fakeRow{scan: func(dest ...any) error {
 			if f.objectGuardErr != nil {
 				return f.objectGuardErr
