@@ -49,38 +49,10 @@ func NewPostgresMonitoringInstanceRuntimeSummariesRepository(db *pgxpool.Pool) *
 
 var _ MonitoringInstanceRuntimeSummariesRepository = (*PostgresMonitoringInstanceRuntimeSummariesRepository)(nil)
 
+// Read the newest eligible row per instance using the instance/time index.
+// Sorting all matching history before selecting one row makes list reads grow
+// with raw retention volume even when every active instance has fresh samples.
 const getMonitoringInstanceRuntimeSummariesSQL = `
-	with active_instances as (
-		select
-			mi.monitoring_instance_id,
-			coalesce(mi.binding_fingerprint, '') as binding_fingerprint,
-			mi.binding_epoch_started_at
-		from monitoring_instances mi
-		where mi.lifecycle_status in ('待接入','已接入')
-			and exists (select 1 from vps_assets v where v.vps_id=mi.vps_id and v.lifecycle_status='active')
-	), latest_samples as (
-		select distinct on (hs.monitoring_instance_id)
-			hs.monitoring_instance_id,
-			hs.observed_at,
-			hs.received_at,
-			hs.uptime_seconds,
-			hs.net_in_bytes_per_sec,
-			hs.net_out_bytes_per_sec,
-			hs.network_rates_valid
-		from host_samples hs
-		join active_instances mi on mi.monitoring_instance_id = hs.monitoring_instance_id
-		where mi.binding_fingerprint <> ''
-			and mi.binding_epoch_started_at is not null
-			and hs.fingerprint = mi.binding_fingerprint
-			and hs.received_at >= mi.binding_epoch_started_at
-			and hs.observed_at <= $1
-			and hs.received_at <= $1
-		order by hs.monitoring_instance_id,
-			hs.observed_at desc,
-			hs.is_backfilled asc,
-			hs.received_at desc,
-			hs.id desc
-	)
 	select
 		mi.monitoring_instance_id,
 		latest.observed_at,
@@ -89,8 +61,31 @@ const getMonitoringInstanceRuntimeSummariesSQL = `
 		latest.net_in_bytes_per_sec,
 		latest.net_out_bytes_per_sec,
 		latest.network_rates_valid
-	from active_instances mi
-	left join latest_samples latest on latest.monitoring_instance_id = mi.monitoring_instance_id
+	from monitoring_instances mi
+	left join lateral (
+		select
+			hs.observed_at,
+			hs.received_at,
+			hs.uptime_seconds,
+			hs.net_in_bytes_per_sec,
+			hs.net_out_bytes_per_sec,
+			hs.network_rates_valid
+		from host_samples hs
+		where hs.monitoring_instance_id = mi.monitoring_instance_id
+			and mi.binding_fingerprint <> ''
+			and mi.binding_epoch_started_at is not null
+			and hs.fingerprint = mi.binding_fingerprint
+			and hs.received_at >= mi.binding_epoch_started_at
+			and hs.observed_at <= $1
+			and hs.received_at <= $1
+		order by hs.observed_at desc,
+			hs.is_backfilled asc,
+			hs.received_at desc,
+			hs.id desc
+		limit 1
+	) latest on true
+	where mi.lifecycle_status in ('待接入','已接入')
+		and exists (select 1 from vps_assets v where v.vps_id=mi.vps_id and v.lifecycle_status='active')
 	order by mi.monitoring_instance_id`
 
 func (r *PostgresMonitoringInstanceRuntimeSummariesRepository) GetMonitoringInstanceRuntimeSummaries(ctx context.Context) (MonitoringInstanceRuntimeSummaries, error) {

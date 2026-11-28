@@ -40,6 +40,9 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeSummariesUseCurrentBindingA
 	insertRuntimeHostSample(t, ctx, db, "mi_runtime_live", now.Add(-time.Minute), now.Add(-time.Minute), "fp-old", 11, 11, 11, true, false, "old-identity")
 	insertRuntimeHostSample(t, ctx, db, "mi_runtime_live", now.Add(-30*time.Second), epoch.Add(-time.Second), "fp-current", 22, 22, 22, true, false, "old-epoch")
 	insertRuntimeHostSample(t, ctx, db, "mi_runtime_live", now.Add(time.Hour), now.Add(time.Hour), "fp-current", 33, 33, 33, true, false, "future")
+	insertRuntimeHostSample(t, ctx, db, "mi_runtime_live", now.Add(-time.Second), now.Add(time.Hour), "fp-current", 44, 44, 44, true, false, "future-receipt")
+	insertRuntimeHostSample(t, ctx, db, "mi_runtime_empty", now.Add(-time.Minute), now.Add(-time.Minute), "fp-old", 55, 55, 55, true, false, "old-identity-only")
+	insertRuntimeHostSample(t, ctx, db, "mi_runtime_archived", now.Add(-time.Minute), now.Add(-time.Minute), "fp-archived", 66, 66, 66, true, false, "retired-sample")
 
 	observedAt := now.Add(-2 * time.Minute)
 	receivedAt := now.Add(-90 * time.Second)
@@ -122,8 +125,8 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeSummariesUseCurrentBindingA
 	if err != nil {
 		t.Fatalf("GetMonitoringInstanceRuntimeSummaries: %v", err)
 	}
-	if result.MonitoringInstances["mi_runtime_archived"] != nil {
-		t.Fatalf("archived instance unexpectedly returned: %#v", result.MonitoringInstances["mi_runtime_archived"])
+	if summary, ok := result.MonitoringInstances["mi_runtime_archived"]; ok {
+		t.Fatalf("archived instance unexpectedly returned: %#v", summary)
 	}
 	live := result.MonitoringInstances["mi_runtime_live"]
 	if live == nil || live.UptimeSeconds != 404 || !live.ObservedAt.Equal(observedAt) || !live.ReceivedAt.Equal(receivedAt) {
@@ -132,8 +135,8 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeSummariesUseCurrentBindingA
 	if live.NetInBytesPerSec != nil || live.NetOutBytesPerSec != nil {
 		t.Fatalf("invalid network marker produced rates: %#v", live)
 	}
-	if result.MonitoringInstances["mi_runtime_empty"] != nil {
-		t.Fatalf("missing sample = %#v, want nil", result.MonitoringInstances["mi_runtime_empty"])
+	if summary, ok := result.MonitoringInstances["mi_runtime_empty"]; !ok || summary != nil {
+		t.Fatalf("missing current-binding sample = %#v (present=%t), want explicit nil", summary, ok)
 	}
 	zero := result.MonitoringInstances["mi_runtime_zero"]
 	if zero == nil || zero.NetInBytesPerSec == nil || *zero.NetInBytesPerSec != 0 || zero.NetOutBytesPerSec == nil || *zero.NetOutBytesPerSec != 0 {
@@ -171,8 +174,10 @@ func insertRuntimeSummaryMonitoringInstance(t *testing.T, ctx context.Context, d
 	`, vpsID, id); err != nil {
 		t.Fatalf("insert monitoring instance VPS %q: %v", id, err)
 	}
+	lifecycle := "已接入"
 	var archivedAt any
 	if archived {
+		lifecycle = "已退役"
 		archivedAt = time.Now().UTC()
 	}
 	if _, err := db.Exec(ctx, `
@@ -181,8 +186,8 @@ func insertRuntimeSummaryMonitoringInstance(t *testing.T, ctx context.Context, d
 			lifecycle_status, monitoring_status, binding_status, binding_fingerprint,
 			binding_epoch_started_at, archived_at
 		) values ($1, $2, $1, 'test', 'test-region', 'test-city', 'test-provider',
-			'已接入', '启用', '已绑定', $3, $4, $5)
-	`, id, vpsID, fingerprint, epoch, archivedAt); err != nil {
+			$3, '启用', '已绑定', $4, $5, $6)
+	`, id, vpsID, lifecycle, fingerprint, epoch, archivedAt); err != nil {
 		t.Fatalf("insert monitoring instance %q: %v", id, err)
 	}
 }

@@ -60,40 +60,61 @@ var ValidSparklineMetrics = map[string]bool{
 	"uptime_seconds":           true,
 }
 
+const monitoringSparklineSampleColumns = `
+			observed_at,
+			cpu_usage_pct,
+			load_1,
+			load_5,
+			load_15,
+			mem_used_pct,
+			mem_available_bytes,
+			mem_total_bytes,
+			swap_used_pct,
+			disk_used_pct,
+			disk_total_bytes,
+			inode_used_pct,
+			net_in_bytes_per_sec,
+			net_out_bytes_per_sec,
+			cpu_iowait_pct,
+			cpu_steal_pct,
+			disk_read_bytes_per_sec,
+			disk_write_bytes_per_sec,
+			disk_busy_pct,
+			uptime_seconds,
+			cpu_rates_valid`
+
 const getMonitoringInstanceSparklinesSQL = `
-	select
-		monitoring_instance_id,
-		observed_at,
-		cpu_usage_pct,
-		load_1,
-		load_5,
-		load_15,
-		mem_used_pct,
-		mem_available_bytes,
-		mem_total_bytes,
-		swap_used_pct,
-		disk_used_pct,
-		disk_total_bytes,
-		inode_used_pct,
-		net_in_bytes_per_sec,
-		net_out_bytes_per_sec,
-		cpu_iowait_pct,
-		cpu_steal_pct,
-		disk_read_bytes_per_sec,
-		disk_write_bytes_per_sec,
-		disk_busy_pct,
-		uptime_seconds,
-		cpu_rates_valid
+	select monitoring_instance_id, ` + monitoringSparklineSampleColumns + `
 	from host_samples
 	where observed_at >= $1
 	order by monitoring_instance_id, observed_at asc`
+
+// Each sample has an instance foreign key. Enumerate those instances and scan
+// each time range in order so the instance/time index bounds the list read.
+const getRecentMonitoringInstanceSparklinesSQL = `
+	select mi.monitoring_instance_id, hs.*
+	from monitoring_instances mi
+	cross join lateral (
+		select ` + monitoringSparklineSampleColumns + `
+		from host_samples
+		where monitoring_instance_id = mi.monitoring_instance_id
+			and observed_at >= $1
+		order by observed_at asc
+	) hs`
 
 func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]*float64, error) {
 	if downsample <= 0 {
 		return nil, fmt.Errorf("downsample must be positive, got %d", downsample)
 	}
 
-	rows, err := r.db.Query(ctx, getMonitoringInstanceSparklinesSQL, since)
+	query := getMonitoringInstanceSparklinesSQL
+	// The list requests 24 hours. Allow for elapsed time since the handler
+	// picked the cutoff. Keep the bulk scan for 7- and 30-day requests,
+	// where separate instance scans can repeatedly visit the same pages.
+	if time.Since(since) < 48*time.Hour {
+		query = getRecentMonitoringInstanceSparklinesSQL
+	}
+	rows, err := r.db.Query(ctx, query, since)
 	if err != nil {
 		return nil, fmt.Errorf("query host_samples for sparklines: %w", err)
 	}
