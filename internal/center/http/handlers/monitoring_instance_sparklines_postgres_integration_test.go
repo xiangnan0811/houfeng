@@ -29,22 +29,24 @@ func TestPostgresIntegrationMonitoringInstanceSparklinesUseNullableBuckets(t *te
 	}
 
 	const monitoringInstanceID = "mi_sparkline_regression"
-	if _, err := db.Exec(ctx, `
-		insert into monitoring_instances (
-			monitoring_instance_id, display_name, "group", region, city, provider, lifecycle_status
-		) values ($1, 'Sparkline Regression', 'test', 'test-region', 'test-city', 'test-provider', '在用')
-	`, monitoringInstanceID); err != nil {
-		t.Fatalf("insert monitoring instance: %v", err)
-	}
-
+	const retiredInstanceID = "mi_sparkline_retired"
+	const olderInstanceID = "mi_sparkline_older"
 	referenceNow := time.Now().UTC()
+	epoch := referenceNow.Add(-48 * time.Hour)
+	insertRuntimeSummaryMonitoringInstance(t, ctx, db, monitoringInstanceID, "test-fingerprint", epoch, false)
+	insertRuntimeSummaryMonitoringInstance(t, ctx, db, retiredInstanceID, "test-fingerprint", epoch, true)
+	insertRuntimeSummaryMonitoringInstance(t, ctx, db, olderInstanceID, "test-fingerprint", epoch, false)
 	for _, sample := range []struct {
+		instanceID string
 		observedAt time.Time
 		cpuUsage   float64
 	}{
-		{observedAt: referenceNow.Add(-21 * time.Hour), cpuUsage: 0},
-		{observedAt: referenceNow.Add(-9 * time.Hour), cpuUsage: 10},
-		{observedAt: referenceNow.Add(-9*time.Hour + time.Minute), cpuUsage: 20},
+		{instanceID: monitoringInstanceID, observedAt: referenceNow.Add(-25 * time.Hour), cpuUsage: 99},
+		{instanceID: monitoringInstanceID, observedAt: referenceNow.Add(-21 * time.Hour), cpuUsage: 0},
+		{instanceID: monitoringInstanceID, observedAt: referenceNow.Add(-9 * time.Hour), cpuUsage: 10},
+		{instanceID: monitoringInstanceID, observedAt: referenceNow.Add(-9*time.Hour + time.Minute), cpuUsage: 20},
+		{instanceID: retiredInstanceID, observedAt: referenceNow.Add(-21 * time.Hour), cpuUsage: 42},
+		{instanceID: olderInstanceID, observedAt: referenceNow.Add(-25 * time.Hour), cpuUsage: 55},
 	} {
 		if _, err := db.Exec(ctx, `
 			insert into host_samples (
@@ -57,8 +59,8 @@ func TestPostgresIntegrationMonitoringInstanceSparklinesUseNullableBuckets(t *te
 				$1, $2, $2, 'test-agent', 'test-fingerprint', $3,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 'sparkline-regression'
 			)
-		`, monitoringInstanceID, sample.observedAt, sample.cpuUsage); err != nil {
-			t.Fatalf("insert host sample at %s: %v", sample.observedAt.Format(time.RFC3339), err)
+		`, sample.instanceID, sample.observedAt, sample.cpuUsage); err != nil {
+			t.Fatalf("insert host sample for %s at %s: %v", sample.instanceID, sample.observedAt.Format(time.RFC3339), err)
 		}
 	}
 
@@ -86,8 +88,37 @@ func TestPostgresIntegrationMonitoringInstanceSparklinesUseNullableBuckets(t *te
 		t.Fatalf("decode handler response: %v", err)
 	}
 	assertNullableSparklineBuckets(t, response.MonitoringInstances[monitoringInstanceID]["cpu_usage_pct"])
+	retiredBuckets := response.MonitoringInstances[retiredInstanceID]["cpu_usage_pct"]
+	if len(retiredBuckets) != 4 || retiredBuckets[0] == nil || *retiredBuckets[0] != 42 {
+		t.Fatalf("retired instance's stored history missing: %v", retiredBuckets)
+	}
+	if _, ok := response.MonitoringInstances[olderInstanceID]; ok {
+		t.Fatal("instance with only older samples unexpectedly present in the 24h response")
+	}
 	if !strings.Contains(recorder.Body.String(), `"cpu_usage_pct":[0,null,15,null]`) {
 		t.Fatalf("handler response did not preserve zero, average, and null buckets: %s", recorder.Body.String())
+	}
+
+	for _, window := range []string{"7d", "30d"} {
+		t.Run(window, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(
+				http.MethodGet,
+				"/api/monitoring-instances/sparklines?metrics=cpu_usage_pct&window="+window+"&downsample=4",
+				nil,
+			))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("handler status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			var history sparklinesResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &history); err != nil {
+				t.Fatalf("decode handler response: %v", err)
+			}
+			buckets := history.MonitoringInstances[olderInstanceID]["cpu_usage_pct"]
+			if len(buckets) != 4 || buckets[3] == nil || *buckets[3] != 55 {
+				t.Fatalf("sample older than 24 hours missing from %s: %v", window, buckets)
+			}
+		})
 	}
 
 	// Set HOUFENG_SPARKLINES_ARTIFACT to persist this sanitized response for browser replay.
