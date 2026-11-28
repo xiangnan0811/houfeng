@@ -21,7 +21,7 @@ This repository does not currently document package-manager repositories, Kubern
 
 `0067_refactor_vps_monitoring_lifecycle.sql` introduces the VPS/session lifecycle model for fresh installations. Existing VPS, monitoring, service/domain or related business data that needs conversion causes initialization to fail explicitly. There is no old-state conversion, compatibility alias, or automatic data deletion. Do not rebuild an existing environment as an implicit upgrade step; rebuilding requires a separate operator decision and appropriate backup.
 
-Deploy a matching Center, SPA and Agent candidate together. The new Agent session credentials and unbuffered online signals are required; mixed old/new Agent operation is unsupported. A Center restart resets the continuous receiver-health observation window. Archive eligibility therefore requires another uninterrupted 180-minute observation after restart for previously enrolled assets.
+Deploy a matching Center, SPA and Agent candidate together. The new Agent session credentials and unbuffered online signals are required; mixed old/new Agent operation is unsupported. After a Center restart, archival of previously enrolled assets requires a fresh receiver-health check and a new preview. The 180-minute waiting period uses durable heartbeat and session issuance times across restarts.
 
 ### IP quality product protocol upgrade and rollback
 

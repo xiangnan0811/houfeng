@@ -251,13 +251,12 @@ func TestArchiveSafetyPostgresReceiverRestartAndUnpersistedFault(t *testing.T) {
 	if err := observer.observe(ctx, true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(ctx, `update receiver_health set healthy_since=now()-interval '181 minutes',checked_at=now(),healthy=true`); err != nil {
-		t.Fatal(err)
-	}
 	review, err = r.GetVPSArchiveReview(ctx, vps.VPSID)
 	if err != nil || !review.Eligible {
 		t.Fatalf("pre-fault %+v %v", review, err)
 	}
+	beforeFault := review.OnlineEvidence
+	staleInput := archiveSafetyRequest(t, ctx, r, vps, "before-receiver-fault")
 	if err := MarkReceiverHealthFault(ctx, archiveFaultUnavailableDB{}, "receive failure"); err == nil {
 		t.Fatal("expected unavailable persistence")
 	}
@@ -277,8 +276,15 @@ func TestArchiveSafetyPostgresReceiverRestartAndUnpersistedFault(t *testing.T) {
 		t.Fatal(err)
 	}
 	review, err = r.GetVPSArchiveReview(ctx, vps.VPSID)
-	if err != nil || review.Eligible {
-		t.Fatalf("fault recovery retained old window: %+v %v", review, err)
+	if err != nil || !review.Eligible || !review.OnlineEvidence.ReceiverHealthy {
+		t.Fatalf("receiver recovered with old heartbeats: %+v %v", review, err)
+	}
+	afterFault := review.OnlineEvidence
+	if !afterFault.HealthySince.After(*beforeFault.HealthySince) || !afterFault.EarliestArchiveAt.Equal(*beforeFault.EarliestArchiveAt) {
+		t.Fatalf("receiver recovery should reset health origin only: before=%+v after=%+v", beforeFault, afterFault)
+	}
+	if _, err := r.ApplyVPSArchive(ctx, vps.VPSID, staleInput); !errors.Is(err, assetlifecycle.ErrStaleArchivePreview) {
+		t.Fatalf("preview from before receiver fault remained usable: %v", err)
 	}
 }
 
@@ -375,15 +381,20 @@ func TestArchiveSafetyPostgresRuntimeRoleEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime receiver initialization: %v", err)
 	}
+	r := NewPostgresAssetLifecycleRepository(runtime)
+	review, err := r.GetVPSArchiveReview(ctx, vps.VPSID)
+	if err != nil || review.Eligible || review.OnlineEvidence.ReceiverHealthy {
+		t.Fatalf("archive before receiver recovery: review=%+v err=%v", review, err)
+	}
 	if err := observer.observe(ctx, true, ""); err != nil {
 		t.Fatalf("runtime receiver read/write: %v", err)
 	}
-	// Age only the test fixture's observation origin; production never adjusts
-	// observation time. All operations under test use the direct runtime role.
-	if _, err := fixture.db.Exec(ctx, `update receiver_health set healthy_since=now()-interval '181 minutes'`); err != nil {
-		t.Fatal(err)
+	review, err = r.GetVPSArchiveReview(ctx, vps.VPSID)
+	if err != nil || !review.Eligible || !review.OnlineEvidence.ReceiverHealthy ||
+		review.OnlineEvidence.EarliestArchiveAt == nil || review.OnlineEvidence.HealthySince == nil ||
+		!review.OnlineEvidence.EarliestArchiveAt.Before(*review.OnlineEvidence.HealthySince) {
+		t.Fatalf("old heartbeat after receiver recovery: review=%+v err=%v", review, err)
 	}
-	r := NewPostgresAssetLifecycleRepository(runtime)
 	input := archiveSafetyRequest(t, ctx, r, vps, "strict-runtime")
 	if _, err := r.ApplyVPSArchive(ctx, vps.VPSID, input); err != nil {
 		t.Fatalf("runtime archive: %v", err)

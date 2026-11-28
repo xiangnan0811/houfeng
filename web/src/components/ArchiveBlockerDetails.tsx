@@ -13,8 +13,9 @@ type ArchiveBlockerDetailsProps = {
 // exposing the internal code or linking to a non-existent object.
 const BLOCKER_REASON: Record<string, string> = {
   vps_lifecycle_not_archivable: '只有管理中的 VPS 可以结束使用并归档。',
-  receiver_observation_unhealthy: 'Center 接收链路尚未建立连续健康观察，请等待接收服务恢复。',
-  continuous_offline_window_incomplete: '所有接入会话无可信在线信号的时间尚未达到 180 分钟。',
+  receiver_observation_unhealthy: 'Center 暂无法确认心跳接收服务正常，请等待恢复后重试。',
+  offline_observation_evidence_missing: '缺少可信心跳或会话签发时间，无法判断是否已满 180 分钟。',
+  continuous_offline_window_incomplete: '距最近一次可信心跳或会话签发尚未满 180 分钟。',
   recent_trusted_online_signal: '最近 180 分钟内仍有可信在线信号',
 }
 

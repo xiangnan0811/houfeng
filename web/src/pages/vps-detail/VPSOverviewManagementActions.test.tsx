@@ -376,8 +376,8 @@ describe('VPSOverviewManagementActions', () => {
   })
 
   it('states connected archive evidence once with human timestamps', async () => {
-    const healthySince = '2026-09-28T00:31:47.362882Z'
-    const earliest = '2026-09-28T03:31:47.362882Z'
+    const healthySince = '2026-09-28T03:20:47.362882Z'
+    const earliest = '2026-09-28T03:01:47.362882Z'
     const lastOnline = '2026-09-28T00:01:47.362882Z'
     vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue({
       ...archiveReview(),
@@ -410,10 +410,10 @@ describe('VPSOverviewManagementActions', () => {
     render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
     const dialog = await openArchiveDialog()
     const text = dialog.textContent ?? ''
-    expect(text.split('接收链路').length - 1).toBe(1)
-    expect(text.split('最早可').length - 1).toBe(1)
-    expect(text.split(formatDateTime(healthySince)).length - 1).toBe(1)
-    expect(text.split(formatDateTime(earliest)).length - 1).toBe(1)
+    expect(text.split('Center 心跳接收服务当前正常。').length - 1).toBe(1)
+    expect(text).not.toContain('最早可')
+    expect(text).not.toContain(formatDateTime(healthySince))
+    expect(text).not.toContain(formatDateTime(earliest))
     expect(text.split(formatDateTime(lastOnline)).length - 1).toBe(1)
     expect(text).toContain(`东京探针，会话 sess_1，最后可信在线 ${formatDateTime(lastOnline)}`)
     expect(text).not.toContain('2026-09-28T')

@@ -191,9 +191,10 @@ def main():
         assert replay_result["stop_collection"]
         assert sql(f"select last_trusted_online_at from monitoring_instances where monitoring_instance_id='{mi}'") == trusted_before_replay
         report("online_signal_replay", accepted_old_session=True, no_trusted_time_refresh=True, collection_denied=True)
-        sql(f"update monitoring_agent_sessions set started_at=clock_timestamp()-interval '1 day',last_trusted_online_at=clock_timestamp()-interval '181 minutes' where monitoring_instance_id='{mi}'; update monitoring_instances set last_trusted_online_at=clock_timestamp()-interval '181 minutes' where monitoring_instance_id='{mi}'; update receiver_health set healthy_since=clock_timestamp()-interval '181 minutes',checked_at=clock_timestamp(),healthy=true")
+        sql(f"update monitoring_agent_sessions set started_at=clock_timestamp()-interval '1 day',last_trusted_online_at=clock_timestamp()-interval '181 minutes' where monitoring_instance_id='{mi}'; update monitoring_instances set last_trusted_online_at=clock_timestamp()-interval '181 minutes' where monitoring_instance_id='{mi}'")
         archive_review = request("GET", f"/api/vps/{vps_id}/archive-review")
         assert archive_review["eligible"], archive_review["blockers"]
+        assert archive_review["online_evidence"]["earliest_archive_at"] < archive_review["online_evidence"]["healthy_since"]
         request("POST", f"/api/vps/{vps_id}/archive", {"confirmation_name": vps["display_name"], "reason": "受控时钟夹具归档验收", "preview_digest": archive_review["preview_digest"], "idempotency_key": secrets.token_hex(16)})
         # Restart the same producer with its durable queue, not a cloned token
         # paired with a new replay identity.

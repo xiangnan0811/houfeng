@@ -7,7 +7,7 @@ import type { ArchiveReview } from '../../lib/types'
 import { VPSArchiveConfirmDialog, type VPSArchiveConfirmDialogProps } from './VPSArchiveConfirmDialog'
 
 const HEALTHY_SINCE = '2026-09-28T03:31:47.362882Z'
-const EARLIEST = '2026-09-28T06:31:47.362882Z'
+const EARLIEST = '2026-09-28T05:11:47.362882Z'
 const LAST_ONLINE = '2026-09-28T02:11:47.362882Z'
 
 function review(overrides: Partial<ArchiveReview> = {}): ArchiveReview {
@@ -129,11 +129,11 @@ describe('VPSArchiveConfirmDialog', () => {
         ] as ArchiveReview['monitoring_instance_links'],
         target_links: [{ name: '专属探测' } as ArchiveReview['target_links'][number]],
         online_evidence: {
-          observed_at: HEALTHY_SINCE,
+          observed_at: '2026-09-28T05:30:00Z',
           receiver_generation: 'boot',
           receiver_healthy: true,
-          healthy_since: HEALTHY_SINCE,
-          last_health_check_at: HEALTHY_SINCE,
+          healthy_since: '2026-09-28T05:28:00Z',
+          last_health_check_at: '2026-09-28T05:30:00Z',
           earliest_archive_at: EARLIEST,
           never_connected: false,
           manual_confirmation_required: false,
@@ -149,10 +149,9 @@ describe('VPSArchiveConfirmDialog', () => {
 
     const dialog = screen.getByRole('alertdialog', { name: '结束使用并归档' })
     const text = dialog.textContent ?? ''
-    expect(text.split('接收链路').length - 1).toBe(1)
-    expect(text.split('最早可').length - 1).toBe(1)
-    expect(text.split(formatDateTime(HEALTHY_SINCE)).length - 1).toBe(1)
-    expect(text.split(formatDateTime(EARLIEST)).length - 1).toBe(1)
+    expect(text.split('Center 心跳接收服务当前正常。').length - 1).toBe(1)
+    expect(text).not.toContain('最早可')
+    expect(text).not.toContain(formatDateTime('2026-09-28T05:28:00Z'))
     expect(text.split(formatDateTime(LAST_ONLINE)).length - 1).toBe(1)
     expect(text).toContain(`东京探针，会话 sess_1，最后可信在线 ${formatDateTime(LAST_ONLINE)}。`)
     expect(text).not.toContain(HEALTHY_SINCE)
@@ -172,7 +171,7 @@ describe('VPSArchiveConfirmDialog', () => {
       onInlineBlocker,
       review: review({
         eligible: false,
-        blockers: ['接收链路连续健康且所有接入会话无可信在线信号的时间尚未达到 180 分钟。'],
+        blockers: ['Center 暂无法确认心跳接收服务正常，请等待恢复后重试。'],
         blocker_details: [{
           code: 'recent_trusted_online_signal',
           object_type: 'service',
@@ -201,11 +200,8 @@ describe('VPSArchiveConfirmDialog', () => {
     expect(screen.getByText(/边缘网关/)).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '归档原因' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
-    expect(screen.getByText('接收链路健康观察不足。')).toBeInTheDocument()
-    expect(screen.getByText('最早可归档时间尚未确定。')).toBeInTheDocument()
-    const dialog = screen.getByRole('alertdialog', { name: '结束使用并归档' })
-    expect((dialog.textContent ?? '').split('接收链路健康观察不足').length - 1).toBe(1)
-    expect((dialog.textContent ?? '').split('最早可归档时间尚未确定').length - 1).toBe(1)
+    expect(screen.getByText('Center 心跳接收服务当前状态未确认。')).toBeInTheDocument()
+    expect(screen.queryByText(/最早可/)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '纠正服务状态' }))
     expect(onInlineBlocker).toHaveBeenCalledWith(
@@ -222,11 +218,18 @@ describe('VPSArchiveConfirmDialog', () => {
           { code: 'continuous_offline_window_incomplete', object_type: 'monitoring_instance', object_id: '', display_name: '', current_state: '', blocked_action: 'archive', resolution_action: 'wait_for_continuous_offline_observation' },
           { code: 'recent_trusted_online_signal', object_type: 'monitoring_instance', object_id: 'mi_1', display_name: '', current_state: '', blocked_action: 'archive', resolution_action: 'wait_for_continuous_offline_observation' },
         ],
+        online_evidence: {
+          observed_at: HEALTHY_SINCE, receiver_generation: 'boot', receiver_healthy: true,
+          healthy_since: HEALTHY_SINCE, last_health_check_at: HEALTHY_SINCE,
+          earliest_archive_at: EARLIEST, never_connected: false, manual_confirmation_required: false,
+          instances: [],
+        },
       }),
     })
 
     const dialog = screen.getByRole('alertdialog', { name: '结束使用并归档' })
-    expect(dialog).toHaveTextContent('所有接入会话无可信在线信号的时间尚未达到 180 分钟。')
+    expect(dialog).toHaveTextContent('距最近一次可信心跳或会话签发尚未满 180 分钟。')
+    expect(dialog).toHaveTextContent(`最早可在 ${formatDateTime(EARLIEST)} 归档。`)
     expect(dialog).toHaveTextContent('mi_1 · 最近 180 分钟内仍有可信在线信号')
     expect(dialog).not.toHaveTextContent('continuous_offline_window_incomplete')
     const links = screen.getAllByRole('link', { name: '打开监控实例' })

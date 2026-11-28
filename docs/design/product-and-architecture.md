@@ -47,7 +47,7 @@ VPS validity (fixed expiry, unlimited, or unknown), renewal intent, and the manu
 
 Services and domains keep their identities across VPS moves. Time-bounded associations describe current and historical deployment details. A migration is an operator follow-up with source, destination and outcome; it never moves services or ends a VPS automatically.
 
-Ending use is one explicit archive transaction from the VPS detail page. Previously enrolled resources require 180 uninterrupted minutes of healthy Center reception and no trusted live signal from any owned instance or session. Backfill and replay do not advance live evidence. Only resources that never formed a valid Agent session may use the documented manual-confirmation exception. There is no force-archive or scheduled archive action.
+Ending use is one explicit archive transaction from the VPS detail page. Previously enrolled resources require a fresh Center reception-health check and 180 minutes since the latest trusted heartbeat or session issuance across all owned instances and sessions. Session and heartbeat timestamps survive Center restarts. Backfill and replay do not advance live evidence. Only resources that never formed a valid Agent session may use the documented manual-confirmation exception. There is no force-archive or scheduled archive action.
 
 Archival ends current associations and exclusive runtime work while retaining shared identities and historical evidence. A subsequently online Agent creates one deduplicated follow-up and leaves the VPS archived. Restoring returns the VPS to management with the idle usage tag; monitoring, associations, commands and renewal intent require separate explicit actions.
 

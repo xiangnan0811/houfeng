@@ -113,12 +113,19 @@ test('saving no-renewal intent preserves a stable archive entry and requires pro
   expect(api.requestCount('POST', '/api/vps/vps_001/archive')).toBe(0)
 })
 
-test('active VPS with no-renewal intent opens archive preview without a cancellation step', async ({ api, page }) => {
+test('active VPS with an old heartbeat can archive after the receiver restarts', async ({ api, page }) => {
+  const review = archiveReview()
+  review.online_evidence = {
+    observed_at: '2026-11-28T07:43:00Z', receiver_generation: 'restarted',
+    receiver_healthy: true, healthy_since: '2026-11-28T06:13:00Z', last_health_check_at: '2026-11-28T07:43:00Z',
+    earliest_archive_at: '2026-11-25T04:03:00Z', never_connected: false, manual_confirmation_required: false,
+    instances: [{ monitoring_instance_id: 'mi_001', session_id: 'mas_001', ever_connected: true, last_trusted_online_at: '2026-11-25T01:03:00Z' }],
+  }
   api.useProfile({
     ...vpsOverviewProfile({ overview: cancelOverview() }),
     [apiRouteKey('GET', '/api/vps/vps_001/archive-review')]: {
       status: 200,
-      body: archiveReview(),
+      body: review,
     },
   })
   await page.goto('/vps/vps_001')
@@ -126,7 +133,13 @@ test('active VPS with no-renewal intent opens archive preview without a cancella
   await page.getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: '结束使用并归档' })).toBeVisible()
   await page.getByRole('menuitem', { name: '结束使用并归档' }).click()
-  await expect(page.getByRole('alertdialog', { name: '结束使用并归档' })).toBeVisible()
+  const dialog = page.getByRole('alertdialog', { name: '结束使用并归档' })
+  await expect(dialog.getByText('Center 心跳接收服务当前正常。')).toBeVisible()
+  await expect(dialog.getByText(/最后可信在线 2026\/11\/25 09:03/)).toBeVisible()
+  await expect(dialog.getByText(/最早可在|2026\/11\/28 14:13/)).toHaveCount(0)
+  await dialog.getByRole('textbox', { name: '归档原因' }).fill('已过期，停止使用')
+  await dialog.getByRole('textbox', { name: '输入 VPS 名称确认归档' }).fill(review.vps.display_name)
+  await expect(dialog.getByRole('button', { name: '结束使用并归档' })).toBeEnabled()
   expect(api.requestCount('GET', '/api/vps/vps_001/archive-review')).toBe(1)
   await expectLocation(page, '/vps/vps_001')
 })
