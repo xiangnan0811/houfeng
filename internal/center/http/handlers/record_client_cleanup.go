@@ -63,6 +63,8 @@ type recordCleanupServerMessage struct {
 	Event *recordclientcleanup.Event `json:"event,omitempty"`
 }
 
+const recordCleanupPingInterval = 20 * time.Second
+
 func RecordClientCleanupStream(repository recordclientcleanup.Repository, validator sessionValidator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", recordPrivateCacheControl)
@@ -186,7 +188,29 @@ func RecordClientCleanupStream(repository recordclientcleanup.Repository, valida
 				}
 			}
 		}()
-		defer func() { cancel(); conn.CloseNow(); <-readerDone; <-watcherDone }()
+		keepaliveDone := make(chan struct{})
+		go func() {
+			defer close(keepaliveDone)
+			ticker := time.NewTicker(recordCleanupPingInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					// Keep idle proxy tunnels open. Handle pongs independently of
+					// the cleanup loop, which must keep accepting acknowledgements.
+					pingCtx, pingCancel := context.WithTimeout(ctx, runtimeStreamWriteTimeout)
+					err := conn.Ping(pingCtx)
+					pingCancel()
+					if err != nil {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+		defer func() { cancel(); conn.CloseNow(); <-readerDone; <-watcherDone; <-keepaliveDone }()
 		ticker := time.NewTicker(runtimeStreamSessionCheckInterval)
 		defer ticker.Stop()
 		var pending *recordclientcleanup.Event

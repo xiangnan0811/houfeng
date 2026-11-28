@@ -11,8 +11,6 @@ const IMPACT_DUPLICATE_WARNINGS = new Set([
 ])
 const NEVER_CONNECTED_WARNING_SNIPPET = '从未形成有效 Agent 会话'
 
-type OnlineEvidence = NonNullable<ArchiveReview['online_evidence']>
-
 export function skipsArchiveObservation(evidence: ArchiveReview['online_evidence']): boolean {
   // Never-connected objects return before the 180-minute window. earliest_archive_at
   // is null because observation does not apply, not because the archive is still blocked.
@@ -72,26 +70,21 @@ export function connectedEvidenceLines(
   links: ArchiveReview['monitoring_instance_links'],
 ): string[] {
   if (!evidence || skipsArchiveObservation(evidence)) return []
-  const lines = [
-    receiverLine(evidence),
-    evidence.earliest_archive_at
-      ? `最早可在 ${formatDateTime(evidence.earliest_archive_at)} 归档。`
-      : '最早可归档时间尚未确定。',
-  ]
+  const lines = [evidence.receiver_healthy
+    ? 'Center 心跳接收服务当前正常。'
+    : 'Center 心跳接收服务当前状态未确认。']
+  if (evidence.earliest_archive_at && Date.parse(evidence.earliest_archive_at) > Date.parse(evidence.observed_at)) {
+    lines.push(`最早可在 ${formatDateTime(evidence.earliest_archive_at)} 归档。`)
+  }
   for (const instance of evidence.instances) {
     const link = links.find((item) => item.monitoring_instance_id === instance.monitoring_instance_id)
     const name = link?.display_name?.trim() || instance.monitoring_instance_id
     const session = instance.session_id ? `，会话 ${instance.session_id}` : ''
     const online = evidenceTime(instance.last_trusted_online_at, '尚未收到')
-    lines.push(`${name}${session}，最后可信在线 ${online}。`)
+    const issued = !instance.last_trusted_online_at && instance.session_started_at
+      ? `，签发于 ${formatDateTime(instance.session_started_at)}`
+      : ''
+    lines.push(`${name}${session}${issued}，最后可信在线 ${online}。`)
   }
   return lines
-}
-
-function receiverLine(evidence: OnlineEvidence): string {
-  if (evidence.receiver_healthy && evidence.healthy_since) {
-    return `接收链路持续健康，自 ${formatDateTime(evidence.healthy_since)} 起。`
-  }
-  if (evidence.receiver_healthy) return '接收链路当前健康，还没有连续观察起点。'
-  return '接收链路健康观察不足。'
 }

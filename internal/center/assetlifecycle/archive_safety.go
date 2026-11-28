@@ -19,7 +19,7 @@ func EvaluateArchiveSafety(e ArchiveOnlineEvidence) (ArchiveOnlineEvidence, []Bl
 	e.NeverConnected = true
 	var latest *time.Time
 	for _, instance := range e.Instances {
-		if instance.SessionID != "" || instance.EverConnected || instance.LastTrustedOnlineAt != nil {
+		if instance.SessionID != "" || instance.EverConnected || instance.SessionStartedAt != nil || instance.LastTrustedOnlineAt != nil {
 			e.NeverConnected = false
 		}
 		for _, candidate := range []*time.Time{instance.SessionStartedAt, instance.LastTrustedOnlineAt} {
@@ -44,11 +44,14 @@ func EvaluateArchiveSafety(e ArchiveOnlineEvidence) (ArchiveOnlineEvidence, []Bl
 		e.EarliestArchiveAt = nil
 		return e, blockers
 	}
-	start := *e.HealthySince
-	if latest != nil && latest.After(start) {
-		start = *latest
+	if latest == nil {
+		add("offline_observation_evidence_missing", "")
+		e.EarliestArchiveAt = nil
+		return e, blockers
 	}
-	earliest := start.Add(ArchiveQuietPeriod)
+	// Receiver health validates the current observation. The quiet period
+	// belongs to the asset and survives a Center restart or outage.
+	earliest := latest.Add(ArchiveQuietPeriod)
 	e.EarliestArchiveAt = &earliest
 	if e.ObservedAt.Before(earliest) {
 		add("continuous_offline_window_incomplete", "")

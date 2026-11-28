@@ -53,6 +53,7 @@
 - `GET /api/records/client-cleanup?browser_id=…&cursor=…` 使用同源 WebSocket；server session 决定 user，周期重验 session、每次发送及 ack 前再次重验，写入有界。`POST /api/records/client-cleanup/reconcile` 接收 `{browser_id,record_ids,allocation_references?}`，其中 allocation reference 为 `{record_id,allocation_id}`，两类合计每批最多 100 项，拒绝重复或矛盾归属。成功响应返回互斥且完整的 `allowed` / `pending` / `invalidate`；pending 只登记 cleanup 元数据，不授予读取记录权限。缺少 allocation 的未决旧版目标不作为普通 record ID 登记，待原请求完成重放后再处理。
 - `browser_id` 是当前 document 内按用户隔离的身份，不从 sessionStorage 继承。新标签页、opener 复制页和 reload 各自生成新身份，启动时先 reconcile 全部本地已知目标，再连接无旧 cursor 的事件流；同 document 内停止/重启复用当前身份与 durable cursor，未知 cursor 协调生成的身份也成为当前身份。比较重试 envelope 仍在各 tab 的 sessionStorage 中，因此不能共用 opener 的 receipt 来代替复制页自己的清理与 ack。
 - WebSocket server frame 为 `{type:"cleanup",event:{version:1,cursor,operation_id,record_id,cleanup_epoch,scopes}}`；client frame 为 `{type:"ack",ack:{cursor,operation_id,record_id,cleanup_epoch}}`。同一连接一次只发送一个未确认事件，四字段必须完整匹配当前事件及持久 target。服务端先重放最早未确认事件，不因客户端声称更大 cursor 而跳过丢失 ack 的事件。未知或不属于该 user/browser 的 cursor 返回 `{type:"reconcile_required"}`；客户端重新协调全部已知本地目标并建立无旧 cursor 的 browser 身份，不静默跳过。
+- 持续连接由 Center 每 20 秒发送 WebSocket Ping，最多等待 5 秒接收 Pong。反向代理的读空闲超时应覆盖该间隔及正常调度余量。浏览器由 WebSocket 协议处理 Pong。保活不续期登录、不确认清理事件，且独立于周期会话复核。
 - 存储协议的实际 IndexedDB 验证不替代服务端事件、target/receipt、在线 consumer 与 comparison 工作台的端到端验收。allocation lookup 本身不证明 APP 回滚后的连续性，unknown recovery 仍须由受信恢复与离线准入关闭；pending 登记 → 真实出生 → V2 签发 → cleanup event 仍需真实整合验收。永久删除 HTTP 保持关闭。
 
 ## 草稿与比较 transport

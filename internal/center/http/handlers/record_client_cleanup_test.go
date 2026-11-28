@@ -207,6 +207,37 @@ func TestRecordClientCleanupStreamRechecksSessionBeforeAcknowledgement(t *testin
 	}
 }
 
+func TestRecordClientCleanupStreamKeepsIdleConnectionAlive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	repository := &cleanupProtocolRepository{}
+	server := cleanupProtocolServer(t, repository, &cleanupSessionValidator{})
+	pings := make(chan struct{}, 1)
+	options := &websocket.DialOptions{
+		OnPingReceived: func(context.Context, []byte) bool {
+			select {
+			case pings <- struct{}{}:
+			default:
+			}
+			return true
+		},
+	}
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"?browser_id=browser_a", options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	// CloseRead keeps control frames flowing and rejects unexpected application frames.
+	select {
+	case <-pings:
+	case <-conn.CloseRead(ctx).Done():
+		t.Fatal("idle stream did not send a WebSocket ping before the deadline")
+	}
+	if repository.acked.Load() != 0 {
+		t.Fatal("a transport ping acknowledged a cleanup event")
+	}
+}
+
 func TestRecordClientCleanupStreamUnknownCursorAndForeignOrigin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
